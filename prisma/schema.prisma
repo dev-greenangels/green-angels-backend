@@ -1,0 +1,457 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// 1. БЛОК КОРИСТУВАЧІВ, РОЛЕЙ ТА КОНТРАГЕНТІВ (1С)
+// ==========================================
+
+enum Role {
+  GUEST
+  USER
+  WHOLESALER
+  ADMIN
+  MANAGER
+}
+
+enum AuthProvider {
+  GOOGLE
+  PHONE
+}
+
+model User {
+  id            String   @id @default(uuid())
+  phone         String?  @unique
+  email         String?  @unique
+  phoneVerified Boolean  @default(false)
+  emailVerified Boolean  @default(false)
+  passwordHash  String?
+  role          Role     @default(USER)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  accounts           Account[]
+  contractorProfiles ContractorProfile[]
+  cart               Cart?
+  orders             Order[]
+}
+
+model Account {
+  id         String       @id @default(uuid())
+  provider   AuthProvider
+  providerId String
+  userId     String
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerId])
+}
+
+model ContractorProfile {
+  id           String @id @default(uuid())
+  externalId1C String @unique
+  name         String
+  discountRate Int    @default(0)
+  priceType    String @default("роздріб")
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ==========================================
+// 2. БЛОК СТРУКТУРОВАНОГО КАТАЛОГУ (РОСЛИНИ)
+// ==========================================
+
+model Category {
+  id       String  @id @default(uuid())
+  slug     String  @unique
+  image    String?
+  legacyId Int?    @unique
+  isActive Boolean @default(true)
+  position Int     @default(0)
+  parentId String?
+  parent   Category?  @relation("CategoryToParent", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryToParent")
+  products            Product[]
+  additionalProducts  ProductAdditionalCategory[]
+
+  translations CategoryTranslation[]
+}
+
+model CategoryTranslation {
+  id          String  @id @default(uuid())
+  locale      String
+  name        String
+  description String? @db.Text
+  metaTitle   String?
+  metaDesc    String?
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, locale])
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  latinName   String?
+  legacyId    String?  @unique
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  translations           ProductTranslation[]
+  additionalCategories   ProductAdditionalCategory[]
+  variants               ProductVariant[]
+  images                 ProductImage[]
+  characteristics        ProductCharacteristic[]
+  stockNotifications     ProductStockNotification[]
+}
+
+/// Підписка «повідомити, коли зʼявиться на складі» (будь-який розмір товару)
+model ProductStockNotification {
+  id         String    @id @default(uuid())
+  productId  String
+  product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name       String
+  phone      String?
+  email      String?
+  notifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([productId])
+  @@index([productId, email])
+  @@index([productId, phone])
+}
+
+model ProductAdditionalCategory {
+  productId  String
+  categoryId String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([productId, categoryId])
+}
+
+model ProductTranslation {
+  id          String  @id @default(uuid())
+  locale      String
+  name        String
+  description String? @db.Text
+  metaTitle   String?
+  metaDesc    String?
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, locale])
+}
+
+enum CharacteristicValueType {
+  SELECT
+  MULTI_SELECT
+  NUMBER
+  TEXT
+}
+
+/// Довідник характеристик (створюється в бек-офісі): висота, світло, полив тощо
+model Characteristic {
+  id           String                  @id @default(uuid())
+  slug         String                  @unique
+  valueType    CharacteristicValueType
+  unit         String?
+  sortOrder    Int                     @default(0)
+  isFilterable Boolean                 @default(true)
+
+  translations  CharacteristicTranslation[]
+  options       CharacteristicOption[]
+  productValues ProductCharacteristic[]
+}
+
+model CharacteristicTranslation {
+  id   String @id @default(uuid())
+  locale String
+  name   String
+
+  characteristicId String
+  characteristic   Characteristic @relation(fields: [characteristicId], references: [id], onDelete: Cascade)
+
+  @@unique([characteristicId, locale])
+}
+
+/// Варіанти значення для SELECT / MULTI_SELECT (напр. «повне сонце», «напівтінь»)
+model CharacteristicOption {
+  id             String @id @default(uuid())
+  slug           String
+  sortOrder      Int    @default(0)
+  characteristicId String
+  characteristic Characteristic @relation(fields: [characteristicId], references: [id], onDelete: Cascade)
+
+  translations  CharacteristicOptionTranslation[]
+  productValues ProductCharacteristic[]
+
+  @@unique([characteristicId, slug])
+}
+
+model CharacteristicOptionTranslation {
+  id     String @id @default(uuid())
+  locale String
+  label  String
+
+  optionId String
+  option   CharacteristicOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@unique([optionId, locale])
+}
+
+/// Прив'язка характеристики до товару (опція, число або текст)
+model ProductCharacteristic {
+  id          String  @id @default(uuid())
+  numberValue Float?
+  textValue   String?
+
+  productId        String
+  product          Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  characteristicId String
+  characteristic   Characteristic       @relation(fields: [characteristicId], references: [id], onDelete: Cascade)
+  optionId         String?
+  option           CharacteristicOption? @relation(fields: [optionId], references: [id], onDelete: SetNull)
+
+  @@unique([productId, characteristicId, optionId])
+}
+
+/// Атрибут маркування/розміру (Контейнер, Висота, Висота штамба…)
+model VariantAttribute {
+  id        String  @id @default(uuid())
+  slug      String  @unique
+  legacyId  String?
+  sortOrder Int     @default(0)
+
+  translations VariantAttributeTranslation[]
+  values       VariantAttributeValue[]
+}
+
+model VariantAttributeTranslation {
+  id     String @id @default(uuid())
+  locale String
+  name   String
+
+  attributeId String
+  attribute   VariantAttribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@unique([attributeId, locale])
+}
+
+model VariantAttributeValue {
+  id        String  @id @default(uuid())
+  slug      String
+  legacyId  String?
+  sortOrder Int     @default(0)
+
+  attributeId String
+  attribute   VariantAttribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  translations VariantAttributeValueTranslation[]
+  variantLinks ProductVariantAttributeValue[]
+
+  @@unique([attributeId, slug])
+}
+
+model VariantAttributeValueTranslation {
+  id     String @id @default(uuid())
+  locale String
+  label  String
+
+  valueId String
+  value   VariantAttributeValue @relation(fields: [valueId], references: [id], onDelete: Cascade)
+
+  @@unique([valueId, locale])
+}
+
+model ProductVariant {
+  id            String    @id @default(uuid())
+  sku           String?   @unique
+  ean           String?   @unique
+  stock         Int       @default(0)
+  weight        Float?
+  volume        Float?
+  legacyId      String?
+  attributes    Json      @default("{}")
+  /// Орієнтовна дата доступності (бронювання при нульовому залишку)
+  availableFrom DateTime?
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  attributeValues ProductVariantAttributeValue[]
+  prices          ProductPrice[]
+  quantityPrices  ProductVariantQuantityPrice[]
+  cartItems       CartItem[]
+  orderItems      OrderItem[]
+}
+
+enum VariantQuantityDiscountType {
+  FIXED_PRICE
+  PERCENT
+}
+
+/// Оптова ціна / знижка від кількості для варіанту
+model ProductVariantQuantityPrice {
+  id           String                      @id @default(uuid())
+  minQuantity  Int
+  discountType VariantQuantityDiscountType @default(FIXED_PRICE)
+  /// FIXED_PRICE — ціна за од. (₴); PERCENT — знижка у %
+  value        Decimal                     @db.Decimal(10, 2)
+  validFrom    DateTime?
+  validTo      DateTime?
+  sortOrder    Int                         @default(0)
+
+  productVariantId String
+  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+
+  @@index([productVariantId])
+}
+
+model ProductVariantAttributeValue {
+  variantId String
+  valueId   String
+  variant   ProductVariant        @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  value     VariantAttributeValue @relation(fields: [valueId], references: [id], onDelete: Cascade)
+
+  @@id([variantId, valueId])
+}
+
+model ProductPrice {
+  id             String   @id @default(uuid())
+  priceType      String   @default("роздріб")
+  currency       String   @default("UAH")
+  value          Decimal  @db.Decimal(10, 2)
+  compareAtValue Decimal? @db.Decimal(10, 2)
+
+  productVariantId String
+  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+
+  @@unique([productVariantId, priceType, currency])
+}
+
+model ProductImage {
+  id        String  @id @default(uuid())
+  url       String
+  isMain    Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+// ==========================================
+// 3. БЛОК СУПЕРАВТОМАТИЧНИХ ЗНИЖОК
+// ==========================================
+
+enum DiscountTarget {
+  ALL_PRODUCTS
+  CATEGORY
+  PRODUCT
+  VARIANT
+}
+
+enum DiscountValueType {
+  PERCENT
+  FIXED
+}
+
+model DiscountRule {
+  id           String            @id @default(uuid())
+  name         String
+  type         DiscountValueType
+  value        Decimal           @db.Decimal(10, 2)
+  target       DiscountTarget
+  targetId     String?
+  onlyForRoles Role[]
+  startDate    DateTime?
+  endDate      DateTime?
+  isActive     Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+}
+
+// ==========================================
+// 4. БЛОК КОШИКА ТА ОФОРМЛЕННЯ ЗАМОВЛЕНЬ
+// ==========================================
+
+model Cart {
+  id        String     @id @default(uuid())
+  userId    String     @unique
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+  updatedAt DateTime   @updatedAt
+}
+
+model CartItem {
+  id               String @id @default(uuid())
+  quantity         Int    @default(1)
+  cartId           String
+  cart             Cart   @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productVariantId String
+  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+}
+
+model Order {
+  id                String   @id @default(uuid())
+  orderNumber       Int      @unique @default(autoincrement())
+  status            String   @default("PENDING")
+  totalAmount       Decimal  @db.Decimal(10, 2)
+  currency          String   @default("UAH")
+  customerName      String
+  customerPhone     String
+  customerEmail     String?
+  receiverName      String?
+  receiverPhone     String?
+  deliveryCity      String
+  deliveryWarehouse String
+  deliveryMethod    String   @default("nova-poshta-branch")
+  paymentMethod     String
+  comment           String?  @db.Text
+  externalId1C      String?
+  userId            String?
+  user              User?    @relation(fields: [userId], references: [id])
+  items             OrderItem[]
+  createdAt         DateTime @default(now())
+}
+
+model OrderItem {
+  id               String  @id @default(uuid())
+  quantity         Int
+  priceAtPurchase  Decimal @db.Decimal(10, 2)
+  orderId          String
+  order            Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productVariantId String
+  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id])
+}
+
+// ==========================================
+// 5. НАЛАШТУВАННЯ ТА КОНТЕНТ БЕК-ОФІСУ
+// ==========================================
+
+model Settings {
+  id    String @id @default(uuid())
+  key   String @unique
+  value String
+}
+
+model BlogPost {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  title     String
+  content   String   @db.Text
+  image     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
