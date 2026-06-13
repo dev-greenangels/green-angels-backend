@@ -13,6 +13,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "import:categories": "tsx prisma/import-categories.ts",
+    "import:products": "tsx prisma/import-products.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

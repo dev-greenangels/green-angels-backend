@@ -2,8 +2,8 @@ import { Role } from '@prisma/client'
 
 import type { ApiUserRole } from './auth.constants'
 
-export function roleFromEmail(email: string): ApiUserRole {
-  return email.toLowerCase().includes('admin') ? 'admin' : 'customer'
+export function roleFromEmail(_email: string): ApiUserRole {
+  return 'customer'
 }
 
 export function prismaRoleToApi(role: Role): ApiUserRole {

@@ -13,7 +13,9 @@ import {
 
 import { PrismaService } from '../prisma/prisma.service'
 import { CreateProductDto } from './dto/create-product.dto'
+import { BulkProductAction, BulkProductsDto } from './dto/bulk-products.dto'
 import { CreateProductVariantDto } from './dto/create-product-variant.dto'
+import { ProductImageDto } from './dto/product-image.dto'
 import { ProductCharacteristicsDto } from './dto/product-characteristics.dto'
 import { UpdateProductDto } from './dto/update-product.dto'
 import { ProductCharacteristicsService } from './product-characteristics.service'
@@ -36,6 +38,14 @@ export type BackstageProductListItem = {
   imageUrl: string | null
   characteristics: ProductCharacteristicsDto
   createdAt: string
+}
+
+export type PaginatedBackstageProducts = {
+  items: BackstageProductListItem[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
 }
 
 export type BackstageVariantQuantityPrice = {
@@ -559,6 +569,51 @@ export class ProductsService {
     }
   }
 
+  private async syncImages(
+    tx: Prisma.TransactionClient,
+    productId: string,
+    images: ProductImageDto[] | undefined,
+  ) {
+    if (images === undefined) return
+
+    const rows = images
+      .map((image, index) => ({
+        url: image.url.trim(),
+        isMain: image.isMain ?? false,
+        sortOrder: index,
+      }))
+      .filter((row) => row.url)
+
+    if (!rows.length) {
+      await tx.productImage.deleteMany({ where: { productId } })
+      return
+    }
+
+    const hasMain = rows.some((row) => row.isMain)
+    if (!hasMain) {
+      rows[0].isMain = true
+    } else {
+      let mainAssigned = false
+      for (const row of rows) {
+        if (row.isMain && !mainAssigned) {
+          mainAssigned = true
+        } else {
+          row.isMain = false
+        }
+      }
+    }
+
+    await tx.productImage.deleteMany({ where: { productId } })
+    await tx.productImage.createMany({
+      data: rows.map((row) => ({
+        productId,
+        url: row.url,
+        isMain: row.isMain,
+        sortOrder: row.sortOrder,
+      })),
+    })
+  }
+
   async isSlugAvailable(
     slug: string,
     excludeProductId?: string,
@@ -630,8 +685,59 @@ export class ProductsService {
     published?: string
     stock?: string
     excludeId?: string
-  }): Promise<BackstageProductListItem[]> {
+    ids?: string
+    page?: number
+    pageSize?: number
+  }): Promise<BackstageProductListItem[] | PaginatedBackstageProducts> {
     const locale = this.defaultLocale(params.locale)
+    const where = this.buildListWhere(params, locale)
+
+    const usePagination = params.page != null || params.pageSize != null
+    if (usePagination) {
+      const page = Math.max(1, params.page ?? 1)
+      const pageSize = Math.min(200, Math.max(1, params.pageSize ?? 100))
+      const [total, rows] = await Promise.all([
+        this.prisma.product.count({ where }),
+        this.prisma.product.findMany({
+          where,
+          include: this.listInclude(locale),
+          orderBy: [{ createdAt: 'desc' }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+      ])
+
+      return {
+        items: rows.map((row) => this.toListItem(row)),
+        total,
+        page,
+        pageSize,
+        totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      }
+    }
+
+    const rows = await this.prisma.product.findMany({
+      where,
+      include: this.listInclude(locale),
+      orderBy: [{ createdAt: 'desc' }],
+    })
+
+    return rows.map((row) => this.toListItem(row))
+  }
+
+  private buildListWhere(
+    params: {
+      categoryId?: string
+      categorySlug?: string
+      published?: string
+      stock?: string
+      excludeId?: string
+      ids?: string
+      search?: string
+      locale?: string
+    },
+    locale: string,
+  ): Prisma.ProductWhereInput | undefined {
     const and: Prisma.ProductWhereInput[] = []
 
     if (params.categoryId) {
@@ -657,6 +763,16 @@ export class ProductsService {
       and.push({ NOT: { id: params.excludeId } })
     }
 
+    if (params.ids?.trim()) {
+      const idList = params.ids
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+      if (idList.length) {
+        and.push({ id: { in: idList } })
+      }
+    }
+
     if (params.published === 'true') {
       and.push({ isPublished: true })
     } else if (params.published === 'false') {
@@ -676,13 +792,68 @@ export class ProductsService {
       and.push({ OR: this.buildSearchConditions(search, locale) })
     }
 
-    const rows = await this.prisma.product.findMany({
-      where: and.length ? { AND: and } : undefined,
-      include: this.listInclude(locale),
-      orderBy: [{ createdAt: 'desc' }],
-    })
+    return and.length ? { AND: and } : undefined
+  }
 
-    return rows.map((row) => this.toListItem(row))
+  async bulkAction(dto: BulkProductsDto) {
+    const ids = [...new Set(dto.ids.map((id) => id.trim()).filter(Boolean))]
+    if (!ids.length) {
+      throw new BadRequestException('Оберіть хоча б один товар.')
+    }
+
+    const existing = await this.prisma.product.findMany({
+      where: { id: { in: ids } },
+      select: { id: true },
+    })
+    const existingIds = existing.map((row) => row.id)
+    if (!existingIds.length) {
+      throw new NotFoundException('Товари не знайдено.')
+    }
+
+    switch (dto.action as BulkProductAction) {
+      case 'delete': {
+        const result = await this.prisma.product.deleteMany({
+          where: { id: { in: existingIds } },
+        })
+        return { action: dto.action, affected: result.count }
+      }
+      case 'publish': {
+        const result = await this.prisma.product.updateMany({
+          where: { id: { in: existingIds } },
+          data: { isPublished: true },
+        })
+        return { action: dto.action, affected: result.count }
+      }
+      case 'unpublish': {
+        const result = await this.prisma.product.updateMany({
+          where: { id: { in: existingIds } },
+          data: { isPublished: false },
+        })
+        return { action: dto.action, affected: result.count }
+      }
+      case 'set_stock': {
+        if (dto.stock == null) {
+          throw new BadRequestException('Вкажіть кількість на складі.')
+        }
+        const result = await this.prisma.productVariant.updateMany({
+          where: { productId: { in: existingIds } },
+          data: { stock: dto.stock },
+        })
+        return { action: dto.action, affected: existingIds.length, variantsUpdated: result.count, stock: dto.stock }
+      }
+      default:
+        throw new BadRequestException('Невідома дія.')
+    }
+  }
+
+  async findByIds(ids: string[], locale?: string): Promise<BackstageProductListItem[]> {
+    if (!ids.length) return []
+    const result = await this.findAll({
+      locale,
+      published: 'true',
+      ids: ids.join(','),
+    })
+    return Array.isArray(result) ? result : result.items
   }
 
   async findOne(id: string, locale?: string): Promise<BackstageProductDetail> {
@@ -822,6 +993,7 @@ export class ProductsService {
       })
 
       await this.syncVariants(tx, product.id, variantDtos)
+      await this.syncImages(tx, product.id, dto.images)
       return product.id
     })
 
@@ -900,6 +1072,7 @@ export class ProductsService {
       }
 
       await this.syncVariants(tx, id, variantDtos)
+      await this.syncImages(tx, id, dto.images)
     })
 
     return this.findOne(id, locale)

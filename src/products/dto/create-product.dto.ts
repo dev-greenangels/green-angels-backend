@@ -16,6 +16,7 @@ import {
 
 import { CreateProductVariantDto } from './create-product-variant.dto'
 import { ProductCharacteristicsDto } from './product-characteristics.dto'
+import { ProductImageDto } from './product-image.dto'
 
 export class CreateProductDto {
   @IsString()
@@ -91,4 +92,10 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => CreateProductVariantDto)
   variants?: CreateProductVariantDto[]
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductImageDto)
+  images?: ProductImageDto[]
 }

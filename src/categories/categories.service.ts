@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { isValidCategoryImagePath } from '../media/upload-paths'
 import { CATEGORY_DEFAULT_IMAGE } from './category.constants'
 import { CreateCategoryDto } from './dto/create-category.dto'
 import { UpdateCategoryDto } from './dto/update-category.dto'
@@ -44,7 +45,11 @@ export class CategoriesService {
     if (image === undefined) return null
     if (image === null) return null
     const trimmed = image.trim()
-    return trimmed || null
+    if (!trimmed) return null
+    if (!isValidCategoryImagePath(trimmed)) {
+      throw new BadRequestException('Некоректний шлях зображення категорії.')
+    }
+    return trimmed
   }
 
   private toFlatCategory(

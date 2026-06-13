@@ -21,8 +21,18 @@ export class CreateOrderDto {
 
   @IsString()
   @MinLength(2)
-  @MaxLength(200)
-  customerName!: string
+  @MaxLength(100)
+  customerFirstName!: string
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  customerLastName!: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  customerPatronymic?: string
 
   @IsString()
   @MinLength(10)
@@ -34,30 +44,50 @@ export class CreateOrderDto {
   @MaxLength(200)
   customerEmail?: string
 
-  @IsOptional()
   @IsString()
-  @MaxLength(200)
-  receiverName?: string
+  @MinLength(2)
+  @MaxLength(100)
+  receiverFirstName!: string
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  receiverLastName!: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
+  receiverPatronymic?: string
+
+  @IsString()
+  @MinLength(10)
   @MaxLength(30)
-  receiverPhone?: string
-
-  @IsString()
-  @MinLength(1)
-  @MaxLength(200)
-  deliveryCity!: string
-
-  @IsString()
-  @MinLength(1)
-  @MaxLength(500)
-  deliveryWarehouse!: string
+  receiverPhone!: string
 
   @IsString()
   @MinLength(1)
   @MaxLength(80)
   deliveryMethod!: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  deliveryCity?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  deliveryBranch?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  deliveryStreet?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  deliveryHouseNumber?: string
 
   @IsString()
   @MinLength(1)
@@ -68,4 +98,9 @@ export class CreateOrderDto {
   @IsString()
   @MaxLength(2000)
   comment?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  promoCode?: string
 }

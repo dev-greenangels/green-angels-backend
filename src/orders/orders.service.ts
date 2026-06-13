@@ -6,7 +6,11 @@ import {
 import { Prisma, VariantQuantityDiscountType } from '@prisma/client'
 
 import { normalizePhoneE164 } from '../auth/auth.utils'
+import { computeCheckoutTotals } from '../pricing/checkout-totals'
+import { PricingService } from '../pricing/pricing.service'
+import { SettingsService } from '../settings/settings.service'
 import { PrismaService } from '../prisma/prisma.service'
+import { UsersService } from '../users/users.service'
 import { CreateOrderDto } from './dto/create-order.dto'
 import { isOrderStatus, type OrderStatus } from './order-status.constants'
 
@@ -19,7 +23,9 @@ export type BackstageOrderListItem = {
   status: OrderStatus
   totalAmount: number
   currency: string
-  customerName: string
+  customerFirstName: string
+  customerLastName: string
+  customerPatronymic: string | null
   customerPhone: string
   customerEmail: string | null
   itemCount: number
@@ -39,11 +45,15 @@ export type BackstageOrderItem = {
 }
 
 export type BackstageOrderDetail = BackstageOrderListItem & {
-  receiverName: string | null
-  receiverPhone: string | null
-  deliveryCity: string
-  deliveryWarehouse: string
+  receiverFirstName: string
+  receiverLastName: string
+  receiverPatronymic: string | null
+  receiverPhone: string
   deliveryMethod: string
+  deliveryCity: string | null
+  deliveryBranch: string | null
+  deliveryStreet: string | null
+  deliveryHouseNumber: string | null
   paymentMethod: string
   comment: string | null
   items: BackstageOrderItem[]
@@ -60,7 +70,12 @@ export type CreatedOrderResponse = {
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly users: UsersService,
+    private readonly pricing: PricingService,
+    private readonly settings: SettingsService,
+  ) {}
 
   formatOrderNumber(orderNumber: number): string {
     return `ZY-${String(orderNumber).padStart(8, '0')}`
@@ -77,6 +92,35 @@ export class OrdersService {
     return isOrderStatus(upper) ? upper : 'PENDING'
   }
 
+  private parseAmountSearch(search: string): number | null {
+    const stripped = search.replace(/₴|uah|грн/gi, '').trim()
+    if (/[a-zA-Zа-яА-ЯіїєІЇЄ@]/.test(stripped)) return null
+
+    const normalized = stripped.replace(/\s/g, '').replace(',', '.')
+    if (!/^[\d.]+$/.test(normalized) || !normalized) return null
+
+    const value = Number.parseFloat(normalized)
+    if (Number.isNaN(value) || value < 0) return null
+
+    return Math.round(value * 100) / 100
+  }
+
+  private parseOrderNumberSearch(search: string): number | null {
+    const trimmed = search.trim()
+    const prefixed = trimmed.match(/^ZY-?(\d+)$/i)
+    if (prefixed) {
+      const value = Number.parseInt(prefixed[1], 10)
+      return Number.isNaN(value) ? null : value
+    }
+
+    if (/^\d+$/.test(trimmed.replace(/\s/g, ''))) {
+      const value = Number.parseInt(trimmed.replace(/\s/g, ''), 10)
+      return Number.isNaN(value) ? null : value
+    }
+
+    return null
+  }
+
   private toListItem(
     order: {
       id: string
@@ -84,7 +128,9 @@ export class OrdersService {
       status: string
       totalAmount: Prisma.Decimal
       currency: string
-      customerName: string
+      customerFirstName: string
+      customerLastName: string
+      customerPatronymic: string | null
       customerPhone: string
       customerEmail: string | null
       createdAt: Date
@@ -97,7 +143,9 @@ export class OrdersService {
       status: this.normalizeListStatus(order.status),
       totalAmount: Number(order.totalAmount),
       currency: order.currency,
-      customerName: order.customerName,
+      customerFirstName: order.customerFirstName,
+      customerLastName: order.customerLastName,
+      customerPatronymic: order.customerPatronymic,
       customerPhone: order.customerPhone,
       customerEmail: order.customerEmail,
       itemCount: order.items.reduce((sum, item) => sum + item.quantity, 0),
@@ -118,17 +166,28 @@ export class OrdersService {
     const search = query.search?.trim()
     if (search) {
       const or: Prisma.OrderWhereInput[] = [
-        { customerName: { contains: search, mode: 'insensitive' } },
+        { customerFirstName: { contains: search, mode: 'insensitive' } },
+        { customerLastName: { contains: search, mode: 'insensitive' } },
+        { customerPatronymic: { contains: search, mode: 'insensitive' } },
         { customerPhone: { contains: search, mode: 'insensitive' } },
+        { receiverFirstName: { contains: search, mode: 'insensitive' } },
+        { receiverLastName: { contains: search, mode: 'insensitive' } },
+        { receiverPhone: { contains: search, mode: 'insensitive' } },
       ]
       if (search.includes('@')) {
         or.push({ customerEmail: { contains: search, mode: 'insensitive' } })
       }
-      const digits = search.replace(/\D/g, '')
-      if (digits) {
-        const asNumber = Number.parseInt(digits, 10)
-        if (!Number.isNaN(asNumber)) or.push({ orderNumber: asNumber })
+
+      const orderNumber = this.parseOrderNumberSearch(search)
+      if (orderNumber !== null) {
+        or.push({ orderNumber })
       }
+
+      const amount = this.parseAmountSearch(search)
+      if (amount !== null) {
+        or.push({ totalAmount: { equals: new Prisma.Decimal(amount.toFixed(2)) } })
+      }
+
       where.OR = or
     }
 
@@ -172,11 +231,15 @@ export class OrdersService {
 
     return {
       ...base,
-      receiverName: order.receiverName,
+      receiverFirstName: order.receiverFirstName,
+      receiverLastName: order.receiverLastName,
+      receiverPatronymic: order.receiverPatronymic,
       receiverPhone: order.receiverPhone,
-      deliveryCity: order.deliveryCity,
-      deliveryWarehouse: order.deliveryWarehouse,
       deliveryMethod: order.deliveryMethod,
+      deliveryCity: order.deliveryCity,
+      deliveryBranch: order.deliveryBranch,
+      deliveryStreet: order.deliveryStreet,
+      deliveryHouseNumber: order.deliveryHouseNumber,
       paymentMethod: order.paymentMethod,
       comment: order.comment,
       items: order.items.map((item) => {
@@ -197,6 +260,16 @@ export class OrdersService {
         }
       }),
     }
+  }
+
+  async remove(id: string): Promise<{ ok: true }> {
+    const existing = await this.prisma.order.findUnique({ where: { id }, select: { id: true } })
+    if (!existing) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+
+    await this.prisma.order.delete({ where: { id } })
+    return { ok: true }
   }
 
   async updateStatus(id: string, status: OrderStatus): Promise<BackstageOrderListItem> {
@@ -276,6 +349,29 @@ export class OrdersService {
     return 0
   }
 
+  private validateDeliveryFields(dto: CreateOrderDto): void {
+    const method = dto.deliveryMethod.trim()
+
+    if (method === 'pickup') return
+
+    if (!dto.deliveryCity?.trim()) {
+      throw new BadRequestException('Вкажіть місто доставки.')
+    }
+
+    if (method === 'nova-poshta-branch' && !dto.deliveryBranch?.trim()) {
+      throw new BadRequestException('Вкажіть відділення Нової Пошти.')
+    }
+
+    if (method === 'nova-poshta-address') {
+      if (!dto.deliveryStreet?.trim()) {
+        throw new BadRequestException('Вкажіть вулицю доставки.')
+      }
+      if (!dto.deliveryHouseNumber?.trim()) {
+        throw new BadRequestException('Вкажіть номер будинку.')
+      }
+    }
+  }
+
   private async resolveContractorDiscountPercent(phone: string): Promise<number> {
     const normalized = normalizePhoneE164(phone)
     if (!normalized) return 0
@@ -293,92 +389,62 @@ export class OrdersService {
   }
 
   async create(dto: CreateOrderDto): Promise<CreatedOrderResponse> {
-    const uniqueItems = new Map<string, number>()
-    for (const item of dto.items) {
-      uniqueItems.set(
-        item.productVariantId,
-        (uniqueItems.get(item.productVariantId) ?? 0) + item.quantity,
-      )
-    }
-
-    const variantIds = [...uniqueItems.keys()]
-    const variants = await this.prisma.productVariant.findMany({
-      where: { id: { in: variantIds } },
-      include: {
-        product: { select: { id: true, isPublished: true } },
-        prices: { where: { priceType: 'роздріб', currency: 'UAH' }, take: 1 },
-        quantityPrices: true,
-      },
+    const customerPhone = normalizePhoneE164(dto.customerPhone) ?? dto.customerPhone.trim()
+    const audience = await this.pricing.resolveAudience({ customerPhone })
+    const quote = await this.pricing.quote({
+      items: dto.items,
+      audience,
+      promoCode: dto.promoCode,
+      validatePromo: true,
     })
 
-    if (variants.length !== variantIds.length) {
-      throw new NotFoundException('Один або кілька товарів не знайдено.')
+    if (dto.promoCode?.trim() && quote.promoMessage) {
+      throw new BadRequestException(quote.promoMessage)
     }
 
-    const discountPercent = await this.resolveContractorDiscountPercent(dto.customerPhone)
+    const lineItems = quote.lines.map((line) => ({
+      productVariantId: line.productVariantId,
+      quantity: line.quantity,
+      priceAtPurchase: line.unitPrice,
+      stockToDecrement: line.stockToDecrement,
+    }))
 
-    const lineItems: Array<{
-      productVariantId: string
-      quantity: number
-      priceAtPurchase: number
-      stockToDecrement: number
-    }> = []
-
-    let totalAmount = 0
-
-    for (const variant of variants) {
-      if (!variant.product.isPublished) {
-        throw new BadRequestException('Товар недоступний для замовлення.')
-      }
-
-      const quantity = uniqueItems.get(variant.id)
-      if (!quantity) continue
-
-      const maxQuantity = this.getVariantMaxQuantity(variant)
-      if (maxQuantity <= 0) {
-        throw new BadRequestException('Один із товарів недоступний для замовлення.')
-      }
-      if (quantity > maxQuantity) {
-        throw new BadRequestException(
-          `Недостатня кількість товару на складі (макс. ${maxQuantity} шт.).`,
-        )
-      }
-
-      const priceRow = variant.prices[0]
-      if (!priceRow) {
-        throw new BadRequestException('Для товару не вказано ціну.')
-      }
-
-      const basePrice = Number(priceRow.value)
-      const unitPrice = this.resolveUnitPrice(basePrice, quantity, variant.quantityPrices)
-      const lineSubtotal = unitPrice * quantity
-      const lineTotal =
-        discountPercent > 0
-          ? Math.round(lineSubtotal * (1 - discountPercent / 100) * 100) / 100
-          : lineSubtotal
-
-      totalAmount += lineTotal
+    for (const gift of quote.giftLines) {
       lineItems.push({
-        productVariantId: variant.id,
-        quantity,
-        priceAtPurchase: Math.round((lineTotal / quantity) * 100) / 100,
-        stockToDecrement: variant.stock > 0 ? quantity : 0,
+        productVariantId: gift.productVariantId,
+        quantity: gift.quantity,
+        priceAtPurchase: 0,
+        stockToDecrement: 0,
       })
     }
 
-    if (!lineItems.length) {
-      throw new BadRequestException('Кошик порожній.')
+    const deliveryMethod = dto.deliveryMethod.trim()
+    const cartSettings = await this.settings.getCartCheckoutSettings()
+    const checkout = computeCheckoutTotals({
+      productsSubtotal: quote.totalAmount,
+      subtotalBeforeDiscount: quote.subtotalBeforeDiscount,
+      settings: cartSettings,
+      deliveryMethod,
+    })
+
+    if (!checkout.canPlaceOrder) {
+      throw new BadRequestException(
+        checkout.belowMinOrderMessage ?? 'Сума замовлення менша за мінімальну.',
+      )
     }
 
-    totalAmount = Math.round(totalAmount * 100) / 100
-    const customerPhone = normalizePhoneE164(dto.customerPhone) ?? dto.customerPhone.trim()
-    const receiverPhone = dto.receiverPhone
-      ? normalizePhoneE164(dto.receiverPhone) ?? dto.receiverPhone.trim()
-      : null
+    const totalAmount = checkout.grandTotal
+    const receiverPhone =
+      normalizePhoneE164(dto.receiverPhone) ?? dto.receiverPhone.trim()
 
-    const user = await this.prisma.user.findUnique({
-      where: { phone: customerPhone },
-      select: { id: true },
+    this.validateDeliveryFields(dto)
+
+    const userId = await this.users.findOrCreateCustomer({
+      phone: customerPhone,
+      firstName: dto.customerFirstName,
+      lastName: dto.customerLastName,
+      patronymic: dto.customerPatronymic,
+      email: dto.customerEmail,
     })
 
     const order = await this.prisma.$transaction(async (tx) => {
@@ -386,18 +452,39 @@ export class OrdersService {
         data: {
           status: 'PENDING',
           totalAmount,
+          productsSubtotal: checkout.productsSubtotal,
+          deliveryAmount: checkout.deliveryAmount,
+          packagingAmount: checkout.packagingAmount,
+          taxAmount: checkout.taxAmount,
           currency: 'UAH',
-          customerName: dto.customerName.trim(),
+          customerFirstName: dto.customerFirstName.trim(),
+          customerLastName: dto.customerLastName.trim(),
+          customerPatronymic: dto.customerPatronymic?.trim() || null,
           customerPhone,
           customerEmail: dto.customerEmail?.trim() || null,
-          receiverName: dto.receiverName?.trim() || null,
+          receiverFirstName: dto.receiverFirstName.trim(),
+          receiverLastName: dto.receiverLastName.trim(),
+          receiverPatronymic: dto.receiverPatronymic?.trim() || null,
           receiverPhone,
-          deliveryCity: dto.deliveryCity.trim(),
-          deliveryWarehouse: dto.deliveryWarehouse.trim(),
-          deliveryMethod: dto.deliveryMethod.trim(),
+          deliveryMethod,
+          deliveryCity:
+            deliveryMethod === 'pickup' ? null : dto.deliveryCity?.trim() || null,
+          deliveryBranch:
+            deliveryMethod === 'nova-poshta-branch'
+              ? dto.deliveryBranch?.trim() || null
+              : null,
+          deliveryStreet:
+            deliveryMethod === 'nova-poshta-address'
+              ? dto.deliveryStreet?.trim() || null
+              : null,
+          deliveryHouseNumber:
+            deliveryMethod === 'nova-poshta-address'
+              ? dto.deliveryHouseNumber?.trim() || null
+              : null,
           paymentMethod: dto.paymentMethod.trim(),
           comment: dto.comment?.trim() || null,
-          userId: user?.id ?? null,
+          userId,
+          promoCodeId: quote.promoCodeId,
           items: {
             create: lineItems.map((item) => ({
               productVariantId: item.productVariantId,
@@ -421,6 +508,16 @@ export class OrdersService {
         await tx.productVariant.update({
           where: { id: item.productVariantId },
           data: { stock: { decrement: item.stockToDecrement } },
+        })
+      }
+
+      if (quote.promoCodeId) {
+        await tx.promoCodeUsage.create({
+          data: {
+            promoCodeId: quote.promoCodeId,
+            userId,
+            orderId: created.id,
+          },
         })
       }
 

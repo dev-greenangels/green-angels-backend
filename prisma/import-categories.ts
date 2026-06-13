@@ -264,11 +264,13 @@ async function main() {
   console.log(`Без батька (відсутній у CSV): ${rootFallback}`)
 }
 
-main()
-  .catch((err) => {
-    console.error(err)
-    process.exitCode = 1
-  })
-  .finally(async () => {
-    await prisma.$disconnect()
-  })
+if (process.argv[1]?.includes('import-categories')) {
+  main()
+    .catch((err) => {
+      console.error(err)
+      process.exitCode = 1
+    })
+    .finally(async () => {
+      await prisma.$disconnect()
+    })
+}

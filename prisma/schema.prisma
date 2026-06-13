@@ -28,6 +28,9 @@ model User {
   id            String   @id @default(uuid())
   phone         String?  @unique
   email         String?  @unique
+  firstName     String?
+  lastName      String?
+  patronymic    String?
   phoneVerified Boolean  @default(false)
   emailVerified Boolean  @default(false)
   passwordHash  String?
@@ -39,6 +42,11 @@ model User {
   contractorProfiles ContractorProfile[]
   cart               Cart?
   orders             Order[]
+  reviews            Review[]
+  favorites          UserFavorite[]
+  customerGroups     UserCustomerGroup[]
+  promoCodeUsages    PromoCodeUsage[]
+  promoCodeAllowances PromoCodeUser[]
 }
 
 model Account {
@@ -114,6 +122,8 @@ model Product {
   images                 ProductImage[]
   characteristics        ProductCharacteristic[]
   stockNotifications     ProductStockNotification[]
+  reviews                Review[]
+  favorites              UserFavorite[]
 }
 
 /// Підписка «повідомити, коли зʼявиться на складі» (будь-який розмір товару)
@@ -368,18 +378,116 @@ enum DiscountValueType {
   FIXED
 }
 
+model CustomerGroup {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users         UserCustomerGroup[]
+  discountRules DiscountRuleGroup[]
+  promoCodes    PromoCodeGroup[]
+}
+
+model UserCustomerGroup {
+  userId  String
+  groupId String
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group   CustomerGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([userId, groupId])
+  @@index([groupId])
+}
+
 model DiscountRule {
-  id           String            @id @default(uuid())
-  name         String
-  type         DiscountValueType
-  value        Decimal           @db.Decimal(10, 2)
-  target       DiscountTarget
-  targetId     String?
-  onlyForRoles Role[]
-  startDate    DateTime?
-  endDate      DateTime?
-  isActive     Boolean           @default(true)
-  createdAt    DateTime          @default(now())
+  id              String            @id @default(uuid())
+  name            String
+  type            DiscountValueType
+  value           Decimal           @db.Decimal(10, 2)
+  target          DiscountTarget
+  targetId        String?
+  targetIds       String[]          @default([])
+  onlyForRoles    Role[]
+  minCartSubtotal Decimal?          @db.Decimal(10, 2)
+  startDate       DateTime?
+  endDate         DateTime?
+  isActive        Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  groups DiscountRuleGroup[]
+}
+
+model DiscountRuleGroup {
+  discountRuleId String
+  groupId        String
+  discountRule   DiscountRule  @relation(fields: [discountRuleId], references: [id], onDelete: Cascade)
+  group          CustomerGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([discountRuleId, groupId])
+}
+
+model PromoCode {
+  id                  String             @id @default(uuid())
+  code                String             @unique
+  name                String
+  description         String?
+  discountType        DiscountValueType?
+  value               Decimal?           @db.Decimal(10, 2)
+  target              DiscountTarget
+  targetId            String?
+  targetIds           String[]           @default([])
+  excludeProductIds   String[]           @default([])
+  excludeVariantIds   String[]           @default([])
+  minCartSubtotal     Decimal?           @db.Decimal(10, 2)
+  giftVariantId       String?
+  giftQuantity        Int                @default(1)
+  usageLimitTotal     Int?
+  usageLimitPerUser   Int?
+  validFrom           DateTime?
+  validTo             DateTime?
+  isActive            Boolean            @default(true)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  groups        PromoCodeGroup[]
+  allowedUsers  PromoCodeUser[]
+  usages        PromoCodeUsage[]
+  orders        Order[]
+}
+
+model PromoCodeUser {
+  promoCodeId String
+  userId      String
+  promoCode   PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([promoCodeId, userId])
+  @@index([userId])
+}
+
+model PromoCodeGroup {
+  promoCodeId String
+  groupId     String
+  promoCode   PromoCode     @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+  group       CustomerGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([promoCodeId, groupId])
+}
+
+model PromoCodeUsage {
+  id          String    @id @default(uuid())
+  promoCodeId String
+  promoCode   PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  orderId     String?   @unique
+  createdAt   DateTime  @default(now())
+
+  @@index([promoCodeId, userId])
 }
 
 // ==========================================
@@ -408,20 +516,32 @@ model Order {
   orderNumber       Int      @unique @default(autoincrement())
   status            String   @default("PENDING")
   totalAmount       Decimal  @db.Decimal(10, 2)
+  productsSubtotal  Decimal? @db.Decimal(10, 2)
+  deliveryAmount    Decimal? @db.Decimal(10, 2)
+  packagingAmount   Decimal? @db.Decimal(10, 2)
+  taxAmount         Decimal? @db.Decimal(10, 2)
   currency          String   @default("UAH")
-  customerName      String
-  customerPhone     String
-  customerEmail     String?
-  receiverName      String?
-  receiverPhone     String?
-  deliveryCity      String
-  deliveryWarehouse String
-  deliveryMethod    String   @default("nova-poshta-branch")
+  customerFirstName  String
+  customerLastName   String
+  customerPatronymic String?
+  customerPhone      String
+  customerEmail      String?
+  receiverFirstName  String
+  receiverLastName   String
+  receiverPatronymic String?
+  receiverPhone      String
+  deliveryMethod     String   @default("nova-poshta-branch")
+  deliveryCity       String?
+  deliveryBranch     String?
+  deliveryStreet     String?
+  deliveryHouseNumber String?
   paymentMethod     String
   comment           String?  @db.Text
   externalId1C      String?
   userId            String?
   user              User?    @relation(fields: [userId], references: [id])
+  promoCodeId       String?
+  promoCode         PromoCode? @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
   items             OrderItem[]
   createdAt         DateTime @default(now())
 }
@@ -454,4 +574,47 @@ model BlogPost {
   image     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Review {
+  id           String       @id @default(uuid())
+  userId       String?
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  productId    String?
+  product      Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+  authorName   String
+  email        String?
+  phone        String?
+  text         String       @db.Text
+  image        String?
+  rating       Int          @default(5)
+  status       ReviewStatus @default(PENDING)
+  legacyId     String?
+  legacySource String?
+  importedAt   DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@unique([legacySource, legacyId])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([productId, status, createdAt(sort: Desc)])
+  @@index([rating])
+}
+
+model UserFavorite {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@index([userId, createdAt(sort: Desc)])
 }
