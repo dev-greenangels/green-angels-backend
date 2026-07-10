@@ -1,7 +1,7 @@
 /** Валідація шляхів завантажених зображень (зберігаються на диску магазину). */
 
 export const CATEGORY_IMAGE_PATH_REGEX =
-  /^\/uploads\/categories\/(?:pending\/[a-f0-9-]+|[a-f0-9-]{36})\/cover\.webp$/i
+  /^\/uploads\/categories\/(?:pending\/[a-f0-9-]+|[a-f0-9-]{36})(?:\/v\d+)?\/cover\.webp$/i
 
 export const LEGACY_CATEGORY_IMAGE_PATH_REGEX =
   /^\/uploads\/categories\/[a-f0-9-]+\.(jpg|jpeg|png|webp|gif)$/i

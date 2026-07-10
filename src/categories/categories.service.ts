@@ -17,9 +17,11 @@ export type CategoryTreeNode = {
   parentId: string | null
   legacyId: number | null
   isActive: boolean
+  isCatalogRoot: boolean
   position: number
   name: string
   description: string | null
+  footerDescription: string | null
   image: string | null
   imageUrl: string
   metaTitle: string | null
@@ -59,11 +61,13 @@ export class CategoriesService {
       parentId: string | null
       legacyId: number | null
       isActive: boolean
+      isCatalogRoot: boolean
       position: number
       image: string | null
       translations: Array<{
         name: string
         description: string | null
+        footerDescription: string | null
         metaTitle: string | null
         metaDesc: string | null
       }>
@@ -78,9 +82,11 @@ export class CategoriesService {
       parentId: category.parentId,
       legacyId: category.legacyId,
       isActive: category.isActive,
+      isCatalogRoot: category.isCatalogRoot,
       position: category.position,
       name: t?.name ?? slugFallback ?? category.slug,
       description: t?.description ?? null,
+      footerDescription: t?.footerDescription ?? null,
       image: category.image,
       imageUrl: this.resolveImageUrl(category.image),
       metaTitle: t?.metaTitle ?? null,
@@ -123,6 +129,44 @@ export class CategoriesService {
     return roots
   }
 
+  /** Усі id категорії та її нащадків (для фільтра товарів у розділі каталогу). */
+  async findCategoryIdsInSubtreeBySlug(slug: string): Promise<string[]> {
+    const normalized = slug.trim().toLowerCase()
+    const rows = await this.prisma.category.findMany({
+      select: { id: true, slug: true, parentId: true },
+    })
+    const root = rows.find((row) => row.slug === normalized)
+    if (!root) return []
+
+    const childrenByParent = new Map<string, string[]>()
+    for (const row of rows) {
+      if (!row.parentId) continue
+      const siblings = childrenByParent.get(row.parentId) ?? []
+      siblings.push(row.id)
+      childrenByParent.set(row.parentId, siblings)
+    }
+
+    const ids: string[] = []
+    const stack = [root.id]
+    while (stack.length > 0) {
+      const id = stack.pop()!
+      ids.push(id)
+      for (const childId of childrenByParent.get(id) ?? []) {
+        stack.push(childId)
+      }
+    }
+
+    return ids
+  }
+
+  private async ensureSingleCatalogRoot(categoryId: string | null, isCatalogRoot: boolean) {
+    if (!isCatalogRoot) return
+    await this.prisma.category.updateMany({
+      where: categoryId ? { NOT: { id: categoryId } } : {},
+      data: { isCatalogRoot: false },
+    })
+  }
+
   async create(dto: CreateCategoryDto) {
     const locale = this.defaultLocale(dto.locale)
     const slug = dto.slug.trim().toLowerCase()
@@ -148,6 +192,10 @@ export class CategoriesService {
       }
     }
 
+    if (dto.isCatalogRoot) {
+      await this.ensureSingleCatalogRoot(null, true)
+    }
+
     const category = await this.prisma.category.create({
       data: {
         slug,
@@ -155,12 +203,14 @@ export class CategoriesService {
         parentId: dto.parentId ?? null,
         legacyId: dto.legacyId ?? null,
         isActive: dto.isActive ?? true,
+        isCatalogRoot: dto.isCatalogRoot ?? false,
         position: dto.position ?? 0,
         translations: {
           create: {
             locale,
             name: dto.name.trim(),
             description: dto.description?.trim() || null,
+            footerDescription: dto.footerDescription?.trim() || null,
             metaTitle: dto.metaTitle?.trim() || null,
             metaDesc: dto.metaDesc?.trim() || null,
           },
@@ -219,6 +269,10 @@ export class CategoriesService {
       }
     }
 
+    if (dto.isCatalogRoot) {
+      await this.ensureSingleCatalogRoot(id, true)
+    }
+
     const category = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.category.update({
         where: { id },
@@ -228,6 +282,7 @@ export class CategoriesService {
           ...(dto.image !== undefined ? { image: this.normalizeImageInput(dto.image) } : {}),
           ...(dto.legacyId !== undefined ? { legacyId: dto.legacyId } : {}),
           ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+          ...(dto.isCatalogRoot !== undefined ? { isCatalogRoot: dto.isCatalogRoot } : {}),
           ...(dto.position !== undefined ? { position: dto.position } : {}),
         },
       })
@@ -242,12 +297,16 @@ export class CategoriesService {
         dto.description !== undefined
           ? dto.description.trim() || null
           : translation?.description ?? null
+      const footerDescription =
+        dto.footerDescription !== undefined
+          ? dto.footerDescription.trim() || null
+          : translation?.footerDescription ?? null
 
       if (name) {
         if (translation) {
           await tx.categoryTranslation.update({
             where: { id: translation.id },
-            data: { name, description, metaTitle, metaDesc },
+            data: { name, description, footerDescription, metaTitle, metaDesc },
           })
         } else {
           await tx.categoryTranslation.create({
@@ -256,6 +315,7 @@ export class CategoriesService {
               locale,
               name,
               description,
+              footerDescription,
               metaTitle,
               metaDesc,
             },

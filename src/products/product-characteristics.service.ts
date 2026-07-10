@@ -1,8 +1,13 @@
 import { Injectable } from '@nestjs/common'
-import { Prisma } from '@prisma/client'
+import { CharacteristicValueType, Prisma } from '@prisma/client'
 
 import { PrismaService } from '../prisma/prisma.service'
-import { ProductCharacteristicsDto } from './dto/product-characteristics.dto'
+import {
+  ProductCharacteristicEntryDto,
+  ProductCharacteristicsDto,
+  ProductCharacteristicsResponse,
+  ProductDisplayCharacteristic,
+} from './dto/product-characteristics.dto'
 import {
   PRODUCT_CHARACTERISTIC_FORM_KEYS,
   PRODUCT_FILTER_CHARACTERISTICS,
@@ -12,7 +17,8 @@ type CharacteristicLookup = Map<
   string,
   {
     id: string
-    valueType: string
+    slug: string
+    valueType: CharacteristicValueType
     options: Map<string, string>
   }
 >
@@ -21,6 +27,44 @@ type CharacteristicLookup = Map<
 export class ProductCharacteristicsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async loadCharacteristicLookup(locale = 'uk'): Promise<CharacteristicLookup> {
+    const loc = locale.trim().toLowerCase() || 'uk'
+    const rows = await this.prisma.characteristic.findMany({
+      include: {
+        translations: { where: { locale: loc } },
+        options: { include: { translations: { where: { locale: loc } } } },
+      },
+      orderBy: [{ sortOrder: 'asc' }, { slug: 'asc' }],
+    })
+
+    const lookup: CharacteristicLookup = new Map()
+    for (const row of rows) {
+      const options = new Map<string, string>()
+      for (const option of row.options) {
+        options.set(option.slug, option.id)
+      }
+      lookup.set(row.slug, {
+        id: row.id,
+        slug: row.slug,
+        valueType: row.valueType,
+        options,
+      })
+      lookup.set(row.id, {
+        id: row.id,
+        slug: row.slug,
+        valueType: row.valueType,
+        options,
+      })
+    }
+
+    if (lookup.size === 0) {
+      return this.ensureFilterCharacteristics(loc)
+    }
+
+    return lookup
+  }
+
+  /** Початкове наповнення з legacy-констант, якщо таблиці порожні */
   async ensureFilterCharacteristics(locale = 'uk'): Promise<CharacteristicLookup> {
     const lookup: CharacteristicLookup = new Map()
 
@@ -73,14 +117,41 @@ export class ProductCharacteristicsService {
         options.set(created.slug, created.id)
       }
 
-      lookup.set(def.slug, {
+      const entry = {
         id: characteristic.id,
+        slug: characteristic.slug,
         valueType: characteristic.valueType,
         options,
-      })
+      }
+      lookup.set(characteristic.slug, entry)
+      lookup.set(characteristic.id, entry)
     }
 
     return lookup
+  }
+
+  private legacyEntries(dto: ProductCharacteristicsDto): ProductCharacteristicEntryDto[] {
+    const entries: ProductCharacteristicEntryDto[] = []
+    const legacy: Array<[string, string | undefined]> = [
+      [PRODUCT_CHARACTERISTIC_FORM_KEYS.sunRequirement, dto.sunRequirement],
+      [PRODUCT_CHARACTERISTIC_FORM_KEYS.soilType, dto.soilType],
+      [PRODUCT_CHARACTERISTIC_FORM_KEYS.hardinessZone, dto.hardinessZone],
+      [PRODUCT_CHARACTERISTIC_FORM_KEYS.wateringNeeds, dto.wateringNeeds],
+    ]
+
+    for (const [slug, optionSlug] of legacy) {
+      if (!optionSlug?.trim()) continue
+      entries.push({ characteristicId: slug, optionId: optionSlug.trim() })
+    }
+
+    if (dto.height?.trim()) {
+      entries.push({
+        characteristicId: PRODUCT_CHARACTERISTIC_FORM_KEYS.height,
+        textValue: dto.height.trim(),
+      })
+    }
+
+    return entries
   }
 
   buildCharacteristicCreates(
@@ -89,70 +160,76 @@ export class ProductCharacteristicsService {
   ): Prisma.ProductCharacteristicCreateWithoutProductInput[] {
     if (!dto) return []
 
-    const entries: Array<{
-      characteristicSlug: string
-      optionSlug?: string
-      textValue?: string
-    }> = []
-
-    if (dto.sunRequirement?.trim()) {
-      entries.push({
-        characteristicSlug: PRODUCT_CHARACTERISTIC_FORM_KEYS.sunRequirement,
-        optionSlug: dto.sunRequirement.trim(),
-      })
-    }
-    if (dto.soilType?.trim()) {
-      entries.push({
-        characteristicSlug: PRODUCT_CHARACTERISTIC_FORM_KEYS.soilType,
-        optionSlug: dto.soilType.trim(),
-      })
-    }
-    if (dto.hardinessZone?.trim()) {
-      entries.push({
-        characteristicSlug: PRODUCT_CHARACTERISTIC_FORM_KEYS.hardinessZone,
-        optionSlug: dto.hardinessZone.trim(),
-      })
-    }
-    if (dto.wateringNeeds?.trim()) {
-      entries.push({
-        characteristicSlug: PRODUCT_CHARACTERISTIC_FORM_KEYS.wateringNeeds,
-        optionSlug: dto.wateringNeeds.trim(),
-      })
-    }
-    if (dto.height?.trim()) {
-      entries.push({
-        characteristicSlug: PRODUCT_CHARACTERISTIC_FORM_KEYS.height,
-        textValue: dto.height.trim(),
-      })
-    }
-
+    const rawEntries = dto.entries?.length ? dto.entries : this.legacyEntries(dto)
     const creates: Prisma.ProductCharacteristicCreateWithoutProductInput[] = []
 
-    for (const entry of entries) {
-      const characteristic = lookup.get(entry.characteristicSlug)
+    for (const entry of rawEntries) {
+      const characteristic =
+        lookup.get(entry.characteristicId) ?? lookup.get(entry.characteristicId.trim())
       if (!characteristic) continue
 
-      if (entry.textValue) {
+      if (entry.textValue?.trim()) {
         creates.push({
           characteristic: { connect: { id: characteristic.id } },
-          textValue: entry.textValue,
+          textValue: entry.textValue.trim(),
         })
         continue
       }
 
-      if (!entry.optionSlug) continue
-      const optionId = characteristic.options.get(entry.optionSlug)
-      if (!optionId) continue
+      if (entry.numberValue != null && !Number.isNaN(entry.numberValue)) {
+        creates.push({
+          characteristic: { connect: { id: characteristic.id } },
+          numberValue: entry.numberValue,
+        })
+        continue
+      }
 
-      creates.push({
-        characteristic: { connect: { id: characteristic.id } },
-        option: { connect: { id: optionId } },
-      })
+      if (entry.optionId) {
+        const resolvedOptionId =
+          characteristic.options.get(entry.optionId) ?? entry.optionId
+        creates.push({
+          characteristic: { connect: { id: characteristic.id } },
+          option: { connect: { id: resolvedOptionId } },
+        })
+      }
     }
 
     return creates
   }
 
+  toCharacteristicsResponse(
+    rows: Array<{
+      numberValue: number | null
+      textValue: string | null
+      characteristic: {
+        id: string
+        slug: string
+        valueType: CharacteristicValueType
+        translations: Array<{ name: string }>
+      }
+      option: { id: string; slug: string; translations: Array<{ label: string }> } | null
+    }>,
+  ): ProductCharacteristicsResponse {
+    return {
+      entries: rows.map((row) => ({
+        characteristicId: row.characteristic.id,
+        characteristicSlug: row.characteristic.slug,
+        characteristicName: row.characteristic.translations[0]?.name ?? row.characteristic.slug,
+        valueType: row.characteristic.valueType,
+        ...(row.option
+          ? {
+              optionId: row.option.id,
+              optionSlug: row.option.slug,
+              optionLabel: row.option.translations[0]?.label ?? row.option.slug,
+            }
+          : {}),
+        ...(row.textValue?.trim() ? { textValue: row.textValue.trim() } : {}),
+        ...(row.numberValue != null ? { numberValue: row.numberValue } : {}),
+      })),
+    }
+  }
+
+  /** @deprecated для сумісності зі старим API */
   toCharacteristicsDto(
     rows: Array<{
       textValue: string | null
@@ -183,5 +260,102 @@ export class ProductCharacteristicsService {
     }
 
     return dto
+  }
+
+  toDisplayCharacteristics(
+    rows: Array<{
+      numberValue: number | null
+      textValue: string | null
+      characteristic: {
+        id: string
+        slug: string
+        valueType: CharacteristicValueType
+        unit: string | null
+        sortOrder: number
+        showOnProductPage: boolean
+        icon: string | null
+        translations: Array<{ name: string }>
+      }
+      option: {
+        slug: string
+        translations: Array<{ label: string }>
+      } | null
+    }>,
+  ): ProductDisplayCharacteristic[] {
+    const grouped = new Map<string, typeof rows>()
+
+    for (const row of rows) {
+      if (!row.characteristic.showOnProductPage) continue
+      const bucket = grouped.get(row.characteristic.id) ?? []
+      bucket.push(row)
+      grouped.set(row.characteristic.id, bucket)
+    }
+
+    const result: ProductDisplayCharacteristic[] = []
+
+    for (const charRows of grouped.values()) {
+      const characteristic = charRows[0].characteristic
+      const displayValue = this.formatDisplayValue(
+        charRows,
+        characteristic.valueType,
+        characteristic.unit,
+      )
+      if (!displayValue) continue
+
+      result.push({
+        id: characteristic.id,
+        slug: characteristic.slug,
+        name: characteristic.translations[0]?.name ?? characteristic.slug,
+        icon: characteristic.icon,
+        unit: characteristic.unit,
+        valueType: characteristic.valueType,
+        displayValue,
+        sortOrder: characteristic.sortOrder,
+      })
+    }
+
+    return result.sort(
+      (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'uk'),
+    )
+  }
+
+  private formatDisplayValue(
+    rows: Array<{
+      numberValue: number | null
+      textValue: string | null
+      option: {
+        slug: string
+        translations: Array<{ label: string }>
+      } | null
+    }>,
+    valueType: CharacteristicValueType,
+    unit: string | null,
+  ): string | null {
+    if (valueType === CharacteristicValueType.MULTI_SELECT) {
+      const labels = rows
+        .map((row) => row.option?.translations[0]?.label ?? row.option?.slug)
+        .filter((label): label is string => Boolean(label?.trim()))
+      return labels.length ? labels.join(', ') : null
+    }
+
+    if (valueType === CharacteristicValueType.SELECT) {
+      const row = rows.find((item) => item.option)
+      const label = row?.option?.translations[0]?.label ?? row?.option?.slug
+      return label?.trim() || null
+    }
+
+    if (valueType === CharacteristicValueType.TEXT) {
+      const textValue = rows.find((item) => item.textValue?.trim())?.textValue?.trim()
+      return textValue || null
+    }
+
+    if (valueType === CharacteristicValueType.NUMBER) {
+      const numberValue = rows.find((item) => item.numberValue != null)?.numberValue
+      if (numberValue == null) return null
+      const unitSuffix = unit?.trim() ? ` ${unit.trim()}` : ''
+      return `${numberValue}${unitSuffix}`
+    }
+
+    return null
   }
 }

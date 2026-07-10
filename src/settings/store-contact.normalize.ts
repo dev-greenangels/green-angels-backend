@@ -1,8 +1,12 @@
 import {
+  DEFAULT_CONTACT_BLOCKS,
   DEFAULT_FOOTER_VISIBILITY,
   DEFAULT_MAPS_URL,
   DEFAULT_SOCIAL_LINKS,
   DEFAULT_STORE_SETTINGS,
+  type StoreContactBlock,
+  type StoreContactLine,
+  type StoreContactLineType,
   type StoreContactSettings,
   type StoreEmailContact,
   type StoreFooterVisibility,
@@ -12,23 +16,110 @@ import {
   type StoreSocialLinks,
 } from './settings.constants'
 
+type LegacyFooter = Partial<StoreFooterVisibility> & {
+  showPhones?: boolean
+  showEmails?: boolean
+}
+
 type LegacyStoreContact = Partial<StoreContactSettings> & {
   phone?: string
   email?: string
   hoursWeekdays?: string
   hoursSaturday?: string
+  footer?: LegacyFooter
 }
 
-function normalizePhones(raw: LegacyStoreContact): StorePhoneContact[] {
-  if (raw.phones?.length) return raw.phones
-  if (raw.phone?.trim()) return [{ label: 'Підтримка', phone: raw.phone.trim() }]
-  return DEFAULT_STORE_SETTINGS.phones
+const CONTACT_LINE_TYPES: StoreContactLineType[] = [
+  'phone',
+  'email',
+  'viber',
+  'telegram',
+  'whatsapp',
+  'link',
+]
+
+function normalizeContactLine(raw: Partial<StoreContactLine>): StoreContactLine | null {
+  const type = CONTACT_LINE_TYPES.includes(raw.type as StoreContactLineType)
+    ? (raw.type as StoreContactLineType)
+    : 'link'
+  const value = raw.value?.trim() ?? ''
+  if (!value) return null
+  const label = raw.label?.trim() || undefined
+  return { type, value, ...(label ? { label } : {}) }
 }
 
-function normalizeEmails(raw: LegacyStoreContact): StoreEmailContact[] {
-  if (raw.emails?.length) return raw.emails
-  if (raw.email?.trim()) return [{ label: 'Підтримка', email: raw.email.trim() }]
-  return DEFAULT_STORE_SETTINGS.emails
+function normalizeContactBlocks(raw: LegacyStoreContact): StoreContactBlock[] {
+  if (raw.contactBlocks?.length) {
+    return raw.contactBlocks
+      .map((block) => {
+        const title = block.title?.trim() || 'Контакти'
+        const lines = (block.lines ?? [])
+          .map((line) => normalizeContactLine(line))
+          .filter((line): line is StoreContactLine => line != null)
+        return lines.length ? { title, lines } : null
+      })
+      .filter((block): block is StoreContactBlock => block != null)
+  }
+
+  const phones = raw.phones?.length
+    ? raw.phones
+    : raw.phone?.trim()
+      ? [{ label: 'Підтримка', phone: raw.phone.trim() }]
+      : []
+
+  const emails = raw.emails?.length
+    ? raw.emails
+    : raw.email?.trim()
+      ? [{ label: 'Підтримка', email: raw.email.trim() }]
+      : []
+
+  if (!phones.length && !emails.length) {
+    return DEFAULT_CONTACT_BLOCKS
+  }
+
+  const order: string[] = []
+  const blocks = new Map<string, StoreContactBlock>()
+
+  const ensure = (label: string) => {
+    const title = label.trim() || 'Контакти'
+    const key = title.toLowerCase()
+    if (!blocks.has(key)) {
+      blocks.set(key, { title, lines: [] })
+      order.push(key)
+    }
+    return blocks.get(key)!
+  }
+
+  for (const item of phones) {
+    const value = item.phone?.trim()
+    if (!value) continue
+    ensure(item.label).lines.push({ type: 'phone', value })
+  }
+  for (const item of emails) {
+    const value = item.email?.trim()
+    if (!value) continue
+    ensure(item.label).lines.push({ type: 'email', value })
+  }
+
+  return order
+    .map((key) => blocks.get(key)!)
+    .filter((block) => block.lines.length > 0)
+}
+
+export function derivePhonesFromContactBlocks(blocks: StoreContactBlock[]): StorePhoneContact[] {
+  return blocks.flatMap((block) =>
+    block.lines
+      .filter((line) => line.type === 'phone' && line.value.trim())
+      .map((line) => ({ label: block.title, phone: line.value.trim() })),
+  )
+}
+
+export function deriveEmailsFromContactBlocks(blocks: StoreContactBlock[]): StoreEmailContact[] {
+  return blocks.flatMap((block) =>
+    block.lines
+      .filter((line) => line.type === 'email' && line.value.trim())
+      .map((line) => ({ label: block.title, email: line.value.trim() })),
+  )
 }
 
 function normalizeSchedules(raw: LegacyStoreContact): StoreHoursSchedule[] {
@@ -49,20 +140,46 @@ function normalizeSchedules(raw: LegacyStoreContact): StoreHoursSchedule[] {
 }
 
 function normalizeFooter(raw: LegacyStoreContact): StoreFooterVisibility {
-  if (!raw.footer) {
+  const footer = raw.footer
+
+  if (!footer) {
     return {
       showAddress: true,
-      showPhones: true,
-      showEmails: true,
+      showPhone: true,
+      showEmail: true,
+      showViber: true,
+      showTelegram: true,
+      showWhatsApp: true,
+      showLink: true,
       showSchedules: true,
     }
   }
 
+  return normalizeFooterVisibility(footer, DEFAULT_FOOTER_VISIBILITY)
+}
+
+function normalizeFooterVisibility(
+  footer: LegacyFooter,
+  defaults: StoreFooterVisibility,
+): StoreFooterVisibility {
+  const hasLegacyPhones = footer.showPhones !== undefined
+  const hasLegacyEmails = footer.showEmails !== undefined
+  const legacyPhones = footer.showPhones
+  const legacyEmails = footer.showEmails
+
   return {
-    showAddress: raw.footer.showAddress ?? DEFAULT_FOOTER_VISIBILITY.showAddress,
-    showPhones: raw.footer.showPhones ?? DEFAULT_FOOTER_VISIBILITY.showPhones,
-    showEmails: raw.footer.showEmails ?? DEFAULT_FOOTER_VISIBILITY.showEmails,
-    showSchedules: raw.footer.showSchedules ?? DEFAULT_FOOTER_VISIBILITY.showSchedules,
+    showAddress: footer.showAddress ?? defaults.showAddress,
+    showPhone: footer.showPhone ?? (hasLegacyPhones ? legacyPhones! : defaults.showPhone),
+    showEmail: footer.showEmail ?? (hasLegacyEmails ? legacyEmails! : defaults.showEmail),
+    showViber: footer.showViber ?? (hasLegacyPhones ? legacyPhones! : defaults.showViber),
+    showTelegram: footer.showTelegram ?? (hasLegacyPhones ? legacyPhones! : defaults.showTelegram),
+    showWhatsApp: footer.showWhatsApp ?? (hasLegacyPhones ? legacyPhones! : defaults.showWhatsApp),
+    showLink:
+      footer.showLink ??
+      (hasLegacyPhones || hasLegacyEmails
+        ? Boolean(legacyPhones) || Boolean(legacyEmails)
+        : defaults.showLink),
+    showSchedules: footer.showSchedules ?? defaults.showSchedules,
   }
 }
 
@@ -90,13 +207,19 @@ function normalizeSocial(raw: LegacyStoreContact): StoreSocialLinks {
 }
 
 export function normalizeStoreContactSettings(raw: LegacyStoreContact): StoreContactSettings {
+  let contactBlocks = normalizeContactBlocks(raw)
+  if (!contactBlocks.length) {
+    contactBlocks = DEFAULT_CONTACT_BLOCKS
+  }
+
   return {
     addressLine1: raw.addressLine1?.trim() || DEFAULT_STORE_SETTINGS.addressLine1,
     addressLine2: raw.addressLine2?.trim() || DEFAULT_STORE_SETTINGS.addressLine2,
     mapsUrl: raw.mapsUrl?.trim() || DEFAULT_MAPS_URL,
     mapsEmbedUrl: raw.mapsEmbedUrl?.trim() || undefined,
-    phones: normalizePhones(raw),
-    emails: normalizeEmails(raw),
+    contactBlocks,
+    phones: derivePhonesFromContactBlocks(contactBlocks),
+    emails: deriveEmailsFromContactBlocks(contactBlocks),
     schedules: normalizeSchedules(raw),
     footer: normalizeFooter(raw),
     social: normalizeSocial(raw),

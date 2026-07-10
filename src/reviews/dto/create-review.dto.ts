@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsEmail,
   IsInt,
   IsOptional,
@@ -47,6 +49,17 @@ export class CreateReviewDto {
     message: 'Некоректне посилання на зображення.',
   })
   image?: string
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @IsString({ each: true })
+  @MaxLength(300, { each: true })
+  @Matches(REVIEW_IMAGE_PATH_REGEX, {
+    each: true,
+    message: 'Некоректне посилання на зображення.',
+  })
+  images?: string[]
 
   @IsInt()
   @Min(1)

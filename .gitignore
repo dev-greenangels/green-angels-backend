@@ -4,6 +4,10 @@
 /build
 /tmp
 
+# Estimate photo uploads (keep folder, ignore files)
+/uploads/**
+!/uploads/**/.gitkeep
+
 # Logs
 logs
 *.log

@@ -1,5 +1,7 @@
 import { DiscountTarget, DiscountValueType, Role } from '@prisma/client'
 
+import type { CategoryDescendantMap } from './category-scope.util'
+import { expandCategoryIds } from './category-scope.util'
 import type { ScopeMatchInput } from './pricing.types'
 
 export function roundMoney(value: number): number {
@@ -40,6 +42,31 @@ export function matchesAudience(
 export type ScopeExclusions = {
   productIds?: string[]
   variantIds?: string[]
+  categoryIds?: string[]
+}
+
+function productCategoryIdSet(variant: {
+  product: {
+    categoryId: string
+    additionalCategories: Array<{ categoryId: string }>
+  }
+}): Set<string> {
+  return new Set([
+    variant.product.categoryId,
+    ...variant.product.additionalCategories.map((row) => row.categoryId),
+  ])
+}
+
+function matchesExcludedCategories(
+  productCategoryIds: Set<string>,
+  excludeCategoryIds: string[],
+  categoryExpansion?: CategoryDescendantMap,
+): boolean {
+  if (!excludeCategoryIds.length) return false
+  const expanded = categoryExpansion
+    ? expandCategoryIds(excludeCategoryIds, categoryExpansion)
+    : new Set(excludeCategoryIds)
+  return [...productCategoryIds].some((id) => expanded.has(id))
 }
 
 export function matchesScope(
@@ -53,21 +80,33 @@ export function matchesScope(
     }
   },
   exclusions?: ScopeExclusions,
+  categoryExpansion?: CategoryDescendantMap,
 ): boolean {
   if (exclusions?.variantIds?.includes(variant.id)) return false
   if (exclusions?.productIds?.includes(variant.product.id)) return false
 
-  const productCategoryIds = new Set([
-    variant.product.categoryId,
-    ...variant.product.additionalCategories.map((row) => row.categoryId),
-  ])
+  const productCategoryIds = productCategoryIdSet(variant)
+  if (matchesExcludedCategories(productCategoryIds, exclusions?.categoryIds ?? [], categoryExpansion)) {
+    return false
+  }
 
   switch (rule.target) {
     case DiscountTarget.ALL_PRODUCTS:
       return true
-    case DiscountTarget.CATEGORY:
-      if (rule.targetId && productCategoryIds.has(rule.targetId)) return true
-      return rule.targetIds.some((id) => productCategoryIds.has(id))
+    case DiscountTarget.CATEGORY: {
+      const targetCategoryIds = [
+        ...(rule.targetId ? [rule.targetId] : []),
+        ...rule.targetIds,
+      ]
+      if (!targetCategoryIds.length) return false
+
+      if (categoryExpansion) {
+        const expandedTargets = expandCategoryIds(targetCategoryIds, categoryExpansion)
+        return [...productCategoryIds].some((id) => expandedTargets.has(id))
+      }
+
+      return targetCategoryIds.some((id) => productCategoryIds.has(id))
+    }
     case DiscountTarget.PRODUCT:
       if (rule.targetId && rule.targetId === variant.product.id) return true
       return rule.targetIds.includes(variant.product.id)

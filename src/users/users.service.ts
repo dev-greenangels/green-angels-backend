@@ -92,12 +92,6 @@ export class UsersService {
     return isOrderStatus(upper) ? upper : 'PENDING'
   }
 
-  private readVariantLabel(attributes: unknown): string | null {
-    if (!attributes || typeof attributes !== 'object') return null
-    const label = (attributes as { label?: unknown }).label
-    return typeof label === 'string' && label.trim() ? label.trim() : null
-  }
-
   async createStaff(dto: CreateStaffDto): Promise<BackstageUserListItem> {
     const email = dto.email.trim().toLowerCase()
     const existing = await this.prisma.user.findUnique({ where: { email } })
@@ -150,16 +144,44 @@ export class UsersService {
         { lastName: { contains: search, mode: 'insensitive' } },
         { patronymic: { contains: search, mode: 'insensitive' } },
         { phone: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
       ]
-      if (search.includes('@')) {
-        or.push({ email: { contains: search, mode: 'insensitive' } })
+
+      const parts = search.split(/\s+/).filter(Boolean)
+      if (parts.length >= 2) {
+        const [first, second] = parts
+        or.push({
+          AND: [
+            {
+              OR: [
+                { firstName: { contains: first, mode: 'insensitive' } },
+                { lastName: { contains: first, mode: 'insensitive' } },
+                { patronymic: { contains: first, mode: 'insensitive' } },
+              ],
+            },
+            {
+              OR: [
+                { firstName: { contains: second, mode: 'insensitive' } },
+                { lastName: { contains: second, mode: 'insensitive' } },
+                { patronymic: { contains: second, mode: 'insensitive' } },
+              ],
+            },
+          ],
+        })
       }
+
+      const digits = search.replace(/\D/g, '')
+      if (digits.length >= 4) {
+        or.push({ phone: { contains: digits, mode: 'insensitive' } })
+      }
+
       where.OR = or
     }
 
     const users = await this.prisma.user.findMany({
       where,
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { createdAt: 'desc' }],
+      take: search ? 25 : 50,
       include: { _count: { select: { orders: true } } },
     })
 
@@ -301,20 +323,7 @@ export class UsersService {
           orderBy: { createdAt: 'desc' },
           include: {
             items: {
-              include: {
-                productVariant: {
-                  include: {
-                    product: {
-                      include: {
-                        translations: {
-                          where: { locale: DEFAULT_LOCALE },
-                          take: 1,
-                        },
-                      },
-                    },
-                  },
-                },
-              },
+              orderBy: { id: 'asc' },
             },
           },
         },
@@ -354,15 +363,12 @@ export class UsersService {
         deliveryStreet: order.deliveryStreet,
         deliveryHouseNumber: order.deliveryHouseNumber,
         items: order.items.map((item) => {
-          const variant = item.productVariant
-          const product = variant.product
-          const productName = product.translations[0]?.name ?? product.slug
           const lineTotal =
             Math.round(Number(item.priceAtPurchase) * item.quantity * 100) / 100
           return {
             id: item.id,
-            productName,
-            variantLabel: this.readVariantLabel(variant.attributes),
+            productName: item.productName,
+            variantLabel: item.variantLabel,
             quantity: item.quantity,
             priceAtPurchase: Number(item.priceAtPurchase),
             lineTotal,

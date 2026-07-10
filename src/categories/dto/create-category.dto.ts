@@ -44,6 +44,10 @@ export class CreateCategoryDto {
 
   @IsOptional()
   @IsString()
+  footerDescription?: string
+
+  @IsOptional()
+  @IsString()
   @MaxLength(500)
   image?: string
 
@@ -55,6 +59,10 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  isCatalogRoot?: boolean
 
   @IsOptional()
   @IsInt()

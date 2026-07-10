@@ -23,3 +23,8 @@ export function normalizePhoneE164(phone: string): string | null {
   if (digits.length >= 10) return `+${digits}`
   return null
 }
+
+/** Формат номера для TurboSMS API (380XXXXXXXXX). */
+export function phoneE164ToTurboSms(phone: string): string {
+  return phone.replace(/\D/g, '')
+}

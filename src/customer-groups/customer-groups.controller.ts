@@ -3,13 +3,13 @@ import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
-import { JwtAuthGuard } from '../auth/jwt-auth.guard'
+import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { CustomerGroupsService } from './customer-groups.service'
 import { CreateCustomerGroupDto } from './dto/create-customer-group.dto'
 import { UpdateCustomerGroupDto } from './dto/update-customer-group.dto'
 
 @Controller('customer-groups')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(BackstageJwtAuthGuard, RolesGuard)
 @Roles(Role.ADMIN, Role.MANAGER)
 export class CustomerGroupsController {
   constructor(private readonly groups: CustomerGroupsService) {}

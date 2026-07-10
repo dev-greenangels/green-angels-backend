@@ -5,22 +5,40 @@ import {
   DEFAULT_CART_CHECKOUT_SETTINGS,
   DEFAULT_CATALOG_SETTINGS,
   DEFAULT_HOME_SETTINGS,
+  DEFAULT_LOCALIZATION_SETTINGS,
+  DEFAULT_RECENTLY_VIEWED_SETTINGS,
   DEFAULT_STORE_SETTINGS,
+  DEFAULT_VARIANT_LABEL_SETTINGS,
   SETTINGS_KEYS,
   type CartCheckoutSettings,
   type CatalogPageSettings,
   type HomePageSettings,
+  type LocalizationSettings,
+  type RecentlyViewedSettings,
   type StoreContactSettings,
+  type VariantLabelSettings,
 } from './settings.constants'
+import { normalizeLocalizationSettings } from './localization.normalize'
+import { normalizeRecentlyViewedSettings } from './recently-viewed.normalize'
 import { normalizeCartCheckoutSettings } from './cart-checkout.normalize'
+import { normalizeCatalogPageSettings } from './catalog.normalize'
+import { normalizeVariantLabelSettings } from './variant-label.normalize'
 import { UpdateStoreSettingsDto } from './dto/update-store-settings.dto'
 import { normalizeStoreContactSettings } from './store-contact.normalize'
+import { normalizeNavigationSettings } from './navigation.normalize'
+import {
+  DEFAULT_NAVIGATION_SETTINGS,
+  type NavigationSettings,
+} from './navigation.types'
 
 export type PublicSiteSettings = {
   store: StoreContactSettings
   home: HomePageSettings
   cart: CartCheckoutSettings
   catalog: CatalogPageSettings
+  recentlyViewed: RecentlyViewedSettings
+  localization: LocalizationSettings
+  navigation: NavigationSettings
 }
 
 export type BackstageSiteSettings = PublicSiteSettings
@@ -95,17 +113,41 @@ export class SettingsService {
   }
 
   async getCatalogPageSettings(): Promise<CatalogPageSettings> {
-    return this.readSetting(SETTINGS_KEYS.CATALOG_PAGE, DEFAULT_CATALOG_SETTINGS)
+    const raw = await this.readSetting(SETTINGS_KEYS.CATALOG_PAGE, DEFAULT_CATALOG_SETTINGS)
+    return normalizeCatalogPageSettings(raw)
+  }
+
+  async getRecentlyViewedSettings(): Promise<RecentlyViewedSettings> {
+    const raw = await this.readSetting(SETTINGS_KEYS.RECENTLY_VIEWED, DEFAULT_RECENTLY_VIEWED_SETTINGS)
+    return normalizeRecentlyViewedSettings(raw)
+  }
+
+  async getLocalizationSettings(): Promise<LocalizationSettings> {
+    const raw = await this.readSetting(SETTINGS_KEYS.LOCALIZATION, DEFAULT_LOCALIZATION_SETTINGS)
+    return normalizeLocalizationSettings(raw)
+  }
+
+  async getVariantLabelSettings(): Promise<VariantLabelSettings> {
+    const raw = await this.readSetting(SETTINGS_KEYS.VARIANT_LABELS, DEFAULT_VARIANT_LABEL_SETTINGS)
+    return normalizeVariantLabelSettings(raw)
+  }
+
+  async getNavigationSettings(): Promise<NavigationSettings> {
+    const raw = await this.readSetting(SETTINGS_KEYS.NAVIGATION, DEFAULT_NAVIGATION_SETTINGS)
+    return normalizeNavigationSettings(raw)
   }
 
   async getPublicSettings(): Promise<PublicSiteSettings> {
-    const [store, home, cart, catalog] = await Promise.all([
+    const [store, home, cart, catalog, recentlyViewed, localization, navigation] = await Promise.all([
       this.readStoreSettings(),
       this.readSetting(SETTINGS_KEYS.HOME_PAGE, DEFAULT_HOME_SETTINGS),
       this.getCartCheckoutSettings(),
       this.getCatalogPageSettings(),
+      this.getRecentlyViewedSettings(),
+      this.getLocalizationSettings(),
+      this.getNavigationSettings(),
     ])
-    return { store, home, cart, catalog }
+    return { store, home, cart, catalog, recentlyViewed, localization, navigation }
   }
 
   async getBackstageSettings(): Promise<BackstageSiteSettings> {
@@ -120,6 +162,16 @@ export class SettingsService {
       addressLine2: dto.addressLine2 ?? current.addressLine2,
       mapsUrl: dto.mapsUrl ?? current.mapsUrl,
       mapsEmbedUrl: dto.mapsEmbedUrl ?? current.mapsEmbedUrl,
+      contactBlocks: dto.contactBlocks
+        ? dto.contactBlocks.map((block) => ({
+            title: block.title,
+            lines: block.lines.map((line) => ({
+              type: line.type,
+              label: line.label,
+              value: line.value ?? '',
+            })),
+          }))
+        : current.contactBlocks,
       phones: dto.phones ?? current.phones,
       emails: dto.emails ?? current.emails,
       schedules: dto.schedules ?? current.schedules,
@@ -166,18 +218,49 @@ export class SettingsService {
       current as unknown as Record<string, unknown>,
       patch as unknown as Record<string, unknown>,
     ) as CatalogPageSettings
-    const normalized: CatalogPageSettings = {
-      categoryDisplay: next.categoryDisplay ?? DEFAULT_CATALOG_SETTINGS.categoryDisplay,
-      visibleCategoryIds: Array.isArray(next.visibleCategoryIds)
-        ? [
-            ...new Set(
-              next.visibleCategoryIds.filter(
-                (id): id is string => typeof id === 'string' && id.trim() !== '',
-              ),
-            ),
-          ]
-        : DEFAULT_CATALOG_SETTINGS.visibleCategoryIds,
-    }
+    const normalized = normalizeCatalogPageSettings(next)
     return this.writeSetting(SETTINGS_KEYS.CATALOG_PAGE, normalized)
+  }
+
+  async updateRecentlyViewed(patch: Partial<RecentlyViewedSettings>): Promise<RecentlyViewedSettings> {
+    const current = await this.getRecentlyViewedSettings()
+    const merged = this.deepMerge(
+      current as unknown as Record<string, unknown>,
+      patch as unknown as Record<string, unknown>,
+    ) as RecentlyViewedSettings
+    const next = normalizeRecentlyViewedSettings(merged)
+    return this.writeSetting(SETTINGS_KEYS.RECENTLY_VIEWED, next)
+  }
+
+  async updateLocalization(patch: Partial<LocalizationSettings>): Promise<LocalizationSettings> {
+    const current = await this.getLocalizationSettings()
+    const merged = this.deepMerge(
+      current as unknown as Record<string, unknown>,
+      patch as unknown as Record<string, unknown>,
+    ) as LocalizationSettings
+    const next = normalizeLocalizationSettings(merged)
+    return this.writeSetting(SETTINGS_KEYS.LOCALIZATION, next)
+  }
+
+  async updateVariantLabelSettings(
+    patch: Partial<VariantLabelSettings>,
+  ): Promise<VariantLabelSettings> {
+    const current = await this.getVariantLabelSettings()
+    const next = normalizeVariantLabelSettings({
+      ...current,
+      ...patch,
+      labelTypeOrder: patch.labelTypeOrder ?? current.labelTypeOrder,
+    })
+    return this.writeSetting(SETTINGS_KEYS.VARIANT_LABELS, next)
+  }
+
+  async updateNavigation(patch: Partial<NavigationSettings>): Promise<NavigationSettings> {
+    const current = await this.getNavigationSettings()
+    const next = normalizeNavigationSettings({
+      ...current,
+      ...patch,
+      items: patch.items ?? current.items,
+    })
+    return this.writeSetting(SETTINGS_KEYS.NAVIGATION, next)
   }
 }

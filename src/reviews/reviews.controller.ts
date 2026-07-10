@@ -15,10 +15,12 @@ import type { Request } from 'express'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
+import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 import type { SessionJwtPayload } from '../auth/auth.constants'
 import { CreateReviewDto } from './dto/create-review.dto'
 import { ReviewQueryDto } from './dto/review-query.dto'
+import { UpdateReviewReplyDto } from './dto/update-review-reply.dto'
 import { UpdateReviewStatusDto } from './dto/update-review-status.dto'
 import { ReviewsService } from './reviews.service'
 
@@ -41,21 +43,28 @@ export class ReviewsController {
   }
 
   @Get('backstage/all')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)
   findAllBackstage(@Query() query: ReviewQueryDto) {
     return this.reviews.findAllBackstage(query)
   }
 
   @Patch(':id/status')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)
   updateStatus(@Param('id') id: string, @Body() dto: UpdateReviewStatusDto) {
     return this.reviews.updateStatus(id, dto)
   }
 
+  @Patch(':id/reply')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  updateReply(@Param('id') id: string, @Body() dto: UpdateReviewReplyDto) {
+    return this.reviews.updateReply(id, dto)
+  }
+
   @Delete(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)
   remove(@Param('id') id: string) {
     return this.reviews.remove(id)

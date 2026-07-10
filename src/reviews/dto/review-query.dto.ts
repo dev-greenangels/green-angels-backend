@@ -9,6 +9,11 @@ export enum ReviewTypeFilter {
   PRODUCT = 'product',
 }
 
+export enum ReviewSortOrder {
+  NEWEST = 'newest',
+  OLDEST = 'oldest',
+}
+
 export class ReviewQueryDto {
   @IsOptional()
   @IsEnum(ReviewTypeFilter)
@@ -28,4 +33,21 @@ export class ReviewQueryDto {
   @IsOptional()
   @IsEnum(ReviewStatus)
   status?: ReviewStatus
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  pageSize?: number
+
+  @IsOptional()
+  @IsEnum(ReviewSortOrder)
+  sort?: ReviewSortOrder
 }

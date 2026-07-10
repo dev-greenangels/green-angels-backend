@@ -3,7 +3,7 @@ import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
-import { JwtAuthGuard } from '../auth/jwt-auth.guard'
+import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { BlogService } from './blog.service'
 import { CreateBlogPostDto } from './dto/create-blog-post.dto'
 import { UpdateBlogPostDto } from './dto/update-blog-post.dto'
@@ -18,7 +18,7 @@ export class BlogController {
   }
 
   @Get('id/:id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)
   findById(@Param('id') id: string) {
     return this.blog.findById(id)
@@ -30,21 +30,21 @@ export class BlogController {
   }
 
   @Post()
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)
   create(@Body() dto: CreateBlogPostDto) {
     return this.blog.create(dto)
   }
 
   @Patch(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)
   update(@Param('id') id: string, @Body() dto: UpdateBlogPostDto) {
     return this.blog.update(id, dto)
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)
   remove(@Param('id') id: string) {
     return this.blog.remove(id)

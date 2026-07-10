@@ -3,11 +3,36 @@ import {
   IsArray,
   IsBoolean,
   IsEmail,
+  IsIn,
   IsOptional,
   IsString,
   MinLength,
   ValidateNested,
 } from 'class-validator'
+
+class StoreContactLineDto {
+  @IsIn(['phone', 'email', 'viber', 'telegram', 'whatsapp', 'link'])
+  type!: 'phone' | 'email' | 'viber' | 'telegram' | 'whatsapp' | 'link'
+
+  @IsOptional()
+  @IsString()
+  label?: string
+
+  @IsOptional()
+  @IsString()
+  value?: string
+}
+
+class StoreContactBlockDto {
+  @IsString()
+  @MinLength(1)
+  title!: string
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => StoreContactLineDto)
+  lines!: StoreContactLineDto[]
+}
 
 class StorePhoneContactDto {
   @IsString()
@@ -45,15 +70,41 @@ class StoreFooterVisibilityDto {
 
   @IsOptional()
   @IsBoolean()
-  showPhones?: boolean
+  showPhone?: boolean
 
   @IsOptional()
   @IsBoolean()
-  showEmails?: boolean
+  showEmail?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  showViber?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  showTelegram?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  showWhatsApp?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  showLink?: boolean
 
   @IsOptional()
   @IsBoolean()
   showSchedules?: boolean
+
+  /** @deprecated використовуйте окремі поля showPhone, showViber тощо */
+  @IsOptional()
+  @IsBoolean()
+  showPhones?: boolean
+
+  /** @deprecated використовуйте showEmail */
+  @IsOptional()
+  @IsBoolean()
+  showEmails?: boolean
 }
 
 class StoreHoursScheduleDto {
@@ -127,6 +178,12 @@ export class UpdateStoreSettingsDto {
   @IsString()
   @MinLength(8)
   mapsEmbedUrl?: string
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => StoreContactBlockDto)
+  contactBlocks?: StoreContactBlockDto[]
 
   @IsOptional()
   @IsArray()

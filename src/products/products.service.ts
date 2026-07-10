@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
-import { Prisma, VariantQuantityDiscountType } from '@prisma/client'
+import { Prisma, VariantAttributeType, VariantQuantityDiscountType } from '@prisma/client'
 
 import {
   VariantQuantityDiscountTypeDto,
@@ -12,13 +12,34 @@ import {
 } from './dto/variant-quantity-price.dto'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { CommerceService } from '../commerce/commerce.service'
+import { RETAIL_PRICE_TYPE } from '../commerce/commerce.constants'
+import { CategoriesService } from '../categories/categories.service'
+import { sortUkrainianAlphabetLetters, UKRAINIAN_ALPHABET } from '../catalog/ukrainian-alphabet'
+import { normalizeSearchQuery } from '../search/normalize-search-query'
+import { ProductSearchService } from '../search/product-search.service'
 import { CreateProductDto } from './dto/create-product.dto'
 import { BulkProductAction, BulkProductsDto } from './dto/bulk-products.dto'
 import { CreateProductVariantDto } from './dto/create-product-variant.dto'
 import { ProductImageDto } from './dto/product-image.dto'
-import { ProductCharacteristicsDto } from './dto/product-characteristics.dto'
+import { ProductCharacteristicsDto, ProductDisplayCharacteristic } from './dto/product-characteristics.dto'
 import { UpdateProductDto } from './dto/update-product.dto'
 import { ProductCharacteristicsService } from './product-characteristics.service'
+import { type CatalogAvailableFacets, groupSlugFilterPairs } from './product-filter.util'
+import { VARIANT_LABEL_ATTRIBUTE_SELECT } from './variant-label.util'
+import { VariantLabelService } from './variant-label.service'
+
+export type CatalogStorefrontVariant = {
+  id: string
+  ean: string | null
+  label: string | null
+  price: number
+  stock: number
+  availableFrom: string | null
+  salesUnitId: string | null
+  salesUnitSymbol: string | null
+  quantityPrices: BackstageVariantQuantityPrice[]
+}
 
 export type BackstageProductListItem = {
   id: string
@@ -38,6 +59,9 @@ export type BackstageProductListItem = {
   imageUrl: string | null
   characteristics: ProductCharacteristicsDto
   createdAt: string
+  maxDiscountPercent: number | null
+  pricingMode: 'simple' | 'variants'
+  variants: CatalogStorefrontVariant[]
 }
 
 export type PaginatedBackstageProducts = {
@@ -67,6 +91,8 @@ export type BackstageProductVariant = {
   label: string | null
   attributeValueIds: string[]
   availableFrom: string | null
+  salesUnitId: string | null
+  salesUnitSymbol: string | null
   quantityPrices: BackstageVariantQuantityPrice[]
 }
 
@@ -75,6 +101,7 @@ export type BackstageProductDetail = BackstageProductListItem & {
   metaTitle: string | null
   metaDesc: string | null
   additionalCategoryIds: string[]
+  displayCharacteristics: ProductDisplayCharacteristic[]
   pricingMode: 'simple' | 'variants'
   variants: BackstageProductVariant[]
   images: string[]
@@ -85,7 +112,15 @@ export class ProductsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly productCharacteristics: ProductCharacteristicsService,
+    private readonly productSearch: ProductSearchService,
+    private readonly categories: CategoriesService,
+    private readonly variantLabels: VariantLabelService,
+    private readonly commerce: CommerceService,
   ) {}
+
+  private retailPriceFilter(currency: string) {
+    return { priceType: RETAIL_PRICE_TYPE, currency }
+  }
 
   private defaultLocale(locale?: string) {
     return (locale?.trim() || 'uk').toLowerCase()
@@ -104,10 +139,16 @@ export class ProductsService {
     return dto.variants
   }
 
-  private readVariantLabel(attributes: unknown): string | null {
-    if (!attributes || typeof attributes !== 'object') return null
-    const label = (attributes as { label?: unknown }).label
-    return typeof label === 'string' && label.trim() ? label.trim() : null
+  private readVariantLabel(
+    attributeValues: Array<{
+      value: {
+        translations: Array<{ label: string }>
+        attribute?: { sortOrder: number; participatesInLabel: boolean; valueType?: VariantAttributeType }
+      }
+    }>,
+    typeOrder: VariantAttributeType[],
+  ): string | null {
+    return this.variantLabels.buildFromLinksWithOrder(attributeValues, typeOrder)
   }
 
   private inferPricingMode(
@@ -158,6 +199,116 @@ export class ProductsService {
     return value
   }
 
+  private isQuantityPriceActive(
+    row: { validFrom: Date | null; validTo: Date | null },
+    now = new Date(),
+  ) {
+    if (row.validFrom && now < row.validFrom) return false
+    if (row.validTo) {
+      const to = new Date(row.validTo)
+      to.setHours(23, 59, 59, 999)
+      if (now > to) return false
+    }
+    return true
+  }
+
+  private computeMaxDiscountPercent(
+    variants: Array<{
+      stock: number
+      prices: Array<{ value: Prisma.Decimal; compareAtValue: Prisma.Decimal | null }>
+      quantityPrices?: Array<{
+        minQuantity: number
+        discountType: VariantQuantityDiscountType
+        value: Prisma.Decimal
+        validFrom: Date | null
+        validTo: Date | null
+      }>
+    }>,
+  ): number | null {
+    const now = new Date()
+    let maxPercent = 0
+
+    for (const variant of variants) {
+      if (variant.stock <= 0) continue
+      const priceRow = variant.prices[0]
+      if (!priceRow) continue
+      const basePrice = Number(priceRow.value)
+      if (basePrice <= 0) continue
+
+      if (priceRow.compareAtValue != null) {
+        const compareAt = Number(priceRow.compareAtValue)
+        if (compareAt > basePrice) {
+          maxPercent = Math.max(maxPercent, Math.round((1 - basePrice / compareAt) * 100))
+        }
+      }
+
+      for (const row of variant.quantityPrices ?? []) {
+        if (!this.isQuantityPriceActive(row, now)) continue
+        const salePrice = this.resolveDiscountUnitPrice(
+          basePrice,
+          this.toDiscountTypeDto(row.discountType),
+          Number(row.value),
+        )
+        if (salePrice < basePrice - 0.001) {
+          maxPercent = Math.max(maxPercent, Math.round((1 - salePrice / basePrice) * 100))
+        }
+      }
+    }
+
+    return maxPercent > 0 ? maxPercent : null
+  }
+
+  private toListVariantSummary(
+    variant: {
+      id: string
+      ean?: string | null
+      stock: number
+      availableFrom: Date | null
+      salesUnitId?: string | null
+      salesUnit?: { symbol: string } | null
+      prices: Array<{ value: Prisma.Decimal }>
+      quantityPrices?: Array<{
+        id: string
+        minQuantity: number
+        discountType: VariantQuantityDiscountType
+        value: Prisma.Decimal
+        validFrom: Date | null
+        validTo: Date | null
+        sortOrder: number
+      }>
+      attributeValues: Array<{
+        value: {
+          translations: Array<{ label: string }>
+          attribute?: { sortOrder: number; participatesInLabel: boolean; valueType?: VariantAttributeType }
+        }
+      }>
+    },
+    typeOrder: VariantAttributeType[],
+  ): CatalogStorefrontVariant {
+    const priceRow = variant.prices[0]
+
+    return {
+      id: variant.id,
+      ean: variant.ean ?? null,
+      label: this.readVariantLabel(variant.attributeValues, typeOrder),
+      price: priceRow ? Number(priceRow.value) : 0,
+      stock: variant.stock,
+      availableFrom: this.toIsoDate(variant.availableFrom),
+      salesUnitId: variant.salesUnitId ?? null,
+      salesUnitSymbol: variant.salesUnit?.symbol ?? null,
+      quantityPrices: [...(variant.quantityPrices ?? [])]
+        .sort((a, b) => a.minQuantity - b.minQuantity || a.sortOrder - b.sortOrder)
+        .map((row) => ({
+          id: row.id,
+          minQuantity: row.minQuantity,
+          discountType: this.toDiscountTypeDto(row.discountType),
+          value: Number(row.value),
+          validFrom: this.toIsoDate(row.validFrom),
+          validTo: this.toIsoDate(row.validTo),
+        })),
+    }
+  }
+
   private toVariantNode(
     variant: {
       id: string
@@ -166,9 +317,16 @@ export class ProductsService {
       stock: number
       legacyId: string | null
       availableFrom: Date | null
-      attributes: unknown
+      salesUnitId?: string | null
+      salesUnit?: { symbol: string } | null
       prices: Array<{ value: Prisma.Decimal; compareAtValue: Prisma.Decimal | null }>
-      attributeValues: Array<{ valueId: string }>
+      attributeValues: Array<{
+        valueId: string
+        value: {
+          translations: Array<{ label: string }>
+          attribute?: { sortOrder: number; participatesInLabel: boolean; valueType?: VariantAttributeType }
+        }
+      }>
       quantityPrices: Array<{
         id: string
         minQuantity: number
@@ -179,6 +337,7 @@ export class ProductsService {
         sortOrder: number
       }>
     },
+    typeOrder: VariantAttributeType[],
   ): BackstageProductVariant {
     const priceRow = variant.prices[0]
     return {
@@ -188,9 +347,11 @@ export class ProductsService {
       stock: variant.stock,
       price: priceRow ? Number(priceRow.value) : 0,
       legacyId: variant.legacyId,
-      label: this.readVariantLabel(variant.attributes),
+      label: this.readVariantLabel(variant.attributeValues, typeOrder),
       attributeValueIds: variant.attributeValues.map((row) => row.valueId),
       availableFrom: this.toIsoDate(variant.availableFrom),
+      salesUnitId: variant.salesUnitId ?? null,
+      salesUnitSymbol: variant.salesUnit?.symbol ?? null,
       quantityPrices: [...variant.quantityPrices]
         .sort((a, b) => a.minQuantity - b.minQuantity || a.sortOrder - b.sortOrder)
         .map((row) => ({
@@ -233,26 +394,37 @@ export class ProductsService {
         option: { slug: string } | null
       }>
       variants: Array<{
+        id: string
         sku: string | null
+        ean?: string | null
         stock: number
-        attributes: unknown
+        availableFrom: Date | null
+        salesUnitId?: string | null
+        salesUnit?: { symbol: string } | null
         prices: Array<{ value: Prisma.Decimal; compareAtValue: Prisma.Decimal | null }>
+        quantityPrices?: Array<{
+          id: string
+          minQuantity: number
+          discountType: VariantQuantityDiscountType
+          value: Prisma.Decimal
+          validFrom: Date | null
+          validTo: Date | null
+          sortOrder: number
+        }>
         attributeValues: Array<{
-          value: { translations: Array<{ label: string }> }
+          value: {
+            translations: Array<{ label: string }>
+            attribute?: { sortOrder: number; participatesInLabel: boolean }
+          }
         }>
       }>
       _count: { variants: number }
     },
     slugFallback?: string,
+    typeOrder: VariantAttributeType[] = [],
   ): BackstageProductListItem {
     const firstVariant = product.variants[0]
     const priceRow = firstVariant?.prices[0]
-    const labelFromJson = firstVariant ? this.readVariantLabel(firstVariant.attributes) : null
-    const labelFromAttrs =
-      firstVariant?.attributeValues
-        .map((link) => link.value.translations[0]?.label)
-        .filter(Boolean)
-        .join(' / ') || null
 
     return {
       id: product.id,
@@ -269,14 +441,19 @@ export class ProductsService {
       sku: firstVariant?.sku ?? null,
       price: priceRow ? Number(priceRow.value) : null,
       stock: product.variants.reduce((sum, variant) => sum + variant.stock, 0),
-      variantLabel: labelFromJson ?? labelFromAttrs,
+      variantLabel: firstVariant
+        ? this.readVariantLabel(firstVariant.attributeValues, typeOrder)
+        : null,
       imageUrl: this.resolveMainImageUrl(product.images),
       characteristics: this.productCharacteristics.toCharacteristicsDto(product.characteristics),
       createdAt: product.createdAt.toISOString(),
+      maxDiscountPercent: this.computeMaxDiscountPercent(product.variants),
+      pricingMode: this.inferPricingMode(product.variants),
+      variants: product.variants.map((variant) => this.toListVariantSummary(variant, typeOrder)),
     }
   }
 
-  private listInclude(locale: string) {
+  private listInclude(locale: string, currency: string) {
     return {
       translations: { where: { locale } },
       category: { include: { translations: { where: { locale } } } },
@@ -289,14 +466,20 @@ export class ProductsService {
       },
       variants: {
         include: {
+          salesUnit: { select: { id: true, symbol: true } },
           prices: {
-            where: { priceType: 'роздріб', currency: 'UAH' },
+            where: this.retailPriceFilter(currency),
             take: 1,
           },
           quantityPrices: { orderBy: [{ minQuantity: 'asc' as const }, { sortOrder: 'asc' as const }] },
           attributeValues: {
             include: {
-              value: { include: { translations: { where: { locale } } } },
+              value: {
+                include: {
+                  translations: { where: { locale } },
+                  attribute: { select: VARIANT_LABEL_ATTRIBUTE_SELECT },
+                },
+              },
             },
           },
         },
@@ -306,16 +489,702 @@ export class ProductsService {
     }
   }
 
-  private detailInclude(locale: string) {
+  private detailInclude(locale: string, currency: string) {
     return {
-      ...this.listInclude(locale),
+      ...this.listInclude(locale, currency),
       additionalCategories: { select: { categoryId: true } },
       characteristics: {
         include: {
-          characteristic: { select: { slug: true } },
-          option: { select: { slug: true } },
+          characteristic: {
+            include: {
+              translations: { where: { locale } },
+            },
+          },
+          option: {
+            include: {
+              translations: { where: { locale } },
+            },
+          },
         },
       },
+    }
+  }
+
+  private catalogSortSelect(locale: string, currency: string) {
+    return {
+      id: true,
+      slug: true,
+      createdAt: true,
+      restockedAt: true,
+      translations: { where: { locale }, select: { name: true } },
+      variants: {
+        select: {
+          stock: true,
+          prices: {
+            where: this.retailPriceFilter(currency),
+            take: 1,
+            select: { value: true },
+          },
+        },
+      },
+    } satisfies Prisma.ProductSelect
+  }
+
+  private catalogSortTotalStock(variants: Array<{ stock: number }>): number {
+    return variants.filter((variant) => variant.stock > 0).reduce((sum, variant) => sum + variant.stock, 0)
+  }
+
+  private filterLowStockRows<T extends { variants: Array<{ stock: number }> }>(
+    rows: T[],
+    threshold: number,
+  ): T[] {
+    return rows.filter((row) => {
+      const total = this.catalogSortTotalStock(row.variants)
+      return total > 0 && total <= threshold
+    })
+  }
+
+  async touchProductAvailability(
+    productId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const client = tx ?? this.prisma
+    const variants = await client.productVariant.findMany({
+      where: { productId },
+      select: { stock: true },
+    })
+    if (!variants.length) return
+
+    const inStock = variants.some((variant) => variant.stock > 0)
+    const product = await client.product.findUnique({
+      where: { id: productId },
+      select: { fullyOutOfStockAt: true, restockedAt: true, createdAt: true },
+    })
+    if (!product) return
+
+    if (inStock) {
+      if (product.fullyOutOfStockAt != null) {
+        await client.product.update({
+          where: { id: productId },
+          data: { restockedAt: new Date(), fullyOutOfStockAt: null },
+        })
+      } else if (product.restockedAt == null) {
+        await client.product.update({
+          where: { id: productId },
+          data: { restockedAt: product.createdAt },
+        })
+      }
+      return
+    }
+
+    if (product.fullyOutOfStockAt == null) {
+      await client.product.update({
+        where: { id: productId },
+        data: { fullyOutOfStockAt: new Date() },
+      })
+    }
+  }
+
+  private isProductInStock(
+    variants: Array<{ stock: number }>,
+  ): boolean {
+    return variants.some((variant) => variant.stock > 0)
+  }
+
+  private catalogSortPrice(
+    variants: Array<{ stock: number; prices: Array<{ value: Prisma.Decimal }> }>,
+  ): number {
+    const priced = variants
+      .filter((variant) => variant.stock > 0)
+      .flatMap((variant) => variant.prices.map((price) => Number(price.value)))
+      .filter((value) => Number.isFinite(value) && value > 0)
+
+    if (priced.length > 0) return Math.min(...priced)
+
+    const fallback = variants
+      .flatMap((variant) => variant.prices.map((price) => Number(price.value)))
+      .filter((value) => Number.isFinite(value) && value > 0)
+
+    return fallback.length > 0 ? Math.min(...fallback) : Number.MAX_SAFE_INTEGER
+  }
+
+  async getCatalogPriceBounds(params: {
+    locale?: string
+    categoryId?: string
+    categorySlug?: string
+    search?: string
+  }): Promise<{ min: number; max: number }> {
+    const locale = this.defaultLocale(params.locale)
+    const normalizedSearch = params.search ? normalizeSearchQuery(params.search) : ''
+    const currency = await this.commerce.getDefaultCurrencyCode()
+
+    let productWhere: Prisma.ProductWhereInput | undefined
+
+    if (normalizedSearch) {
+      const searchResult = await this.productSearch.search(
+        normalizedSearch,
+        {
+          locale,
+          categoryId: params.categoryId,
+          categorySlug: params.categorySlug,
+          published: 'true',
+        },
+        1,
+        10_000,
+      )
+      if (!searchResult.ids.length) return { min: 0, max: 0 }
+      productWhere = { id: { in: searchResult.ids } }
+    } else {
+      const categorySubtreeIds = params.categorySlug?.trim()
+        ? await this.categories.findCategoryIdsInSubtreeBySlug(params.categorySlug)
+        : undefined
+      productWhere = this.buildListWhere(
+        {
+          categoryId: params.categoryId,
+          categorySlug: params.categorySlug,
+          categorySubtreeIds,
+          published: 'true',
+        },
+        locale,
+        currency,
+      )
+    }
+
+    const aggregate = await this.prisma.productPrice.aggregate({
+      where: {
+        ...this.retailPriceFilter(currency),
+        productVariant: {
+          stock: { gt: 0 },
+          product: productWhere ?? { isPublished: true },
+        },
+      },
+      _min: { value: true },
+      _max: { value: true },
+    })
+
+    const minRaw = aggregate._min.value != null ? Number(aggregate._min.value) : 0
+    const maxRaw = aggregate._max.value != null ? Number(aggregate._max.value) : 0
+
+    if (!Number.isFinite(minRaw) || !Number.isFinite(maxRaw) || maxRaw <= 0) {
+      return { min: 0, max: 0 }
+    }
+
+    return {
+      min: Math.floor(minRaw),
+      max: Math.ceil(maxRaw),
+    }
+  }
+
+  async resolveCatalogScopeProductWhere(params: {
+    locale?: string
+    categoryId?: string
+    categorySlug?: string
+    search?: string
+    characteristics?: string
+    variantAttributes?: string
+    priceMin?: string
+    priceMax?: string
+  }): Promise<Prisma.ProductWhereInput> {
+    const locale = this.defaultLocale(params.locale)
+    const currency = await this.commerce.getDefaultCurrencyCode()
+    const hasFacetFilters = this.hasCatalogFacetFilters({
+      characteristics: params.characteristics,
+      variantAttributes: params.variantAttributes,
+      priceMin: params.priceMin,
+      priceMax: params.priceMax,
+    })
+    const and: Prisma.ProductWhereInput[] = [{ isPublished: true }]
+
+    if (hasFacetFilters) {
+      and.push({ variants: { some: { stock: { gt: 0 } } } })
+    }
+
+    const normalizedSearch = params.search ? normalizeSearchQuery(params.search) : ''
+    if (normalizedSearch) {
+      const searchResult = await this.productSearch.search(
+        normalizedSearch,
+        {
+          locale,
+          categoryId: params.categoryId,
+          categorySlug: params.categorySlug,
+          published: 'true',
+          ...(hasFacetFilters ? { stock: 'in_stock' as const } : {}),
+        },
+        1,
+        10_000,
+      )
+      if (!searchResult.ids.length) {
+        return { id: { in: [] } }
+      }
+      and.push({ id: { in: searchResult.ids } })
+    } else if (params.categoryId) {
+      and.push({
+        OR: [
+          { categoryId: params.categoryId },
+          { additionalCategories: { some: { categoryId: params.categoryId } } },
+        ],
+      })
+    } else if (params.categorySlug?.trim()) {
+      const categorySubtreeIds = await this.categories.findCategoryIdsInSubtreeBySlug(
+        params.categorySlug,
+      )
+      if (categorySubtreeIds.length > 0) {
+        and.push({
+          OR: [
+            { categoryId: { in: categorySubtreeIds } },
+            {
+              additionalCategories: {
+                some: { categoryId: { in: categorySubtreeIds } },
+              },
+            },
+          ],
+        })
+      } else {
+        return { id: { in: [] } }
+      }
+    }
+
+    const facetWhere = this.buildCatalogFacetWhere(
+      {
+        characteristics: params.characteristics,
+        variantAttributes: params.variantAttributes,
+        priceMin: params.priceMin,
+        priceMax: params.priceMax,
+      },
+      currency,
+    )
+    if (facetWhere?.AND) {
+      const clauses = Array.isArray(facetWhere.AND) ? facetWhere.AND : [facetWhere.AND]
+      and.push(...clauses)
+    }
+
+    return { AND: and }
+  }
+
+  async getCatalogAvailableFacets(
+    productWhere: Prisma.ProductWhereInput,
+  ): Promise<CatalogAvailableFacets> {
+    const [characteristicRows, variantRows] = await Promise.all([
+      this.prisma.productCharacteristic.findMany({
+        where: {
+          optionId: { not: null },
+          product: productWhere,
+        },
+        select: { characteristicId: true, optionId: true },
+        distinct: ['characteristicId', 'optionId'],
+      }),
+      this.prisma.productVariantAttributeValue.findMany({
+        where: {
+          variant: {
+            stock: { gt: 0 },
+            product: productWhere,
+          },
+        },
+        select: {
+          valueId: true,
+          value: { select: { attributeId: true } },
+        },
+        distinct: ['valueId'],
+      }),
+    ])
+
+    const optionIdsByCharacteristic: Record<string, string[]> = {}
+    for (const row of characteristicRows) {
+      if (!row.optionId) continue
+      const bucket = optionIdsByCharacteristic[row.characteristicId] ?? []
+      bucket.push(row.optionId)
+      optionIdsByCharacteristic[row.characteristicId] = bucket
+    }
+
+    const valueIdsByAttribute: Record<string, string[]> = {}
+    for (const row of variantRows) {
+      const attributeId = row.value.attributeId
+      const bucket = valueIdsByAttribute[attributeId] ?? []
+      bucket.push(row.valueId)
+      valueIdsByAttribute[attributeId] = bucket
+    }
+
+    return { optionIdsByCharacteristic, valueIdsByAttribute }
+  }
+
+  private hasCatalogFacetFilters(params: {
+    characteristics?: string
+    variantAttributes?: string
+    priceMin?: string
+    priceMax?: string
+  }): boolean {
+    return Boolean(
+      params.characteristics?.trim() ||
+        params.variantAttributes?.trim() ||
+        params.priceMin?.trim() ||
+        params.priceMax?.trim(),
+    )
+  }
+
+  private parseCatalogPriceBound(value?: string): number | undefined {
+    if (value == null || value.trim() === '') return undefined
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+
+  private buildCatalogFacetWhere(
+    params: {
+      stock?: string
+      characteristics?: string
+      variantAttributes?: string
+      priceMin?: string
+      priceMax?: string
+    },
+    currency: string,
+  ): Prisma.ProductWhereInput | undefined {
+    const and: Prisma.ProductWhereInput[] = []
+
+    if (params.stock === 'in_stock') {
+      and.push({ variants: { some: { stock: { gt: 0 } } } })
+    } else if (params.stock === 'out_of_stock') {
+      and.push({
+        OR: [{ variants: { none: {} } }, { variants: { every: { stock: { lte: 0 } } } }],
+      })
+    }
+
+    for (const [charSlug, optionSlugs] of groupSlugFilterPairs(params.characteristics)) {
+      and.push({
+        characteristics: {
+          some: {
+            characteristic: { slug: charSlug },
+            OR: optionSlugs.flatMap((optionSlug) => [
+              { option: { slug: optionSlug } },
+              { textValue: optionSlug },
+            ]),
+          },
+        },
+      })
+    }
+
+    for (const [attrSlug, valueSlugs] of groupSlugFilterPairs(params.variantAttributes)) {
+      and.push({
+        variants: {
+          some: {
+            stock: { gt: 0 },
+            attributeValues: {
+              some: {
+                value: {
+                  slug: { in: valueSlugs },
+                  attribute: { slug: attrSlug },
+                },
+              },
+            },
+          },
+        },
+      })
+    }
+
+    const priceMin = this.parseCatalogPriceBound(params.priceMin)
+    const priceMax = this.parseCatalogPriceBound(params.priceMax)
+    if (priceMin != null || priceMax != null) {
+      const valueFilter: Prisma.DecimalFilter = {}
+      if (priceMin != null) valueFilter.gte = priceMin
+      if (priceMax != null) valueFilter.lte = priceMax
+
+      and.push({
+        variants: {
+          some: {
+            stock: { gt: 0 },
+            prices: {
+              some: {
+                ...this.retailPriceFilter(currency),
+                value: valueFilter,
+              },
+            },
+          },
+        },
+      })
+    }
+
+    return and.length ? { AND: and } : undefined
+  }
+
+  private async intersectProductIdsWithCatalogFacets(
+    ids: string[],
+    params: {
+      stock?: string
+      characteristics?: string
+      variantAttributes?: string
+      priceMin?: string
+      priceMax?: string
+    },
+  ): Promise<string[]> {
+    if (!ids.length) return ids
+
+    const currency = await this.commerce.getDefaultCurrencyCode()
+    const facetWhere = this.buildCatalogFacetWhere(params, currency)
+    if (!facetWhere) return ids
+
+    const rows = await this.prisma.product.findMany({
+      where: { AND: [{ id: { in: ids } }, facetWhere] },
+      select: { id: true },
+    })
+
+    return rows.map((row) => row.id)
+  }
+
+  private async findAllWithSearchAndFacetFilters(
+    params: {
+      locale: string
+      search: string
+      categoryId?: string
+      categorySlug?: string
+      published?: string
+      stock?: string
+      excludeId?: string
+      ids?: string
+      characteristics?: string
+      variantAttributes?: string
+      priceMin?: string
+      priceMax?: string
+      page?: number
+      pageSize?: number
+      sort?: string
+      lowStockThreshold?: number
+    },
+  ): Promise<BackstageProductListItem[] | PaginatedBackstageProducts> {
+    const currency = await this.commerce.getDefaultCurrencyCode()
+    const usePagination = params.page != null || params.pageSize != null
+    const page = Math.max(1, params.page ?? 1)
+    const pageSize = usePagination ? Math.min(200, Math.max(1, params.pageSize ?? 100)) : 10_000
+
+    const idList = params.ids
+      ?.split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+
+    const searchResult = await this.productSearch.search(
+      params.search,
+      {
+        locale: params.locale,
+        categoryId: params.categoryId,
+        categorySlug: params.categorySlug,
+        published: params.published,
+        stock: params.stock,
+        excludeId: params.excludeId,
+        ids: idList?.length ? idList : undefined,
+      },
+      1,
+      10_000,
+    )
+
+    const filteredIds = await this.intersectProductIdsWithCatalogFacets(searchResult.ids, params)
+    if (!filteredIds.length) {
+      if (usePagination) {
+        return {
+          items: [],
+          total: 0,
+          page,
+          pageSize,
+          totalPages: 0,
+        }
+      }
+      return []
+    }
+
+    const sortRows = await this.prisma.product.findMany({
+      where: { id: { in: filteredIds } },
+      select: this.catalogSortSelect(params.locale, currency),
+    })
+
+    const ordered = await this.orderCatalogProductRows(
+      sortRows,
+      params.sort,
+      params.lowStockThreshold,
+    )
+    const total = ordered.length
+
+    if (!usePagination) {
+      const rows = await this.prisma.product.findMany({
+        where: { id: { in: ordered.map((row) => row.id) } },
+        include: this.listInclude(params.locale, currency),
+      })
+      const order = new Map(ordered.map((row, index) => [row.id, index]))
+      rows.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
+      const labelTypeOrder = await this.variantLabels.getTypeOrder()
+      return rows.map((row) => this.toListItem(row, undefined, labelTypeOrder))
+    }
+
+    const pageIds = ordered.slice((page - 1) * pageSize, page * pageSize).map((row) => row.id)
+    if (!pageIds.length) {
+      return {
+        items: [],
+        total,
+        page,
+        pageSize,
+        totalPages: total ? Math.max(1, Math.ceil(total / pageSize)) : 0,
+      }
+    }
+
+    const rows = await this.prisma.product.findMany({
+      where: { id: { in: pageIds } },
+      include: this.listInclude(params.locale, currency),
+    })
+
+    const order = new Map(pageIds.map((id, index) => [id, index]))
+    rows.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
+    const labelTypeOrder = await this.variantLabels.getTypeOrder()
+
+    return {
+      items: rows.map((row) => this.toListItem(row, undefined, labelTypeOrder)),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    }
+  }
+
+  private sortCatalogProductRows<
+    T extends {
+      id: string
+      slug: string
+      createdAt: Date
+      restockedAt: Date | null
+      translations: Array<{ name: string }>
+      variants: Array<{ stock: number; prices: Array<{ value: Prisma.Decimal }> }>
+    },
+  >(rows: T[], sort?: string, lowStockThreshold = 15): T[] {
+    const getName = (row: T) => row.translations[0]?.name ?? ''
+
+    let working = [...rows]
+
+    if (sort === 'low_stock') {
+      working = this.filterLowStockRows(working, lowStockThreshold)
+    }
+
+    return working.sort((left, right) => {
+      const leftInStock = this.isProductInStock(left.variants)
+      const rightInStock = this.isProductInStock(right.variants)
+      if (leftInStock !== rightInStock) {
+        return leftInStock ? -1 : 1
+      }
+
+      switch (sort) {
+        case 'price-asc':
+          return this.catalogSortPrice(left.variants) - this.catalogSortPrice(right.variants)
+        case 'price-desc':
+          return this.catalogSortPrice(right.variants) - this.catalogSortPrice(left.variants)
+        case 'newest':
+          return right.createdAt.getTime() - left.createdAt.getTime()
+        case 'restocked': {
+          const leftAt = (left.restockedAt ?? left.createdAt).getTime()
+          const rightAt = (right.restockedAt ?? right.createdAt).getTime()
+          return rightAt - leftAt
+        }
+        case 'low_stock': {
+          const stockDiff =
+            this.catalogSortTotalStock(left.variants) - this.catalogSortTotalStock(right.variants)
+          if (stockDiff !== 0) return stockDiff
+          return getName(left).localeCompare(getName(right), 'uk')
+        }
+        default:
+          return getName(left).localeCompare(getName(right), 'uk')
+      }
+    })
+  }
+
+  private async sortCatalogProductRowsByPopularity<
+    T extends {
+      id: string
+      slug: string
+      createdAt: Date
+      restockedAt: Date | null
+      translations: Array<{ name: string }>
+      variants: Array<{ stock: number; prices: Array<{ value: Prisma.Decimal }> }>
+    },
+  >(rows: T[]): Promise<T[]> {
+    const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+    const sales = await this.prisma.orderItem.groupBy({
+      by: ['productSlug'],
+      where: { order: { createdAt: { gte: since } } },
+      _sum: { quantity: true },
+    })
+    const salesBySlug = new Map(
+      sales.map((row) => [row.productSlug.trim().toLowerCase(), row._sum.quantity ?? 0]),
+    )
+
+    return [...rows].sort((left, right) => {
+      const leftInStock = this.isProductInStock(left.variants)
+      const rightInStock = this.isProductInStock(right.variants)
+      if (leftInStock !== rightInStock) {
+        return leftInStock ? -1 : 1
+      }
+
+      const saleDiff =
+        (salesBySlug.get(right.slug.trim().toLowerCase()) ?? 0) -
+        (salesBySlug.get(left.slug.trim().toLowerCase()) ?? 0)
+      if (saleDiff !== 0) return saleDiff
+
+      return right.createdAt.getTime() - left.createdAt.getTime()
+    })
+  }
+
+  private async orderCatalogProductRows<
+    T extends {
+      id: string
+      slug: string
+      createdAt: Date
+      restockedAt: Date | null
+      translations: Array<{ name: string }>
+      variants: Array<{ stock: number; prices: Array<{ value: Prisma.Decimal }> }>
+    },
+  >(rows: T[], sort?: string, lowStockThreshold = 15): Promise<T[]> {
+    if (sort === 'popular') {
+      return this.sortCatalogProductRowsByPopularity(rows)
+    }
+    return this.sortCatalogProductRows(rows, sort, lowStockThreshold)
+  }
+
+  private async findPaginatedCatalog(
+    where: Prisma.ProductWhereInput | undefined,
+    locale: string,
+    page: number,
+    pageSize: number,
+    sort?: string,
+    currencyCode?: string,
+    lowStockThreshold?: number,
+  ): Promise<PaginatedBackstageProducts> {
+    const currency = currencyCode ?? (await this.commerce.getDefaultCurrencyCode())
+    const sortRows = await this.prisma.product.findMany({
+      where,
+      select: this.catalogSortSelect(locale, currency),
+    })
+
+    const ordered = await this.orderCatalogProductRows(sortRows, sort, lowStockThreshold)
+    const total = ordered.length
+    const pageIds = ordered.slice((page - 1) * pageSize, page * pageSize).map((row) => row.id)
+
+    if (!pageIds.length) {
+      return {
+        items: [],
+        total,
+        page,
+        pageSize,
+        totalPages: total ? Math.max(1, Math.ceil(total / pageSize)) : 0,
+      }
+    }
+
+    const rows = await this.prisma.product.findMany({
+      where: { id: { in: pageIds } },
+      include: this.listInclude(locale, currency),
+    })
+
+    const order = new Map(pageIds.map((id, index) => [id, index]))
+    rows.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
+
+    const labelTypeOrder = await this.variantLabels.getTypeOrder()
+
+    return {
+      items: rows.map((row) => this.toListItem(row, undefined, labelTypeOrder)),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
     }
   }
 
@@ -460,6 +1329,8 @@ export class ProductsService {
     tx: Prisma.TransactionClient,
     productId: string,
     variantDtos: CreateProductVariantDto[],
+    currency: string,
+    defaultSalesUnitId: string | null,
   ) {
     const existingVariants = await tx.productVariant.findMany({
       where: { productId },
@@ -483,14 +1354,13 @@ export class ProductsService {
     }
 
     for (const variantDto of variantDtos) {
-      const attributes =
-        variantDto.label?.trim() ? { label: variantDto.label.trim() } : {}
       const attributeLinks = variantDto.attributeValueIds.map((valueId) => ({ valueId }))
       const availableFrom = variantDto.availableFrom
         ? this.parseDateInput(variantDto.availableFrom)
         : null
 
       let variantId = variantDto.id
+      const salesUnitId = variantDto.salesUnitId ?? defaultSalesUnitId
 
       if (variantDto.id) {
         await tx.productVariant.update({
@@ -501,7 +1371,7 @@ export class ProductsService {
             stock: variantDto.stock,
             legacyId: variantDto.legacyId?.trim() || null,
             availableFrom,
-            attributes,
+            salesUnitId,
           },
         })
 
@@ -521,14 +1391,14 @@ export class ProductsService {
           where: {
             productVariantId_priceType_currency: {
               productVariantId: variantDto.id,
-              priceType: 'роздріб',
-              currency: 'UAH',
+              priceType: RETAIL_PRICE_TYPE,
+              currency,
             },
           },
           create: {
             productVariantId: variantDto.id,
-            priceType: 'роздріб',
-            currency: 'UAH',
+            priceType: RETAIL_PRICE_TYPE,
+            currency,
             value: variantDto.price,
             compareAtValue: null,
           },
@@ -546,14 +1416,14 @@ export class ProductsService {
             stock: variantDto.stock,
             legacyId: variantDto.legacyId?.trim() || null,
             availableFrom,
-            attributes,
+            salesUnitId,
             attributeValues: attributeLinks.length
               ? { create: attributeLinks }
               : undefined,
             prices: {
               create: {
-                priceType: 'роздріб',
-                currency: 'UAH',
+                priceType: RETAIL_PRICE_TYPE,
+                currency,
                 value: variantDto.price,
                 compareAtValue: null,
               },
@@ -567,6 +1437,8 @@ export class ProductsService {
         await this.syncVariantQuantityPrices(tx, variantId, variantDto.quantityPrices)
       }
     }
+
+    await this.touchProductAvailability(productId, tx)
   }
 
   private async syncImages(
@@ -632,34 +1504,6 @@ export class ProductsService {
     return { available: !existing, slug: normalized }
   }
 
-  private buildSearchConditions(search: string, locale: string): Prisma.ProductWhereInput[] {
-    const conditions: Prisma.ProductWhereInput[] = [
-      { slug: { contains: search, mode: 'insensitive' } },
-      { latinName: { contains: search, mode: 'insensitive' } },
-      { translations: { some: { locale, name: { contains: search, mode: 'insensitive' } } } },
-      { variants: { some: { sku: { contains: search, mode: 'insensitive' } } } },
-    ]
-
-    const priceToken = search.replace(/\s/g, '').replace(',', '.')
-    if (/^\d+(\.\d{1,2})?$/.test(priceToken)) {
-      conditions.push({
-        variants: {
-          some: {
-            prices: {
-              some: {
-                priceType: 'роздріб',
-                currency: 'UAH',
-                value: new Prisma.Decimal(priceToken),
-              },
-            },
-          },
-        },
-      })
-    }
-
-    return conditions
-  }
-
   async setPublished(
     id: string,
     isPublished: boolean,
@@ -677,6 +1521,29 @@ export class ProductsService {
     })
   }
 
+  async setImages(
+    id: string,
+    images: ProductImageDto[],
+  ): Promise<Array<{ url: string; isMain: boolean }>> {
+    const existing = await this.prisma.product.findUnique({
+      where: { id },
+      select: { id: true },
+    })
+    if (!existing) throw new NotFoundException('Товар не знайдено')
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.syncImages(tx, id, images)
+    })
+
+    const rows = await this.prisma.productImage.findMany({
+      where: { productId: id },
+      orderBy: [{ isMain: 'desc' }, { sortOrder: 'asc' }],
+      select: { url: true, isMain: true },
+    })
+
+    return rows.map((row) => ({ url: row.url, isMain: row.isMain }))
+  }
+
   async findAll(params: {
     locale?: string
     search?: string
@@ -686,29 +1553,174 @@ export class ProductsService {
     stock?: string
     excludeId?: string
     ids?: string
+    characteristics?: string
+    variantAttributes?: string
+    priceMin?: string
+    priceMax?: string
     page?: number
     pageSize?: number
+    sort?: string
+    namePrefix?: string
+    lowStockThreshold?: number
+    hasDiscount?: string
+    discountMinQuantity?: number
+    discountQuantityMode?: string
   }): Promise<BackstageProductListItem[] | PaginatedBackstageProducts> {
     const locale = this.defaultLocale(params.locale)
-    const where = this.buildListWhere(params, locale)
+    const currency = await this.commerce.getDefaultCurrencyCode()
+    const normalizedSearch = params.search ? normalizeSearchQuery(params.search) : ''
+
+    if (normalizedSearch) {
+      if (this.hasCatalogFacetFilters(params)) {
+        return this.findAllWithSearchAndFacetFilters({
+          ...params,
+          search: normalizedSearch,
+          locale,
+        })
+      }
+      return this.findAllWithSearch({ ...params, search: normalizedSearch, locale })
+    }
+
+    const categorySubtreeIds = params.categorySlug?.trim()
+      ? await this.categories.findCategoryIdsInSubtreeBySlug(params.categorySlug)
+      : undefined
+
+    const where = this.buildListWhere(
+      {
+        ...params,
+        categorySubtreeIds,
+      },
+      locale,
+      currency,
+    )
 
     const usePagination = params.page != null || params.pageSize != null
     if (usePagination) {
       const page = Math.max(1, params.page ?? 1)
       const pageSize = Math.min(200, Math.max(1, params.pageSize ?? 100))
-      const [total, rows] = await Promise.all([
-        this.prisma.product.count({ where }),
-        this.prisma.product.findMany({
-          where,
-          include: this.listInclude(locale),
-          orderBy: [{ createdAt: 'desc' }],
-          skip: (page - 1) * pageSize,
-          take: pageSize,
-        }),
-      ])
+      return this.findPaginatedCatalog(
+        where,
+        locale,
+        page,
+        pageSize,
+        params.sort,
+        currency,
+        params.lowStockThreshold,
+      )
+    }
+
+    const rows = await this.prisma.product.findMany({
+      where,
+      include: this.listInclude(locale, currency),
+      orderBy: [{ createdAt: 'desc' }],
+    })
+
+    const labelTypeOrder = await this.variantLabels.getTypeOrder()
+    return rows.map((row) => this.toListItem(row, undefined, labelTypeOrder))
+  }
+
+  private async findAllWithSearch(
+    params: {
+      locale: string
+      search: string
+      categoryId?: string
+      categorySlug?: string
+      published?: string
+      stock?: string
+      excludeId?: string
+      ids?: string
+      page?: number
+      pageSize?: number
+      sort?: string
+      lowStockThreshold?: number
+    },
+  ): Promise<BackstageProductListItem[] | PaginatedBackstageProducts> {
+    const currency = await this.commerce.getDefaultCurrencyCode()
+    const usePagination = params.page != null || params.pageSize != null
+    const page = Math.max(1, params.page ?? 1)
+    const pageSize = usePagination ? Math.min(200, Math.max(1, params.pageSize ?? 100)) : 10_000
+
+    const idList = params.ids
+      ?.split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+
+    if (usePagination && params.sort) {
+      const countResult = await this.productSearch.search(
+        params.search,
+        {
+          locale: params.locale,
+          categoryId: params.categoryId,
+          categorySlug: params.categorySlug,
+          published: params.published,
+          stock: params.stock,
+          excludeId: params.excludeId,
+          ids: idList?.length ? idList : undefined,
+        },
+        1,
+        1,
+      )
+
+      if (!countResult.total) {
+        return {
+          items: [],
+          total: 0,
+          page,
+          pageSize,
+          totalPages: 0,
+        }
+      }
+
+      const allResults = await this.productSearch.search(
+        params.search,
+        {
+          locale: params.locale,
+          categoryId: params.categoryId,
+          categorySlug: params.categorySlug,
+          published: params.published,
+          stock: params.stock,
+          excludeId: params.excludeId,
+          ids: idList?.length ? idList : undefined,
+        },
+        1,
+        countResult.total,
+      )
+
+      const sortRows = await this.prisma.product.findMany({
+        where: { id: { in: allResults.ids } },
+        select: this.catalogSortSelect(params.locale, currency),
+      })
+
+      const ordered = await this.orderCatalogProductRows(
+        sortRows,
+        params.sort,
+        params.lowStockThreshold,
+      )
+      const total = ordered.length
+      const pageIds = ordered.slice((page - 1) * pageSize, page * pageSize).map((row) => row.id)
+
+      if (!pageIds.length) {
+        return {
+          items: [],
+          total,
+          page,
+          pageSize,
+          totalPages: total ? Math.max(1, Math.ceil(total / pageSize)) : 0,
+        }
+      }
+
+      const rows = await this.prisma.product.findMany({
+        where: { id: { in: pageIds } },
+        include: this.listInclude(params.locale, currency),
+      })
+
+      const order = new Map(pageIds.map((id, index) => [id, index]))
+      rows.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
+
+      const labelTypeOrder = await this.variantLabels.getTypeOrder()
 
       return {
-        items: rows.map((row) => this.toListItem(row)),
+        items: rows.map((row) => this.toListItem(row, undefined, labelTypeOrder)),
         total,
         page,
         pageSize,
@@ -716,27 +1728,80 @@ export class ProductsService {
       }
     }
 
+    const searchResult = await this.productSearch.search(
+      params.search,
+      {
+        locale: params.locale,
+        categoryId: params.categoryId,
+        categorySlug: params.categorySlug,
+        published: params.published,
+        stock: params.stock,
+        excludeId: params.excludeId,
+        ids: idList?.length ? idList : undefined,
+      },
+      page,
+      pageSize,
+    )
+
+    if (!searchResult.ids.length) {
+      if (usePagination) {
+        return {
+          items: [],
+          total: searchResult.total,
+          page,
+          pageSize,
+          totalPages: searchResult.total ? Math.max(1, Math.ceil(searchResult.total / pageSize)) : 0,
+        }
+      }
+      return []
+    }
+
     const rows = await this.prisma.product.findMany({
-      where,
-      include: this.listInclude(locale),
-      orderBy: [{ createdAt: 'desc' }],
+      where: { id: { in: searchResult.ids } },
+      include: this.listInclude(params.locale, currency),
     })
 
-    return rows.map((row) => this.toListItem(row))
+    const order = new Map(searchResult.ids.map((id, index) => [id, index]))
+    rows.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
+
+    const labelTypeOrder = await this.variantLabels.getTypeOrder()
+    const items = rows.map((row) => this.toListItem(row, undefined, labelTypeOrder))
+
+    if (usePagination) {
+      return {
+        items,
+        total: searchResult.total,
+        page,
+        pageSize,
+        totalPages: Math.max(1, Math.ceil(searchResult.total / pageSize)),
+      }
+    }
+
+    return items
   }
 
   private buildListWhere(
     params: {
       categoryId?: string
       categorySlug?: string
+      categorySubtreeIds?: string[]
       published?: string
       stock?: string
       excludeId?: string
       ids?: string
       search?: string
       locale?: string
+      characteristics?: string
+      variantAttributes?: string
+      priceMin?: string
+      priceMax?: string
+      hasDiscount?: string
+      discountMinQuantity?: number
+      discountQuantityMode?: string
+      namePrefix?: string
     },
     locale: string,
+    currency: string,
   ): Prisma.ProductWhereInput | undefined {
     const and: Prisma.ProductWhereInput[] = []
 
@@ -749,7 +1814,22 @@ export class ProductsService {
       })
     }
 
-    if (params.categorySlug?.trim()) {
+    if (params.categorySubtreeIds !== undefined) {
+      if (params.categorySubtreeIds.length > 0) {
+        and.push({
+          OR: [
+            { categoryId: { in: params.categorySubtreeIds } },
+            {
+              additionalCategories: {
+                some: { categoryId: { in: params.categorySubtreeIds } },
+              },
+            },
+          ],
+        })
+      } else {
+        and.push({ id: { in: [] } })
+      }
+    } else if (params.categorySlug?.trim()) {
       const slug = params.categorySlug.trim().toLowerCase()
       and.push({
         OR: [
@@ -779,6 +1859,18 @@ export class ProductsService {
       and.push({ isPublished: false })
     }
 
+    if (params.namePrefix?.trim()) {
+      const prefix = params.namePrefix.trim()
+      and.push({
+        translations: {
+          some: {
+            locale,
+            name: { startsWith: prefix, mode: 'insensitive' },
+          },
+        },
+      })
+    }
+
     if (params.stock === 'in_stock') {
       and.push({ variants: { some: { stock: { gt: 0 } } } })
     } else if (params.stock === 'out_of_stock') {
@@ -787,9 +1879,40 @@ export class ProductsService {
       })
     }
 
-    const search = params.search?.trim()
-    if (search) {
-      and.push({ OR: this.buildSearchConditions(search, locale) })
+    const facetWhere = this.buildCatalogFacetWhere(
+      {
+        characteristics: params.characteristics,
+        variantAttributes: params.variantAttributes,
+        priceMin: params.priceMin,
+        priceMax: params.priceMax,
+      },
+      currency,
+    )
+    if (facetWhere?.AND) {
+      const clauses = Array.isArray(facetWhere.AND) ? facetWhere.AND : [facetWhere.AND]
+      and.push(...clauses)
+    }
+
+    if (params.hasDiscount === 'true') {
+      const minQuantity =
+        params.discountMinQuantity && Number.isFinite(params.discountMinQuantity)
+          ? Math.max(1, Math.floor(params.discountMinQuantity))
+          : undefined
+      const quantityFilter =
+        minQuantity == null
+          ? {}
+          : params.discountQuantityMode === 'exact'
+            ? { minQuantity }
+            : { minQuantity: { gte: minQuantity } }
+      and.push({
+        variants: {
+          some: {
+            quantityPrices: {
+              some: quantityFilter,
+            },
+          },
+        },
+      })
     }
 
     return and.length ? { AND: and } : undefined
@@ -839,6 +1962,9 @@ export class ProductsService {
           where: { productId: { in: existingIds } },
           data: { stock: dto.stock },
         })
+        for (const productId of existingIds) {
+          await this.touchProductAvailability(productId)
+        }
         return { action: dto.action, affected: existingIds.length, variantsUpdated: result.count, stock: dto.stock }
       }
       default:
@@ -856,11 +1982,31 @@ export class ProductsService {
     return Array.isArray(result) ? result : result.items
   }
 
+  async getAvailableNameLetters(locale?: string): Promise<string[]> {
+    const loc = this.defaultLocale(locale)
+    const allowed = new Set<string>(UKRAINIAN_ALPHABET)
+    const rows = await this.prisma.$queryRaw<Array<{ letter: string }>>`
+      SELECT DISTINCT UPPER(SUBSTRING(pt.name FROM 1 FOR 1)) AS letter
+      FROM "ProductTranslation" pt
+      INNER JOIN "Product" p ON p.id = pt."productId"
+      WHERE pt.locale = ${loc}
+        AND p."isPublished" = true
+        AND LENGTH(TRIM(pt.name)) > 0
+    `
+
+    const letters = rows
+      .map((row) => row.letter?.trim().toUpperCase())
+      .filter((letter): letter is string => Boolean(letter && allowed.has(letter)))
+
+    return sortUkrainianAlphabetLetters([...new Set(letters)])
+  }
+
   async findOne(id: string, locale?: string): Promise<BackstageProductDetail> {
     const loc = this.defaultLocale(locale)
+    const currency = await this.commerce.getDefaultCurrencyCode()
     const product = await this.prisma.product.findUnique({
       where: { id },
-      include: this.detailInclude(loc),
+      include: this.detailInclude(loc, currency),
     })
 
     if (!product) throw new NotFoundException('Товар не знайдено')
@@ -870,12 +2016,13 @@ export class ProductsService {
 
   async findBySlug(slug: string, locale?: string): Promise<BackstageProductDetail> {
     const loc = this.defaultLocale(locale)
+    const currency = await this.commerce.getDefaultCurrencyCode()
     const normalized = slug.trim().toLowerCase()
     if (!normalized) throw new NotFoundException('Товар не знайдено')
 
     const product = await this.prisma.product.findFirst({
       where: { slug: normalized, isPublished: true },
-      include: this.detailInclude(loc),
+      include: this.detailInclude(loc, currency),
     })
 
     if (!product) throw new NotFoundException('Товар не знайдено')
@@ -883,7 +2030,7 @@ export class ProductsService {
     return this.toDetail(product)
   }
 
-  private toDetail(product: {
+  private async toDetail(product: {
     id: string
     slug: string
     latinName: string | null
@@ -900,9 +2047,23 @@ export class ProductsService {
     category: { slug: string; translations: Array<{ name: string }> }
     images: Array<{ url: string; isMain: boolean; sortOrder: number }>
     characteristics: Array<{
+      numberValue: number | null
       textValue: string | null
-      characteristic: { slug: string }
-      option: { slug: string } | null
+      characteristic: {
+        id: string
+        slug: string
+        valueType: import('@prisma/client').CharacteristicValueType
+        unit: string | null
+        sortOrder: number
+        showOnProductPage: boolean
+        icon: string | null
+        translations: Array<{ name: string }>
+      }
+      option: {
+        id: string
+        slug: string
+        translations: Array<{ label: string }>
+      } | null
     }>
     variants: Array<{
       id: string
@@ -911,9 +2072,16 @@ export class ProductsService {
       stock: number
       legacyId: string | null
       availableFrom: Date | null
-      attributes: unknown
+      salesUnitId?: string | null
+      salesUnit?: { symbol: string } | null
       prices: Array<{ value: Prisma.Decimal; compareAtValue: Prisma.Decimal | null }>
-      attributeValues: Array<{ valueId: string }>
+      attributeValues: Array<{
+        valueId: string
+        value: {
+          translations: Array<{ label: string }>
+          attribute?: { sortOrder: number; participatesInLabel: boolean }
+        }
+      }>
       quantityPrices: Array<{
         id: string
         minQuantity: number
@@ -926,10 +2094,15 @@ export class ProductsService {
     }>
     additionalCategories: Array<{ categoryId: string }>
     _count: { variants: number }
-  }): BackstageProductDetail {
-    const base = this.toListItem(product as unknown as Parameters<typeof this.toListItem>[0])
+  }): Promise<BackstageProductDetail> {
+    const labelTypeOrder = await this.variantLabels.getTypeOrder()
+    const base = this.toListItem(
+      product as unknown as Parameters<typeof this.toListItem>[0],
+      undefined,
+      labelTypeOrder,
+    )
     const translation = product.translations[0]
-    const variants = product.variants.map((variant) => this.toVariantNode(variant))
+    const variants = product.variants.map((variant) => this.toVariantNode(variant, labelTypeOrder))
 
     const imageUrls = product.images
       .sort((a, b) => {
@@ -938,8 +2111,25 @@ export class ProductsService {
       })
       .map((image) => image.url)
 
+    const entriesResponse = this.productCharacteristics.toCharacteristicsResponse(
+      product.characteristics,
+    )
+    const displayCharacteristics = this.productCharacteristics.toDisplayCharacteristics(
+      product.characteristics,
+    )
+
     return {
       ...base,
+      characteristics: {
+        ...base.characteristics,
+        entries: entriesResponse.entries.map((entry) => ({
+          characteristicId: entry.characteristicId,
+          optionId: entry.optionId,
+          textValue: entry.textValue,
+          numberValue: entry.numberValue,
+        })),
+      },
+      displayCharacteristics,
       description: translation?.description ?? null,
       metaTitle: translation?.metaTitle ?? null,
       metaDesc: translation?.metaDesc ?? null,
@@ -960,11 +2150,16 @@ export class ProductsService {
 
     const { additionalCategoryIds, variantDtos } = await this.validateProductDto(dto)
 
-    const characteristicLookup = await this.productCharacteristics.ensureFilterCharacteristics(locale)
+    const characteristicLookup = await this.productCharacteristics.loadCharacteristicLookup(locale)
     const characteristicCreates = this.productCharacteristics.buildCharacteristicCreates(
       dto.characteristics,
       characteristicLookup,
     )
+
+    const [currency, defaultSalesUnitId] = await Promise.all([
+      this.commerce.getDefaultCurrencyCode(),
+      this.commerce.getDefaultSalesUnitId(),
+    ])
 
     const productId = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
@@ -992,7 +2187,7 @@ export class ProductsService {
         },
       })
 
-      await this.syncVariants(tx, product.id, variantDtos)
+      await this.syncVariants(tx, product.id, variantDtos, currency, defaultSalesUnitId)
       await this.syncImages(tx, product.id, dto.images)
       return product.id
     })
@@ -1016,11 +2211,16 @@ export class ProductsService {
 
     const { additionalCategoryIds, variantDtos } = await this.validateProductDto(dto, id)
 
-    const characteristicLookup = await this.productCharacteristics.ensureFilterCharacteristics(locale)
+    const characteristicLookup = await this.productCharacteristics.loadCharacteristicLookup(locale)
     const characteristicCreates = this.productCharacteristics.buildCharacteristicCreates(
       dto.characteristics,
       characteristicLookup,
     )
+
+    const [currency, defaultSalesUnitId] = await Promise.all([
+      this.commerce.getDefaultCurrencyCode(),
+      this.commerce.getDefaultSalesUnitId(),
+    ])
 
     await this.prisma.$transaction(async (tx) => {
       await tx.product.update({
@@ -1071,7 +2271,7 @@ export class ProductsService {
         })
       }
 
-      await this.syncVariants(tx, id, variantDtos)
+      await this.syncVariants(tx, id, variantDtos, currency, defaultSalesUnitId)
       await this.syncImages(tx, id, dto.images)
     })
 

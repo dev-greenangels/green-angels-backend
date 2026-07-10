@@ -47,6 +47,10 @@ export class UpdateCategoryDto {
   description?: string
 
   @IsOptional()
+  @IsString()
+  footerDescription?: string
+
+  @IsOptional()
   @ValidateIf((_, value) => value !== null)
   @IsString()
   @MaxLength(500)
@@ -60,6 +64,10 @@ export class UpdateCategoryDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  isCatalogRoot?: boolean
 
   @IsOptional()
   @IsInt()

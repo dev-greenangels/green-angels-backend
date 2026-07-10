@@ -33,8 +33,24 @@ export type PricingLineResult = {
 
 export type PricingGiftLine = {
   productVariantId: string
+  productSlug: string
   quantity: number
   label: string
+}
+
+export type AppliedPromoSummary = {
+  code: string
+  name: string
+  appliedDiscountAmount?: number | null
+  unusedDiscountAmount?: number | null
+  infoMessage?: string | null
+}
+
+export type PromoSkipReason = 'no_additional_discount'
+
+export type PromoSkippedSummary = {
+  code: string
+  reason: PromoSkipReason
 }
 
 export type CheckoutTotalsBreakdown = {
@@ -63,7 +79,13 @@ export type PricingQuoteResult = {
   totalAmount: number
   promoCodeId: string | null
   promoCode: string | null
+  promoCodeIds: string[]
+  promoCodes: string[]
+  appliedPromos: AppliedPromoSummary[]
   promoMessage: string | null
+  promoMessages: string[] | null
+  promoInfoMessages: string[] | null
+  promoSkipped: PromoSkippedSummary[]
   checkout?: CheckoutTotalsBreakdown
 }
 

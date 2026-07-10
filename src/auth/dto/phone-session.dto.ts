@@ -1,10 +1,10 @@
-import { IsEmail, IsOptional, IsString } from 'class-validator'
+import { IsOptional, IsString, IsUUID } from 'class-validator'
 
 export class PhoneSessionDto {
   @IsString()
   phone!: string
 
   @IsOptional()
-  @IsEmail()
-  email?: string
+  @IsUUID()
+  verificationToken?: string
 }

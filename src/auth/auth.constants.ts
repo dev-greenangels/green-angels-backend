@@ -1,6 +1,9 @@
 /** Сумісно з green-angels-shop/lib/auth/constants.ts */
 export const SESSION_COOKIE_NAME = 'ga-session'
+/** Сумісно з green-angels-shop/lib/backstage-auth/constants.ts */
+export const BACKSTAGE_SESSION_COOKIE_NAME = 'ga-backstage-session'
 export const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 7
+export const BACKSTAGE_SESSION_MAX_AGE_SEC = 60 * 60 * 8
 
 export type ApiUserRole = 'customer' | 'admin'
 

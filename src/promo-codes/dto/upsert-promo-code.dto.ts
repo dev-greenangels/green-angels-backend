@@ -1,4 +1,4 @@
-import { DiscountTarget, DiscountValueType } from '@prisma/client'
+import { DiscountApplicationScope, DiscountTarget, DiscountValueType, PromoDiscountCombinationMode, PromoStackingMode } from '@prisma/client'
 import { Type } from 'class-transformer'
 import {
   IsArray,
@@ -64,6 +64,23 @@ export class UpsertPromoCodeDto {
   @Max(999999)
   value?: number
 
+  @IsOptional()
+  @IsEnum(DiscountApplicationScope)
+  discountApplicationScope?: DiscountApplicationScope
+
+  @IsOptional()
+  @IsEnum(PromoDiscountCombinationMode)
+  combinesWithOtherDiscounts?: PromoDiscountCombinationMode
+
+  @IsOptional()
+  @IsEnum(PromoStackingMode)
+  stackingMode?: PromoStackingMode
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  compatiblePromoCodeIds?: string[]
+
   @IsEnum(DiscountTarget)
   target!: DiscountTarget
 
@@ -85,6 +102,11 @@ export class UpsertPromoCodeDto {
   @IsArray()
   @IsUUID('4', { each: true })
   excludeVariantIds?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  excludeCategoryIds?: string[]
 
   @IsOptional()
   @IsArray()

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import {
+  DiscountApplicationScope,
   DiscountRule,
   DiscountTarget,
   DiscountValueType,
@@ -10,6 +11,11 @@ import {
 } from '@prisma/client'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { CommerceService } from '../commerce/commerce.service'
+import { RETAIL_PRICE_TYPE } from '../commerce/commerce.constants'
+import { VariantLabelService } from '../products/variant-label.service'
+import { VARIANT_LABEL_ATTRIBUTE_SELECT } from '../products/variant-label.util'
+import { buildCategoryDescendantMap, type CategoryDescendantMap } from './category-scope.util'
 import {
   isWithinDateRange,
   matchesAudience,
@@ -21,10 +27,29 @@ import type {
   AppliedDiscountSource,
   PricingAudience,
   PricingCartItem,
+  PricingLineResult,
   PricingQuoteResult,
 } from './pricing.types'
+import {
+  arePromosCompatible,
+  computeCartPromoDiscount,
+  computeLinePromoUnitPrice,
+  formatPromoNoAdditionalDiscountMessage,
+  formatUnusedPromoDiscountMessage,
+  LoadedPromo,
+  normalizePromoCodesInput,
+  promoAppliesToVariant,
+  promoQualifiesForCart,
+  resolvePromoApplicationScope,
+  resolvePromoUsageIncrement,
+  shouldSkipSplitPromoUsageValidation,
+  sumQualifyingBaseSubtotal,
+  sumQualifyingLineTotals,
+  validatePromoStack,
+} from './pricing.promo'
 
 const PREORDER_MAX_QTY = 999
+const DEFAULT_LOCALE = 'uk'
 
 type LoadedVariant = {
   id: string
@@ -48,7 +73,11 @@ type LoadedVariant = {
 
 @Injectable()
 export class PricingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly variantLabels: VariantLabelService,
+    private readonly commerce: CommerceService,
+  ) {}
 
   private isQuantityPriceActive(
     row: { validFrom: Date | null; validTo: Date | null },
@@ -222,11 +251,11 @@ export class PricingService {
     return rules.filter((rule) => isWithinDateRange(rule.startDate, rule.endDate, now))
   }
 
-  private async loadPromoCode(code: string | undefined, now = new Date()) {
-    if (!code?.trim()) return null
-    const promo = await this.prisma.promoCode.findFirst({
+  private async loadPromoCodes(codes: string[], now = new Date()): Promise<LoadedPromo[]> {
+    if (!codes.length) return []
+    const promos = await this.prisma.promoCode.findMany({
       where: {
-        code: { equals: code.trim(), mode: 'insensitive' },
+        OR: codes.map((code) => ({ code: { equals: code, mode: 'insensitive' as const } })),
         isActive: true,
       },
       include: {
@@ -234,9 +263,16 @@ export class PricingService {
         allowedUsers: { select: { userId: true } },
       },
     })
-    if (!promo) return null
-    if (!isWithinDateRange(promo.validFrom, promo.validTo, now)) return null
-    return promo
+
+    const byCode = new Map(promos.map((promo) => [promo.code.toUpperCase(), promo]))
+    const ordered: LoadedPromo[] = []
+    for (const code of codes) {
+      const promo = byCode.get(code)
+      if (!promo) continue
+      if (!isWithinDateRange(promo.validFrom, promo.validTo, now)) continue
+      ordered.push(promo)
+    }
+    return ordered
   }
 
   private promoMatchesAudience(
@@ -259,16 +295,28 @@ export class PricingService {
     )
   }
 
+  private formatMinCartSubtotalMessage(promo: PromoCode, cartSubtotal: number): string {
+    const min = Number(promo.minCartSubtotal)
+    return `Промокод ${promo.code} діє від ${min.toLocaleString('uk-UA')} ₴. У кошику зараз ${cartSubtotal.toLocaleString('uk-UA')} ₴.`
+  }
+
   private async validatePromoUsage(
     promo: PromoCode,
     userId: string | undefined,
+    context?: { splitOrderParts?: number; splitOrderPartIndex?: number },
   ): Promise<string | null> {
+    if (shouldSkipSplitPromoUsageValidation(context)) {
+      return null
+    }
+
+    const usageIncrement = resolvePromoUsageIncrement(context)
+
     if (promo.usageLimitTotal != null) {
       const total = await this.prisma.promoCodeUsage.count({
         where: { promoCodeId: promo.id },
       })
-      if (total >= promo.usageLimitTotal) {
-        return 'Промокод вичерпано.'
+      if (total + usageIncrement > promo.usageLimitTotal) {
+        return `Промокод ${promo.code} вичерпано.`
       }
     }
 
@@ -276,8 +324,8 @@ export class PricingService {
       const perUser = await this.prisma.promoCodeUsage.count({
         where: { promoCodeId: promo.id, userId },
       })
-      if (perUser >= promo.usageLimitPerUser) {
-        return 'Ви вже використали цей промокод.'
+      if (perUser + usageIncrement > promo.usageLimitPerUser) {
+        return `Ви вже використали промокод ${promo.code}.`
       }
     }
 
@@ -292,6 +340,7 @@ export class PricingService {
     audience: PricingAudience,
     variant: LoadedVariant,
     cartSubtotal: number,
+    categoryExpansion?: CategoryDescendantMap,
   ): boolean {
     if (!this.promoMatchesAudience(promo, audience)) return false
 
@@ -309,7 +358,9 @@ export class PricingService {
       {
         productIds: promo.excludeProductIds,
         variantIds: promo.excludeVariantIds,
+        categoryIds: promo.excludeCategoryIds,
       },
+      categoryExpansion,
     )
   }
 
@@ -348,7 +399,10 @@ export class PricingService {
     items: PricingCartItem[]
     audience: PricingAudience
     promoCode?: string
+    promoCodes?: string[]
     validatePromo?: boolean
+    splitOrderParts?: number
+    splitOrderPartIndex?: number
   }): Promise<PricingQuoteResult> {
     const uniqueItems = new Map<string, number>()
     for (const item of input.items) {
@@ -363,6 +417,7 @@ export class PricingService {
       throw new BadRequestException('Кошик порожній.')
     }
 
+    const currency = await this.commerce.getDefaultCurrencyCode()
     const variants = await this.prisma.productVariant.findMany({
       where: { id: { in: variantIds } },
       include: {
@@ -374,7 +429,7 @@ export class PricingService {
             additionalCategories: { select: { categoryId: true } },
           },
         },
-        prices: { where: { currency: 'UAH' } },
+        prices: { where: { currency, priceType: RETAIL_PRICE_TYPE } },
         quantityPrices: true,
       },
     })
@@ -384,19 +439,64 @@ export class PricingService {
     }
 
     const discountRules = await this.loadActiveDiscountRules()
-    const promo = await this.loadPromoCode(input.promoCode)
+    const requestedCodes = normalizePromoCodesInput(input.promoCode, input.promoCodes)
+    const loadedPromos = await this.loadPromoCodes(requestedCodes)
     let promoMessage: string | null = null
+    const promoMessages: string[] = []
+    const promoInfoMessages: string[] = []
+    const promoSkipped: PricingQuoteResult['promoSkipped'] = []
 
-    if (input.validatePromo && input.promoCode?.trim() && !promo) {
-      promoMessage = 'Промокод недійсний або прострочений.'
-    }
-
-    if (promo && input.validatePromo) {
-      promoMessage = await this.validatePromoUsage(promo, input.audience.userId)
-      if (!promoMessage && !this.promoMatchesAudience(promo, input.audience)) {
-        promoMessage = 'Промокод недоступний для вашого облікового запису.'
+    if (input.validatePromo && requestedCodes.length) {
+      const loadedSet = new Set(loadedPromos.map((promo) => promo.code.toUpperCase()))
+      for (const code of requestedCodes) {
+        if (!loadedSet.has(code)) {
+          promoMessages.push(`Промокод ${code} недійсний або прострочений.`)
+        }
       }
     }
+
+    const promoUsageContext = {
+      splitOrderParts: input.splitOrderParts,
+      splitOrderPartIndex: input.splitOrderPartIndex,
+    }
+
+    const validatedPromos: LoadedPromo[] = []
+    for (const promo of loadedPromos) {
+      let message: string | null = null
+      if (input.validatePromo) {
+        message = await this.validatePromoUsage(promo, input.audience.userId, promoUsageContext)
+        if (!message && !this.promoMatchesAudience(promo, input.audience)) {
+          message = `Промокод ${promo.code} недоступний для вашого облікового запису.`
+        }
+      }
+      if (message) {
+        promoMessages.push(message)
+        continue
+      }
+      validatedPromos.push(promo)
+    }
+
+    if (validatedPromos.length > 1) {
+      const stackError = validatePromoStack(validatedPromos)
+      if (stackError) promoMessages.push(stackError)
+    }
+
+    const activePromos =
+      validatedPromos.length > 1 && promoMessages.some((msg) => msg.includes('не можна застосовувати'))
+        ? []
+        : validatedPromos
+
+    if (promoMessages.length) {
+      promoMessage = promoMessages[0]
+    }
+
+    const needsCategoryExpansion = activePromos.some(
+      (promo) =>
+        promo.target === DiscountTarget.CATEGORY || promo.excludeCategoryIds.length > 0,
+    )
+    const categoryExpansion = needsCategoryExpansion
+      ? await buildCategoryDescendantMap(this.prisma)
+      : undefined
 
     const preliminarySubtotal = variants.reduce((sum, variant) => {
       const quantity = uniqueItems.get(variant.id) ?? 0
@@ -405,7 +505,7 @@ export class PricingService {
     }, 0)
 
     const cartSubtotal = roundMoney(preliminarySubtotal)
-    const lines = []
+    const lines: PricingLineResult[] = []
     let subtotalBeforeDiscount = 0
 
     for (const variant of variants) {
@@ -467,95 +567,257 @@ export class PricingService {
         })
       }
 
-      if (promo && !promoMessage && promo.discountType && promo.value != null) {
-        if (this.promoAppliesToLine(promo, input.audience, variant, cartSubtotal)) {
-          candidates.push({
-            unitPrice: unitPriceFromRule(
-              baseUnitPrice,
-              promo.discountType,
-              Number(promo.value),
-            ),
-            source: 'promo_code',
-            label: `Промокод ${promo.code}`,
-          })
-        }
-      }
-
       const best = this.pickBestUnitPrice(candidates)
-      const lineTotal = roundMoney(best.unitPrice * quantity)
-
       lines.push({
         productVariantId: variant.id,
         quantity,
         baseUnitPrice,
         unitPrice: best.unitPrice,
-        lineTotal,
+        lineTotal: roundMoney(best.unitPrice * quantity),
         appliedSource: best.source,
         appliedLabel: best.label,
         stockToDecrement: variant.stock > 0 ? quantity : 0,
       })
     }
 
-    const giftLines = []
-    if (promo && !promoMessage && promo.giftVariantId) {
-      const qualifies =
-        promo.target === DiscountTarget.ALL_PRODUCTS ||
-        variants.some((variant) => this.promoAppliesToLine(promo, input.audience, variant, cartSubtotal))
+    const linePromos = activePromos.filter(
+      (promo) =>
+        promo.discountType === DiscountValueType.PERCENT &&
+        promo.value != null &&
+        resolvePromoApplicationScope(promo) === DiscountApplicationScope.LINE_ITEMS,
+    )
 
-      if (qualifies) {
-        const giftVariant = await this.prisma.productVariant.findUnique({
-          where: { id: promo.giftVariantId },
-          include: {
-            product: { select: { isPublished: true } },
-          },
+    const appliedPromoIds = new Set<string>()
+    const appliedPromoDetails = new Map<
+      string,
+      { appliedDiscountAmount?: number; unusedDiscountAmount?: number; infoMessage?: string }
+    >()
+
+    for (const promo of linePromos) {
+      if (promo.minCartSubtotal != null && cartSubtotal < Number(promo.minCartSubtotal)) {
+        if (input.validatePromo) {
+          promoMessages.push(this.formatMinCartSubtotalMessage(promo, cartSubtotal))
+        }
+        continue
+      }
+
+      let appliedOnPromo = false
+      let promoLineDiscount = 0
+      for (const line of lines) {
+        const variant = variants.find((row) => row.id === line.productVariantId)
+        if (!variant || !promoAppliesToVariant(promo, variant, categoryExpansion)) continue
+
+        const beforeUnit = line.unitPrice
+        const { nextUnit, applied } = computeLinePromoUnitPrice(
+          promo,
+          line,
+          Number(promo.value),
+        )
+        if (applied) {
+          promoLineDiscount += roundMoney((beforeUnit - nextUnit) * line.quantity)
+          line.unitPrice = nextUnit
+          line.lineTotal = roundMoney(nextUnit * line.quantity)
+          line.appliedSource = 'promo_code'
+          line.appliedLabel = `Промокод ${promo.code}`
+          appliedOnPromo = true
+        }
+      }
+
+      if (appliedOnPromo) {
+        appliedPromoIds.add(promo.id)
+        appliedPromoDetails.set(promo.id, {
+          appliedDiscountAmount: roundMoney(promoLineDiscount),
         })
-        if (giftVariant?.product.isPublished) {
-          giftLines.push({
-            productVariantId: giftVariant.id,
-            quantity: Math.max(1, promo.giftQuantity),
-            label: `Подарунок: ${promo.name}`,
-          })
+      } else if (input.validatePromo) {
+        const qualifies = promoQualifiesForCart(promo, variants, uniqueItems, categoryExpansion)
+        if (qualifies) {
+          promoSkipped.push({ code: promo.code, reason: 'no_additional_discount' })
+          promoInfoMessages.push(formatPromoNoAdditionalDiscountMessage(promo.code))
+        } else {
+          promoMessages.push(`Промокод ${promo.code} не застосовується до товарів у кошику.`)
         }
       }
     }
 
-    const totalAmount = roundMoney(lines.reduce((sum, line) => sum + line.lineTotal, 0))
+    let totalAmount = roundMoney(lines.reduce((sum, line) => sum + line.lineTotal, 0))
 
-    if (promo && !promoMessage) {
-      const hasDiscount = promo.discountType != null && promo.value != null
-      const hasGiftConfig = Boolean(promo.giftVariantId)
-      const promoWonOnLine = lines.some((line) => line.appliedSource === 'promo_code')
-      const hasGift = giftLines.length > 0
-      const appliesToAny = variants.some((variant) => {
-        const quantity = uniqueItems.get(variant.id) ?? 0
-        if (!quantity) return false
-        return this.promoAppliesToLine(promo, input.audience, variant, cartSubtotal)
-      })
+    const cartPromos = activePromos.filter((promo) => {
+      if (!promo.discountType || promo.value == null) return false
+      const scope = resolvePromoApplicationScope(promo)
+      return (
+        promo.discountType === DiscountValueType.FIXED ||
+        scope === DiscountApplicationScope.CART_TOTAL
+      )
+    })
 
-      const discountFailed = hasDiscount && !promoWonOnLine
-      const giftFailed = hasGiftConfig && !hasGift
+    for (const promo of cartPromos) {
+      if (promo.minCartSubtotal != null && cartSubtotal < Number(promo.minCartSubtotal)) {
+        if (input.validatePromo) {
+          promoMessages.push(this.formatMinCartSubtotalMessage(promo, cartSubtotal))
+        }
+        continue
+      }
+      if (!promoQualifiesForCart(promo, variants, uniqueItems, categoryExpansion)) {
+        if (input.validatePromo) {
+          promoMessages.push(`Промокод ${promo.code} не застосовується до товарів у кошику.`)
+        }
+        continue
+      }
 
-      if (discountFailed && giftFailed) {
-        promoMessage = appliesToAny
-          ? 'Промокод не дає додаткової знижки — уже діє краща ціна.'
-          : 'Промокод не застосовується до товарів у кошику.'
-      } else if (hasDiscount && !hasGiftConfig && discountFailed) {
-        promoMessage = appliesToAny
-          ? 'Промокод не дає додаткової знижки — уже діє краща ціна.'
-          : 'Промокод не застосовується до товарів у кошику.'
-      } else if (hasGiftConfig && !hasDiscount && giftFailed) {
-        promoMessage = 'Промокод не застосовується до товарів у кошику.'
+      const qualifyingSubtotal = sumQualifyingLineTotals(lines, variants, promo, categoryExpansion)
+      if (qualifyingSubtotal <= 0) {
+        if (input.validatePromo) {
+          promoMessages.push(`Промокод ${promo.code} не застосовується до товарів у кошику.`)
+        }
+        continue
+      }
+
+      const qualifyingBaseSubtotal = sumQualifyingBaseSubtotal(
+        lines,
+        variants,
+        promo,
+        categoryExpansion,
+      )
+      const { actualDiscount: discount, unusedDiscount } = computeCartPromoDiscount(
+        promo,
+        qualifyingSubtotal,
+        qualifyingBaseSubtotal,
+      )
+
+      if (discount <= 0) {
+        if (input.validatePromo) {
+          promoSkipped.push({ code: promo.code, reason: 'no_additional_discount' })
+          promoInfoMessages.push(formatPromoNoAdditionalDiscountMessage(promo.code))
+        }
+        continue
+      }
+
+      appliedPromoIds.add(promo.id)
+      const promoDetails = appliedPromoDetails.get(promo.id) ?? {}
+      promoDetails.appliedDiscountAmount = roundMoney(
+        (promoDetails.appliedDiscountAmount ?? 0) + discount,
+      )
+      if (unusedDiscount > 0) {
+        promoDetails.unusedDiscountAmount = unusedDiscount
+        promoDetails.infoMessage = formatUnusedPromoDiscountMessage(promo.code, unusedDiscount)
+        if (input.validatePromo) {
+          promoMessages.push(promoDetails.infoMessage)
+        }
+      }
+      appliedPromoDetails.set(promo.id, promoDetails)
+      totalAmount = roundMoney(Math.max(0, totalAmount - discount))
+      for (const line of lines) {
+        const variant = variants.find((row) => row.id === line.productVariantId)
+        if (!variant || !promoAppliesToVariant(promo, variant, categoryExpansion)) continue
+        line.appliedSource = 'promo_code'
+        line.appliedLabel = `Промокод ${promo.code}`
       }
     }
+
+    const giftLines: PricingQuoteResult['giftLines'] = []
+    for (const promo of activePromos) {
+      if (!promo.giftVariantId) continue
+      if (promo.minCartSubtotal != null && cartSubtotal < Number(promo.minCartSubtotal)) {
+        if (input.validatePromo) {
+          promoMessages.push(this.formatMinCartSubtotalMessage(promo, cartSubtotal))
+        }
+        continue
+      }
+
+      const qualifies = promoQualifiesForCart(promo, variants, uniqueItems, categoryExpansion)
+      if (!qualifies) {
+        if (input.validatePromo) {
+          promoMessages.push(`Промокод ${promo.code} не застосовується до товарів у кошику.`)
+        }
+        continue
+      }
+
+      const giftVariant = await this.prisma.productVariant.findUnique({
+        where: { id: promo.giftVariantId },
+        include: {
+          product: {
+            include: {
+              translations: { where: { locale: DEFAULT_LOCALE }, take: 1 },
+            },
+          },
+          attributeValues: {
+            include: {
+              value: {
+                include: {
+                  translations: { where: { locale: DEFAULT_LOCALE } },
+                  attribute: { select: VARIANT_LABEL_ATTRIBUTE_SELECT },
+                },
+              },
+            },
+          },
+        },
+      })
+      if (!giftVariant) {
+        if (input.validatePromo) {
+          promoMessages.push(`Подарунок за промокодом ${promo.code} тимчасово недоступний.`)
+        }
+        continue
+      }
+
+      if (!giftVariant.product.isPublished) {
+        if (input.validatePromo) {
+          promoMessages.push(`Подарунок за промокодом ${promo.code} тимчасово недоступний.`)
+        }
+        continue
+      }
+
+      if (giftLines.some((gift) => gift.productVariantId === giftVariant.id)) continue
+
+      const productName =
+        giftVariant.product.translations[0]?.name ?? giftVariant.product.slug
+      const typeOrder = await this.variantLabels.getTypeOrder()
+      const variantLabel = this.variantLabels.buildFromLinksWithOrder(
+        giftVariant.attributeValues,
+        typeOrder,
+      )
+      const giftTitle = variantLabel ? `${productName} (${variantLabel})` : productName
+
+      appliedPromoIds.add(promo.id)
+      giftLines.push({
+        productVariantId: giftVariant.id,
+        productSlug: giftVariant.product.slug,
+        quantity: Math.max(1, promo.giftQuantity),
+        label: `Подарунок: ${giftTitle}`,
+      })
+    }
+
+    if (!promoMessage && promoMessages.length) {
+      promoMessage = promoMessages[0]
+    }
+
+    const effectivelyAppliedPromos = activePromos.filter((promo) => appliedPromoIds.has(promo.id))
+    const appliedPromoCodes = effectivelyAppliedPromos.map((promo) => promo.code)
+    const appliedPromoIdList = effectivelyAppliedPromos.map((promo) => promo.id)
+    const appliedPromos = effectivelyAppliedPromos.map((promo) => {
+      const details = appliedPromoDetails.get(promo.id)
+      return {
+        code: promo.code,
+        name: promo.name,
+        appliedDiscountAmount: details?.appliedDiscountAmount ?? null,
+        unusedDiscountAmount: details?.unusedDiscountAmount ?? null,
+        infoMessage: details?.infoMessage ?? null,
+      }
+    })
 
     return {
       lines,
       giftLines,
       subtotalBeforeDiscount: roundMoney(subtotalBeforeDiscount),
       totalAmount,
-      promoCodeId: promo && !promoMessage ? promo.id : null,
-      promoCode: promo && !promoMessage ? promo.code : null,
+      promoCodeId: appliedPromoIdList[0] ?? null,
+      promoCode: appliedPromoCodes[0] ?? null,
+      promoCodeIds: appliedPromoIdList,
+      promoCodes: appliedPromoCodes,
+      appliedPromos,
       promoMessage,
+      promoMessages: promoMessages.length ? promoMessages : null,
+      promoInfoMessages: promoInfoMessages.length ? promoInfoMessages : null,
+      promoSkipped,
     }
   }
 }

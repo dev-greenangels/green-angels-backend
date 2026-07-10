@@ -7,12 +7,19 @@ import { Prisma, VariantQuantityDiscountType } from '@prisma/client'
 
 import { normalizePhoneE164 } from '../auth/auth.utils'
 import { computeCheckoutTotals } from '../pricing/checkout-totals'
+import { normalizePromoCodesInput } from '../pricing/pricing.promo'
 import { PricingService } from '../pricing/pricing.service'
 import { SettingsService } from '../settings/settings.service'
 import { PrismaService } from '../prisma/prisma.service'
+import { CommerceService } from '../commerce/commerce.service'
+import { VariantLabelService } from '../products/variant-label.service'
+import { ProductsService } from '../products/products.service'
+import { VARIANT_LABEL_ATTRIBUTE_SELECT } from '../products/variant-label.util'
 import { UsersService } from '../users/users.service'
 import { CreateOrderDto } from './dto/create-order.dto'
 import { isOrderStatus, type OrderStatus } from './order-status.constants'
+import { MONOPAY_PAYMENT_METHOD } from '../monopay/monopay.constants'
+import { MonopayService } from '../monopay/monopay.service'
 
 const PREORDER_MAX_QTY = 99
 const DEFAULT_LOCALE = 'uk'
@@ -66,6 +73,47 @@ export type CreatedOrderResponse = {
   totalAmount: number
   currency: string
   createdAt: string
+  paymentPageUrl?: string
+}
+
+export type PublicOrderConfirmationItem = {
+  id: string
+  quantity: number
+  priceAtPurchase: number
+  lineTotal: number
+  productName: string
+  productSlug: string
+  variantLabel: string | null
+}
+
+export type PublicOrderConfirmation = {
+  id: string
+  orderNumber: string
+  status: string
+  currency: string
+  createdAt: string
+  totalAmount: number
+  productsSubtotal: number | null
+  deliveryAmount: number | null
+  packagingAmount: number | null
+  taxAmount: number | null
+  customerFirstName: string
+  customerLastName: string
+  customerPatronymic: string | null
+  customerPhone: string
+  customerEmail: string | null
+  receiverFirstName: string
+  receiverLastName: string
+  receiverPatronymic: string | null
+  receiverPhone: string
+  deliveryMethod: string
+  deliveryCity: string | null
+  deliveryBranch: string | null
+  deliveryStreet: string | null
+  deliveryHouseNumber: string | null
+  paymentMethod: string
+  comment: string | null
+  items: PublicOrderConfirmationItem[]
 }
 
 @Injectable()
@@ -75,16 +123,65 @@ export class OrdersService {
     private readonly users: UsersService,
     private readonly pricing: PricingService,
     private readonly settings: SettingsService,
+    private readonly variantLabels: VariantLabelService,
+    private readonly monopay: MonopayService,
+    private readonly commerce: CommerceService,
+    private readonly products: ProductsService,
   ) {}
 
   formatOrderNumber(orderNumber: number): string {
     return `ZY-${String(orderNumber).padStart(8, '0')}`
   }
 
-  private readVariantLabel(attributes: unknown): string | null {
-    if (!attributes || typeof attributes !== 'object') return null
-    const label = (attributes as { label?: unknown }).label
-    return typeof label === 'string' && label.trim() ? label.trim() : null
+  private async resolveOrderItemSnapshots(variantIds: string[]) {
+    const uniqueIds = [...new Set(variantIds)]
+    if (!uniqueIds.length) return new Map<string, {
+      productName: string
+      productSlug: string
+      variantLabel: string | null
+      sku: string | null
+    }>()
+
+    const variants = await this.prisma.productVariant.findMany({
+      where: { id: { in: uniqueIds } },
+      include: {
+        attributeValues: {
+          include: {
+            value: {
+              include: {
+                translations: { where: { locale: DEFAULT_LOCALE } },
+                attribute: { select: VARIANT_LABEL_ATTRIBUTE_SELECT },
+              },
+            },
+          },
+        },
+        product: {
+          include: {
+            translations: { where: { locale: DEFAULT_LOCALE }, take: 1 },
+          },
+        },
+      },
+    })
+
+    const typeOrder = await this.variantLabels.getTypeOrder()
+
+    const map = new Map<string, {
+      productName: string
+      productSlug: string
+      variantLabel: string | null
+      sku: string | null
+    }>()
+
+    for (const variant of variants) {
+      map.set(variant.id, {
+        productName: variant.product.translations[0]?.name ?? variant.product.slug,
+        productSlug: variant.product.slug,
+        variantLabel: this.variantLabels.buildFromLinksWithOrder(variant.attributeValues, typeOrder),
+        sku: variant.sku,
+      })
+    }
+
+    return map
   }
 
   private normalizeListStatus(status: string): OrderStatus {
@@ -205,20 +302,7 @@ export class OrdersService {
       where: { id },
       include: {
         items: {
-          include: {
-            productVariant: {
-              include: {
-                product: {
-                  include: {
-                    translations: {
-                      where: { locale: DEFAULT_LOCALE },
-                      take: 1,
-                    },
-                  },
-                },
-              },
-            },
-          },
+          orderBy: { id: 'asc' },
         },
       },
     })
@@ -243,20 +327,79 @@ export class OrdersService {
       paymentMethod: order.paymentMethod,
       comment: order.comment,
       items: order.items.map((item) => {
-        const variant = item.productVariant
-        const product = variant.product
-        const productName = product.translations[0]?.name ?? product.slug
         const lineTotal = Math.round(Number(item.priceAtPurchase) * item.quantity * 100) / 100
         return {
           id: item.id,
           quantity: item.quantity,
           priceAtPurchase: Number(item.priceAtPurchase),
           lineTotal,
-          productVariantId: item.productVariantId,
-          productName,
-          productSlug: product.slug,
-          variantLabel: this.readVariantLabel(variant.attributes),
-          sku: variant.sku,
+          productVariantId: item.productVariantId ?? '',
+          productName: item.productName,
+          productSlug: item.productSlug,
+          variantLabel: item.variantLabel,
+          sku: item.sku,
+        }
+      }),
+    }
+  }
+
+  async findConfirmationByOrderNumber(rawOrderNumber: string): Promise<PublicOrderConfirmation> {
+    const match = rawOrderNumber.trim().match(/(\d+)$/)
+    const numeric = match ? Number(match[1]) : Number.NaN
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { orderNumber: numeric },
+      include: {
+        items: {
+          orderBy: { id: 'asc' },
+        },
+      },
+    })
+
+    if (!order) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+
+    return {
+      id: order.id,
+      orderNumber: this.formatOrderNumber(order.orderNumber),
+      status: order.status,
+      currency: order.currency,
+      createdAt: order.createdAt.toISOString(),
+      totalAmount: Number(order.totalAmount),
+      productsSubtotal: order.productsSubtotal != null ? Number(order.productsSubtotal) : null,
+      deliveryAmount: order.deliveryAmount != null ? Number(order.deliveryAmount) : null,
+      packagingAmount: order.packagingAmount != null ? Number(order.packagingAmount) : null,
+      taxAmount: order.taxAmount != null ? Number(order.taxAmount) : null,
+      customerFirstName: order.customerFirstName,
+      customerLastName: order.customerLastName,
+      customerPatronymic: order.customerPatronymic,
+      customerPhone: order.customerPhone,
+      customerEmail: order.customerEmail,
+      receiverFirstName: order.receiverFirstName,
+      receiverLastName: order.receiverLastName,
+      receiverPatronymic: order.receiverPatronymic,
+      receiverPhone: order.receiverPhone,
+      deliveryMethod: order.deliveryMethod,
+      deliveryCity: order.deliveryCity,
+      deliveryBranch: order.deliveryBranch,
+      deliveryStreet: order.deliveryStreet,
+      deliveryHouseNumber: order.deliveryHouseNumber,
+      paymentMethod: order.paymentMethod,
+      comment: order.comment,
+      items: order.items.map((item) => {
+        const lineTotal = Math.round(Number(item.priceAtPurchase) * item.quantity * 100) / 100
+        return {
+          id: item.id,
+          quantity: item.quantity,
+          priceAtPurchase: Number(item.priceAtPurchase),
+          lineTotal,
+          productName: item.productName,
+          productSlug: item.productSlug,
+          variantLabel: item.variantLabel,
         }
       }),
     }
@@ -372,6 +515,20 @@ export class OrdersService {
     }
   }
 
+  private async validateCheckoutMethods(dto: CreateOrderDto): Promise<void> {
+    const settings = await this.settings.getCartCheckoutSettings()
+    const deliveryMethod = dto.deliveryMethod.trim()
+    const paymentMethod = dto.paymentMethod.trim()
+
+    if (!settings.enabledDeliveryMethods.includes(deliveryMethod as never)) {
+      throw new BadRequestException('Обраний спосіб доставки недоступний.')
+    }
+
+    if (!settings.enabledPaymentMethods.includes(paymentMethod as never)) {
+      throw new BadRequestException('Обраний спосіб оплати недоступний.')
+    }
+  }
+
   private async resolveContractorDiscountPercent(phone: string): Promise<number> {
     const normalized = normalizePhoneE164(phone)
     if (!normalized) return 0
@@ -388,18 +545,41 @@ export class OrdersService {
     )
   }
 
-  async create(dto: CreateOrderDto): Promise<CreatedOrderResponse> {
+  async create(
+    dto: CreateOrderDto,
+    sessionUserId?: string,
+  ): Promise<CreatedOrderResponse> {
     const customerPhone = normalizePhoneE164(dto.customerPhone) ?? dto.customerPhone.trim()
-    const audience = await this.pricing.resolveAudience({ customerPhone })
+    const audience = await this.pricing.resolveAudience({
+      customerPhone,
+      userId: sessionUserId,
+    })
     const quote = await this.pricing.quote({
       items: dto.items,
       audience,
       promoCode: dto.promoCode,
+      promoCodes: dto.promoCodes,
       validatePromo: true,
+      splitOrderParts: dto.splitCheckout?.partCount,
+      splitOrderPartIndex: dto.splitCheckout?.partIndex,
     })
 
-    if (dto.promoCode?.trim() && quote.promoMessage) {
-      throw new BadRequestException(quote.promoMessage)
+    const requestedPromoCodes = normalizePromoCodesInput(dto.promoCode, dto.promoCodes)
+    if (requestedPromoCodes.length) {
+      const appliedSet = new Set((quote.promoCodes ?? []).map((code) => code.toUpperCase()))
+      const blockingMissing = requestedPromoCodes.filter(
+        (code) =>
+          !appliedSet.has(code) &&
+          !quote.promoSkipped?.some(
+            (item) =>
+              item.code.toUpperCase() === code && item.reason === 'no_additional_discount',
+          ),
+      )
+      if (blockingMissing.length > 0) {
+        throw new BadRequestException(
+          quote.promoMessage ?? `Промокод ${blockingMissing[0]} не застосовано.`,
+        )
+      }
     }
 
     const lineItems = quote.lines.map((line) => ({
@@ -420,6 +600,7 @@ export class OrdersService {
 
     const deliveryMethod = dto.deliveryMethod.trim()
     const cartSettings = await this.settings.getCartCheckoutSettings()
+    const currency = await this.commerce.getDefaultCurrencyCode()
     const checkout = computeCheckoutTotals({
       productsSubtotal: quote.totalAmount,
       subtotalBeforeDiscount: quote.subtotalBeforeDiscount,
@@ -438,14 +619,27 @@ export class OrdersService {
       normalizePhoneE164(dto.receiverPhone) ?? dto.receiverPhone.trim()
 
     this.validateDeliveryFields(dto)
+    await this.validateCheckoutMethods(dto)
 
-    const userId = await this.users.findOrCreateCustomer({
-      phone: customerPhone,
-      firstName: dto.customerFirstName,
-      lastName: dto.customerLastName,
-      patronymic: dto.customerPatronymic,
-      email: dto.customerEmail,
-    })
+    const userId =
+      sessionUserId ??
+      (await this.users.findOrCreateCustomer({
+        phone: customerPhone,
+        firstName: dto.customerFirstName,
+        lastName: dto.customerLastName,
+        patronymic: dto.customerPatronymic,
+        email: dto.customerEmail,
+      }))
+
+    const snapshotByVariantId = await this.resolveOrderItemSnapshots(
+      lineItems.map((item) => item.productVariantId),
+    )
+
+    for (const item of lineItems) {
+      if (!snapshotByVariantId.has(item.productVariantId)) {
+        throw new BadRequestException('Один або кілька товарів недоступні для замовлення.')
+      }
+    }
 
     const order = await this.prisma.$transaction(async (tx) => {
       const created = await tx.order.create({
@@ -456,7 +650,7 @@ export class OrdersService {
           deliveryAmount: checkout.deliveryAmount,
           packagingAmount: checkout.packagingAmount,
           taxAmount: checkout.taxAmount,
-          currency: 'UAH',
+          currency,
           customerFirstName: dto.customerFirstName.trim(),
           customerLastName: dto.customerLastName.trim(),
           customerPatronymic: dto.customerPatronymic?.trim() || null,
@@ -484,13 +678,26 @@ export class OrdersService {
           paymentMethod: dto.paymentMethod.trim(),
           comment: dto.comment?.trim() || null,
           userId,
-          promoCodeId: quote.promoCodeId,
+          promoCodeId: quote.promoCodeIds[0] ?? quote.promoCodeId,
+          promoCodes:
+            quote.promoCodeIds.length > 0
+              ? {
+                  create: quote.promoCodeIds.map((promoCodeId) => ({ promoCodeId })),
+                }
+              : undefined,
           items: {
-            create: lineItems.map((item) => ({
-              productVariantId: item.productVariantId,
-              quantity: item.quantity,
-              priceAtPurchase: item.priceAtPurchase,
-            })),
+            create: lineItems.map((item) => {
+              const snapshot = snapshotByVariantId.get(item.productVariantId)!
+              return {
+                productVariantId: item.productVariantId,
+                quantity: item.quantity,
+                priceAtPurchase: item.priceAtPurchase,
+                productName: snapshot.productName,
+                productSlug: snapshot.productSlug,
+                variantLabel: snapshot.variantLabel,
+                sku: snapshot.sku,
+              }
+            }),
           },
         },
         select: {
@@ -503,28 +710,46 @@ export class OrdersService {
         },
       })
 
+      const affectedProductIds = new Set<string>()
       for (const item of lineItems) {
         if (item.stockToDecrement <= 0) continue
+        const variant = await tx.productVariant.findUnique({
+          where: { id: item.productVariantId },
+          select: { productId: true },
+        })
         await tx.productVariant.update({
           where: { id: item.productVariantId },
           data: { stock: { decrement: item.stockToDecrement } },
         })
+        if (variant?.productId) {
+          affectedProductIds.add(variant.productId)
+        }
       }
 
-      if (quote.promoCodeId) {
-        await tx.promoCodeUsage.create({
-          data: {
-            promoCodeId: quote.promoCodeId,
-            userId,
-            orderId: created.id,
-          },
-        })
+      for (const productId of affectedProductIds) {
+        await this.products.touchProductAvailability(productId, tx)
+      }
+
+      if (quote.promoCodeIds.length > 0) {
+        const splitPartIndex = dto.splitCheckout?.partIndex ?? 0
+        const splitPartCount = dto.splitCheckout?.partCount ?? 1
+        const shouldRecordUsage = splitPartCount <= 1 || splitPartIndex === 0
+
+        if (shouldRecordUsage) {
+          await tx.promoCodeUsage.createMany({
+            data: quote.promoCodeIds.map((promoCodeId) => ({
+              promoCodeId,
+              userId,
+              orderId: created.id,
+            })),
+          })
+        }
       }
 
       return created
     })
 
-    return {
+    const response: CreatedOrderResponse = {
       id: order.id,
       orderNumber: this.formatOrderNumber(order.orderNumber),
       status: order.status,
@@ -532,5 +757,11 @@ export class OrdersService {
       currency: order.currency,
       createdAt: order.createdAt.toISOString(),
     }
+
+    if (dto.paymentMethod.trim() === MONOPAY_PAYMENT_METHOD) {
+      response.paymentPageUrl = await this.monopay.createInvoiceForOrder(order.id)
+    }
+
+    return response
   }
 }

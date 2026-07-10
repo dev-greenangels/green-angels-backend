@@ -1,16 +1,30 @@
-import { Type } from 'class-transformer'
+import { Transform, Type } from 'class-transformer'
 import {
   ArrayMinSize,
   IsArray,
   IsEmail,
+  IsInt,
   IsOptional,
   IsString,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator'
 
 import { CreateOrderItemDto } from './create-order-item.dto'
+
+class SplitCheckoutDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  partIndex!: number
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(2)
+  partCount!: number
+}
 
 export class CreateOrderDto {
   @IsArray()
@@ -40,6 +54,7 @@ export class CreateOrderDto {
   customerPhone!: string
 
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' && value.trim() ? value.trim() : undefined))
   @IsEmail()
   @MaxLength(200)
   customerEmail?: string
@@ -103,4 +118,15 @@ export class CreateOrderDto {
   @IsString()
   @MaxLength(64)
   promoCode?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  promoCodes?: string[]
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SplitCheckoutDto)
+  splitCheckout?: SplitCheckoutDto
 }

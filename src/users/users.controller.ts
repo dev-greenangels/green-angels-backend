@@ -16,14 +16,14 @@ import type { Request } from 'express'
 import type { SessionJwtPayload } from '../auth/auth.constants'
 import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
-import { JwtAuthGuard } from '../auth/jwt-auth.guard'
+import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { CreateStaffDto } from './dto/create-staff.dto'
 import { DeleteUserDto } from './dto/delete-user.dto'
 import { UpdateUserDto } from './dto/update-user.dto'
 import { UsersService } from './users.service'
 
 @Controller('users')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(BackstageJwtAuthGuard, RolesGuard)
 @Roles(Role.ADMIN, Role.MANAGER)
 export class UsersController {
   constructor(private readonly users: UsersService) {}

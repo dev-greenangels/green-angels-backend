@@ -22,7 +22,10 @@ export class PricingController {
       items: dto.items,
       audience,
       promoCode: dto.promoCode,
+      promoCodes: dto.promoCodes,
       validatePromo: true,
+      splitOrderParts: dto.splitOrderParts,
+      splitOrderPartIndex: dto.splitOrderPartIndex,
     })
 
     const cartSettings = await this.settings.getCartCheckoutSettings()

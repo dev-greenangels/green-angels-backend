@@ -44,14 +44,13 @@ export class CreateProductVariantDto {
   @MaxLength(64)
   legacyId?: string
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  label?: string
-
   @IsArray()
   @IsUUID('4', { each: true })
   attributeValueIds!: string[]
+
+  @IsOptional()
+  @IsUUID()
+  salesUnitId?: string
 
   @IsOptional()
   @IsDateString()

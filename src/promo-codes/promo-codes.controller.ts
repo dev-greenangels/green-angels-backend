@@ -3,12 +3,12 @@ import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
-import { JwtAuthGuard } from '../auth/jwt-auth.guard'
+import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { UpsertPromoCodeDto } from './dto/upsert-promo-code.dto'
 import { PromoCodesService } from './promo-codes.service'
 
 @Controller('promo-codes')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(BackstageJwtAuthGuard, RolesGuard)
 @Roles(Role.ADMIN, Role.MANAGER)
 export class PromoCodesController {
   constructor(private readonly promos: PromoCodesService) {}

@@ -43,9 +43,17 @@ Health: `GET /health`
 | POST | `/auth/register` | Реєстрація |
 | GET | `/auth/session` | Поточна сесія (cookie або Bearer) |
 | POST | `/auth/logout` | Вихід |
-| POST | `/auth/oauth/google` | Mock Google OAuth (як у shop) |
+| GET | `/auth/oauth/google/config` | Чи налаштовано Google OAuth |
+| POST | `/auth/oauth/google/callback` | Обмін code → сесія (викликає shop після redirect Google) |
 
-`JWT_SECRET` має збігатися з `AUTH_SESSION_SECRET` у shop (мін. 32 символи), щоб токени були взаємозамінні.
+`JWT_SECRET` має збігатися з `JWT_SECRET` у shop (мін. 32 символи).
+
+### Google OAuth
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → Credentials → Create OAuth client ID (Web).
+2. **Authorized redirect URIs:** `http://localhost:3000/api/auth/oauth/google/callback` (прод — ваша публічна URL магазину).
+3. У `green-angels-backend/.env`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
+4. У `green-angels-shop/.env.local`: `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (той самий Client ID), `NEXT_PUBLIC_SITE_URL`.
 
 ## Фронтенд
 

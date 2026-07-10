@@ -12,7 +12,10 @@ import { Response } from 'express'
 
 import { PrismaService } from '../prisma/prisma.service'
 import { UsersService } from '../users/users.service'
+import { OtpService } from './otp.service'
 import {
+  BACKSTAGE_SESSION_COOKIE_NAME,
+  BACKSTAGE_SESSION_MAX_AGE_SEC,
   SESSION_COOKIE_NAME,
   SESSION_MAX_AGE_SEC,
   type ApiUserRole,
@@ -29,17 +32,12 @@ import { BackstageLoginDto } from './dto/backstage-login.dto'
 import { GoogleOAuthCallbackDto } from './dto/google-oauth-callback.dto'
 import { LoginDto } from './dto/login.dto'
 import { PhoneSessionDto } from './dto/phone-session.dto'
+import { EmailSessionDto } from './dto/email-session.dto'
+import { SendOtpDto } from './dto/send-otp.dto'
+import { VerifyOtpDto } from './dto/verify-otp.dto'
 import { RegisterDto } from './dto/register.dto'
+import { CheckoutIdentityDto } from './dto/checkout-identity.dto'
 import type { GoogleIdTokenInfo, GoogleOAuthProfile, GoogleTokenResponse } from './google-oauth.utils'
-
-const MOCK_GOOGLE_SUB = 'mock-google-olena'
-const MOCK_GOOGLE_EMAIL = 'olena.kovalenko@gmail.com'
-const MOCK_GOOGLE_PROFILE = {
-  firstName: 'Олена',
-  lastName: 'Коваленко',
-  phone: '+380631768178',
-  personalDiscountPercent: 5,
-}
 
 @Injectable()
 export class AuthService {
@@ -48,6 +46,7 @@ export class AuthService {
     private readonly users: UsersService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly otp: OtpService,
   ) {}
 
   private signToken(userId: string, role: ApiUserRole): string {
@@ -56,6 +55,16 @@ export class AuthService {
       {
         subject: userId,
         expiresIn: SESSION_MAX_AGE_SEC,
+      },
+    )
+  }
+
+  private signBackstageToken(userId: string, role: ApiUserRole): string {
+    return this.jwt.sign(
+      { role, v: 1 },
+      {
+        subject: userId,
+        expiresIn: BACKSTAGE_SESSION_MAX_AGE_SEC,
       },
     )
   }
@@ -82,7 +91,7 @@ export class AuthService {
     return {
       user: {
         id: user.id,
-        email: user.email ?? user.phone ?? user.id,
+        email: user.email,
         phone: user.phone,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -116,6 +125,32 @@ export class AuthService {
     })
   }
 
+  setBackstageSessionCookie(res: Response, token: string) {
+    const secure = this.config.get<string>('NODE_ENV') === 'production'
+    res.cookie(BACKSTAGE_SESSION_COOKIE_NAME, token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure,
+      path: '/',
+      maxAge: BACKSTAGE_SESSION_MAX_AGE_SEC * 1000,
+    })
+  }
+
+  clearBackstageSessionCookie(res: Response) {
+    const secure = this.config.get<string>('NODE_ENV') === 'production'
+    res.clearCookie(BACKSTAGE_SESSION_COOKIE_NAME, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure,
+      path: '/',
+    })
+  }
+
+  backstageLogout(res: Response) {
+    this.clearBackstageSessionCookie(res)
+    return { ok: true }
+  }
+
   async backstageLogin(dto: BackstageLoginDto, res: Response) {
     const email = dto.email.trim().toLowerCase()
     const user = await this.prisma.user.findUnique({ where: { email } })
@@ -134,8 +169,8 @@ export class AuthService {
     }
 
     const sessionUser = this.toSessionUser(user)
-    const token = this.signToken(user.id, sessionUser.role)
-    this.setSessionCookie(res, token)
+    const token = this.signBackstageToken(user.id, sessionUser.role)
+    this.setBackstageSessionCookie(res, token)
 
     return { ok: true, ...this.toLegacySessionResponse(sessionUser) }
   }
@@ -228,19 +263,28 @@ export class AuthService {
       throw new BadRequestException('Невірний формат телефону.')
     }
 
-    const email = dto.email?.trim().toLowerCase()
+    const isUkrainian = phone.startsWith('+380')
+    if (isUkrainian) {
+      if (!dto.verificationToken) {
+        throw new UnauthorizedException('Потрібна верифікація телефону.')
+      }
+      const verified = await this.otp.consumeVerificationToken(
+        dto.verificationToken,
+        'phone',
+        phone,
+      )
+      if (!verified) {
+        throw new UnauthorizedException('Невалідний або прострочений токен верифікації.')
+      }
+    }
 
-    const userId = await this.users.findOrCreateCustomer({
-      phone,
-      email,
-    })
+    const userId = await this.users.findOrCreateCustomer({ phone })
 
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: {
         phoneVerified: true,
         phone,
-        ...(email ? { email, emailVerified: true } : {}),
       },
     })
 
@@ -249,6 +293,182 @@ export class AuthService {
     this.setSessionCookie(res, token)
 
     return { ok: true, ...this.toLegacySessionResponse(sessionUser) }
+  }
+
+  async emailSession(dto: EmailSessionDto, res: Response) {
+    const email = dto.email.trim().toLowerCase()
+
+    const verified = await this.otp.consumeVerificationToken(
+      dto.verificationToken,
+      'email',
+      email,
+    )
+    if (!verified) {
+      throw new UnauthorizedException('Невалідний або прострочений токен верифікації.')
+    }
+
+    const userId = await this.users.findOrCreateCustomer({ email })
+
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        email,
+        emailVerified: true,
+      },
+    })
+
+    const sessionUser = this.toSessionUser(user)
+    const token = this.signToken(user.id, sessionUser.role)
+    this.setSessionCookie(res, token)
+
+    return { ok: true, ...this.toLegacySessionResponse(sessionUser) }
+  }
+
+  async sendOtp(dto: SendOtpDto) {
+    if (dto.phone?.trim()) {
+      await this.otp.sendPhoneOtp(dto.phone)
+      return { ok: true }
+    }
+    if (dto.email?.trim()) {
+      await this.otp.sendEmailOtp(dto.email)
+      return { ok: true }
+    }
+    throw new BadRequestException('Вкажіть телефон або email.')
+  }
+
+  async verifyOtp(dto: VerifyOtpDto) {
+    if (dto.phone?.trim()) {
+      return this.otp.verifyPhoneOtp(dto.phone, dto.code)
+    }
+    if (dto.email?.trim()) {
+      return this.otp.verifyEmailOtp(dto.email, dto.code)
+    }
+    throw new BadRequestException('Вкажіть телефон або email.')
+  }
+
+  async customerByPhone(phoneRaw: string) {
+    const phone = normalizePhoneE164(phoneRaw)
+    if (!phone) {
+      throw new BadRequestException('Невірний формат телефону.')
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { phone } })
+    if (!user) {
+      return { found: false as const }
+    }
+
+    return this.buildCustomerLookupWithDiscount(user)
+  }
+
+  async customerByEmail(emailRaw: string) {
+    const email = emailRaw.trim().toLowerCase()
+    if (!email || !email.includes('@')) {
+      throw new BadRequestException('Невірний формат email.')
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { email } })
+    if (!user) {
+      return { found: false as const }
+    }
+
+    return this.buildCustomerLookupWithDiscount(user)
+  }
+
+  async resolveCheckoutIdentity(dto: CheckoutIdentityDto, res: Response) {
+    const phone = dto.phone?.trim() ? normalizePhoneE164(dto.phone) : null
+    const email = dto.email?.trim().toLowerCase() || null
+
+    if (!phone && !email) {
+      throw new BadRequestException('Вкажіть телефон або email.')
+    }
+
+    const channel = phone ? ('phone' as const) : ('email' as const)
+    const identity = phone ?? email!
+
+    const tokenValid = await this.otp.matchVerificationToken(
+      dto.verificationToken,
+      channel,
+      identity,
+    )
+    if (!tokenValid) {
+      throw new UnauthorizedException('Невалідний або прострочений токен верифікації.')
+    }
+
+    let user = phone
+      ? await this.prisma.user.findUnique({ where: { phone } })
+      : await this.prisma.user.findUnique({ where: { email: email! } })
+
+    if (!user) {
+      const firstName = dto.firstName?.trim() || null
+      const lastName = dto.lastName?.trim() || null
+      if (!firstName || !lastName) {
+        return { found: false as const, needsProfile: true as const }
+      }
+
+      const userId = await this.users.findOrCreateCustomer({
+        phone: phone ?? undefined,
+        email: email ?? undefined,
+        firstName,
+        lastName,
+      })
+      user = await this.prisma.user.findUnique({ where: { id: userId } })
+      if (!user) {
+        throw new BadRequestException('Не вдалося створити профіль замовника.')
+      }
+    }
+
+    await this.otp.consumeVerificationToken(dto.verificationToken, channel, identity)
+
+    user = await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        ...(phone ? { phone, phoneVerified: true } : {}),
+        ...(email ? { email, emailVerified: true } : {}),
+      },
+    })
+
+    const sessionUser = this.toSessionUser(user)
+    const jwt = this.signToken(user.id, sessionUser.role)
+    this.setSessionCookie(res, jwt)
+
+    const profile = await this.buildCustomerLookupWithDiscount(user)
+    return {
+      ok: true as const,
+      needsProfile: false as const,
+      ...profile,
+      phone: user.phone ?? phone ?? undefined,
+      email: user.email ?? email ?? undefined,
+      user: this.toLegacySessionResponse(sessionUser).user,
+    }
+  }
+
+  private buildCustomerLookup(user: {
+    id: string
+    firstName: string | null
+    lastName: string | null
+    email: string | null
+    phone: string | null
+  }) {
+    return {
+      found: true as const,
+      firstName: user.firstName ?? undefined,
+      lastName: user.lastName ?? undefined,
+      email: user.email ?? undefined,
+      phone: user.phone ?? undefined,
+      personalDiscountPercent: 0 as number,
+    }
+  }
+
+  private async buildCustomerLookupWithDiscount(user: {
+    id: string
+    firstName: string | null
+    lastName: string | null
+    email: string | null
+    phone: string | null
+  }) {
+    const profile = this.buildCustomerLookup(user)
+    profile.personalDiscountPercent = await this.resolvePersonalDiscountPercent(user.id)
+    return profile
   }
 
   isGoogleOAuthConfigured(): boolean {
@@ -462,20 +682,6 @@ export class AuthService {
     const idToken = await this.fetchGoogleIdToken(dto.code, dto.redirectUri.trim())
     const profile = await this.verifyGoogleIdToken(idToken)
     return this.completeGoogleOAuth(profile, res)
-  }
-
-  async mockGoogleOAuth(res: Response) {
-    await new Promise((r) => setTimeout(r, 700))
-
-    return this.completeGoogleOAuth(
-      {
-        sub: MOCK_GOOGLE_SUB,
-        email: MOCK_GOOGLE_EMAIL,
-        firstName: MOCK_GOOGLE_PROFILE.firstName,
-        lastName: MOCK_GOOGLE_PROFILE.lastName,
-      },
-      res,
-    )
   }
 
   async sessionFromPayload(payload: SessionJwtPayload) {

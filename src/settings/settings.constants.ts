@@ -1,20 +1,92 @@
 import type { CartCheckoutSettings } from './cart-checkout.types'
 import { DEFAULT_CART_CHECKOUT_SETTINGS } from './cart-checkout.types'
+import type { CatalogFiltersVisibilitySettings } from './catalog-filters.types'
+import {
+  DEFAULT_CATALOG_FILTERS_VISIBILITY,
+  DEFAULT_PLANTS_ALPHABET_FILTERS_VISIBILITY,
+} from './catalog-filters.types'
 
 export const SETTINGS_KEYS = {
   STORE: 'store.contact',
   HOME_PAGE: 'page.home',
   CART_CHECKOUT: 'cart.checkout',
   CATALOG_PAGE: 'page.catalog',
+  RECENTLY_VIEWED: 'feature.recentlyViewed',
+  LOCALIZATION: 'site.localization',
+  VARIANT_LABELS: 'feature.variantLabels',
+  NAVIGATION: 'site.navigation',
 } as const
+
+export type {
+  AppLocale,
+  LocalizationMessageOverrides,
+  LocalizationSettings,
+} from './localization.types'
+export {
+  DEFAULT_LOCALIZATION_SETTINGS,
+  SUPPORTED_LOCALES,
+} from './localization.types'
+
+export type {
+  RecentlyViewedPageKey,
+  RecentlyViewedPageVisibility,
+  RecentlyViewedSettings,
+} from './recently-viewed.types'
+export {
+  DEFAULT_RECENTLY_VIEWED_PAGES,
+  DEFAULT_RECENTLY_VIEWED_SETTINGS,
+  RECENTLY_VIEWED_PAGE_KEYS,
+} from './recently-viewed.types'
+
+export {
+  DEFAULT_VARIANT_LABEL_SETTINGS,
+  DEFAULT_VARIANT_LABEL_TYPE_ORDER,
+  VARIANT_LABEL_ATTRIBUTE_TYPES,
+} from './variant-label.types'
+export type { VariantLabelSettings } from './variant-label.types'
 
 export type CatalogCategoryDisplay = 'subcategories' | 'products' | 'both'
 
+export type CatalogGridColumns = {
+  mobile: number
+  sm: number
+  md: number
+  lg: number
+  xl: number
+  '2xl': number
+}
+
+export const DEFAULT_PRODUCT_GRID_COLUMNS: CatalogGridColumns = {
+  mobile: 2,
+  sm: 2,
+  md: 2,
+  lg: 3,
+  xl: 4,
+  '2xl': 5,
+}
+
+export const DEFAULT_CATEGORY_GRID_COLUMNS: CatalogGridColumns = {
+  mobile: 2,
+  sm: 4,
+  md: 4,
+  lg: 4,
+  xl: 4,
+  '2xl': 4,
+}
+
 export type CatalogPageSettings = {
   categoryDisplay: CatalogCategoryDisplay
-  /** Порожній список — показувати всі категорії на відповідному рівні */
-  visibleCategoryIds: string[]
+  productGridColumns: CatalogGridColumns
+  categoryGridColumns: CatalogGridColumns
+  catalogFilters: CatalogFiltersVisibilitySettings
+  plantsAlphabetFilters: CatalogFiltersVisibilitySettings
 }
+
+export type { CatalogFiltersVisibilitySettings } from './catalog-filters.types'
+export {
+  DEFAULT_CATALOG_FILTERS_VISIBILITY,
+  DEFAULT_PLANTS_ALPHABET_FILTERS_VISIBILITY,
+} from './catalog-filters.types'
 
 export type { CartCheckoutSettings, BelowMinOrderBehavior } from './cart-checkout.types'
 export { DEFAULT_CART_CHECKOUT_SETTINGS } from './cart-checkout.types'
@@ -27,6 +99,25 @@ export type StorePhoneContact = {
 export type StoreEmailContact = {
   label: string
   email: string
+}
+
+export type StoreContactLineType =
+  | 'phone'
+  | 'email'
+  | 'viber'
+  | 'telegram'
+  | 'whatsapp'
+  | 'link'
+
+export type StoreContactLine = {
+  type: StoreContactLineType
+  label?: string
+  value: string
+}
+
+export type StoreContactBlock = {
+  title: string
+  lines: StoreContactLine[]
 }
 
 export type StoreHoursEntry = {
@@ -42,15 +133,23 @@ export type StoreHoursSchedule = {
 
 export type StoreFooterVisibility = {
   showAddress: boolean
-  showPhones: boolean
-  showEmails: boolean
+  showPhone: boolean
+  showEmail: boolean
+  showViber: boolean
+  showTelegram: boolean
+  showWhatsApp: boolean
+  showLink: boolean
   showSchedules: boolean
 }
 
 export const DEFAULT_FOOTER_VISIBILITY: StoreFooterVisibility = {
   showAddress: true,
-  showPhones: true,
-  showEmails: false,
+  showPhone: true,
+  showEmail: false,
+  showViber: true,
+  showTelegram: true,
+  showWhatsApp: true,
+  showLink: true,
   showSchedules: false,
 }
 
@@ -80,6 +179,7 @@ export type StoreContactSettings = {
   addressLine2: string
   mapsUrl: string
   mapsEmbedUrl?: string
+  contactBlocks: StoreContactBlock[]
   phones: StorePhoneContact[]
   emails: StoreEmailContact[]
   schedules: StoreHoursSchedule[]
@@ -125,12 +225,26 @@ export type HomePageSettings = {
     title: string
     subtitle: string
     limit: number
+    categorySlugs: string[]
+  }
+  newArrivals: {
+    title: string
+    subtitle: string
+    limit: number
+    productSlugs: string[]
   }
   bestsellers: {
     title: string
     subtitle: string
     limit: number
     productSlugs: string[]
+  }
+  lowStock: {
+    title: string
+    subtitle: string
+    limit: number
+    productSlugs: string[]
+    stockThreshold: number
   }
   whyUs: {
     title: string
@@ -152,10 +266,28 @@ export type HomePageSettings = {
 
 export const DEFAULT_MAPS_URL = 'https://maps.app.goo.gl/EdhHzZDNvev2pV9H7'
 
+export const DEFAULT_CONTACT_BLOCKS: StoreContactBlock[] = [
+  {
+    title: 'Підтримка',
+    lines: [
+      { type: 'phone', value: '+380 (67) 123-45-67' },
+      { type: 'email', value: 'info@zeleni-yanholy.ua' },
+    ],
+  },
+  {
+    title: 'Гурт',
+    lines: [
+      { type: 'phone', value: '+380 (67) 765-43-21' },
+      { type: 'email', value: 'opt@zeleni-yanholy.ua' },
+    ],
+  },
+]
+
 export const DEFAULT_STORE_SETTINGS: StoreContactSettings = {
   addressLine1: 'Київська обл., м. Вишгород,',
   addressLine2: 'вул. Садова, 15',
   mapsUrl: DEFAULT_MAPS_URL,
+  contactBlocks: DEFAULT_CONTACT_BLOCKS,
   phones: [
     { label: 'Підтримка', phone: '+380 (67) 123-45-67' },
     { label: 'Гурт', phone: '+380 (67) 765-43-21' },
@@ -188,8 +320,11 @@ export const DEFAULT_STORE_SETTINGS: StoreContactSettings = {
 }
 
 export const DEFAULT_CATALOG_SETTINGS: CatalogPageSettings = {
-  categoryDisplay: 'subcategories',
-  visibleCategoryIds: [],
+  categoryDisplay: 'both',
+  productGridColumns: { ...DEFAULT_PRODUCT_GRID_COLUMNS },
+  categoryGridColumns: { ...DEFAULT_CATEGORY_GRID_COLUMNS },
+  catalogFilters: { ...DEFAULT_CATALOG_FILTERS_VISIBILITY },
+  plantsAlphabetFilters: { ...DEFAULT_PLANTS_ALPHABET_FILTERS_VISIBILITY },
 }
 
 export const DEFAULT_HOME_SETTINGS: HomePageSettings = {
@@ -211,15 +346,29 @@ export const DEFAULT_HOME_SETTINGS: HomePageSettings = {
     ],
   },
   categories: {
-    title: 'Категорії рослин',
+    title: 'Каталог',
     subtitle: 'Понад 500 позицій у каталозі — оберіть напрямок і замовляйте напряму з розсадника',
     limit: 8,
+    categorySlugs: [],
+  },
+  newArrivals: {
+    title: 'Новинки',
+    subtitle: 'Свіжі надходження з розсадника — позиції, що знову зʼявились у наявності',
+    limit: 6,
+    productSlugs: [],
   },
   bestsellers: {
-    title: 'Хіти продажів',
+    title: 'Популярний вибір',
     subtitle: 'Найпопулярніші позиції, які обирають наші клієнти знову і знову',
-    limit: 16,
+    limit: 6,
     productSlugs: [],
+  },
+  lowStock: {
+    title: 'Закінчується',
+    subtitle: 'Позиції, які швидко розкуповують — встигніть замовити, поки є на складі',
+    limit: 6,
+    productSlugs: [],
+    stockThreshold: 15,
   },
   whyUs: {
     title: 'Чому обирають Зелені Янголи',

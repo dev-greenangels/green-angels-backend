@@ -1,9 +1,11 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
+import { PackagingKind, Prisma, VariantAttributeType } from '@prisma/client'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { resolvePackagingKind } from './packaging-kind.util'
 import { AddVariantAttributeValuesDto } from './dto/add-variant-attribute-values.dto'
-import { CreateVariantAttributeDto } from './dto/create-variant-attribute.dto'
-import { UpdateVariantAttributeDto } from './dto/update-variant-attribute.dto'
+import { CreateVariantAttributeDto, CreateVariantAttributeValueDto } from './dto/create-variant-attribute.dto'
+import { UpdateVariantAttributeDto, UpdateVariantAttributeValueDto } from './dto/update-variant-attribute.dto'
 
 export type VariantAttributeValueNode = {
   id: string
@@ -11,16 +13,31 @@ export type VariantAttributeValueNode = {
   label: string
   legacyId: string | null
   sortOrder: number
+  numericMin: number | null
+  numericMax: number | null
+  volumeLiters: number | null
+  potDiameterCm: number | null
+  potHeightCm: number | null
+  tareWeightKg: number | null
+  colorHex: string | null
+  packagingKind: PackagingKind | null
 }
 
 export type VariantAttributeNode = {
   id: string
   slug: string
   name: string
+  description: string | null
   legacyId: string | null
   sortOrder: number
+  valueType: VariantAttributeType
+  unit: string | null
+  isFilterable: boolean
+  participatesInLabel: boolean
   values: VariantAttributeValueNode[]
 }
+
+type ValueDto = CreateVariantAttributeValueDto | UpdateVariantAttributeValueDto
 
 @Injectable()
 export class VariantAttributesService {
@@ -37,9 +54,13 @@ export class VariantAttributesService {
       р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch',
       ь: '', ю: 'yu', я: 'ya',
     }
-    return label
-      .trim()
-      .toLowerCase()
+
+    let normalized = label.trim().toLowerCase()
+    // «110 см» / «110см» → 110-cm (не «110sm» через транслітерацію)
+    normalized = normalized.replace(/(\d)\s*см\b/gu, '$1-cm')
+    normalized = normalized.replace(/(\d)см\b/gu, '$1-cm')
+
+    return normalized
       .split('')
       .map((ch) => map[ch] ?? ch)
       .join('')
@@ -48,12 +69,113 @@ export class VariantAttributesService {
       .replace(/-{2,}/g, '-')
   }
 
+  private uniqueValueSlug(baseSlug: string, usedSlugs: Set<string>): string {
+    if (!baseSlug) return baseSlug
+    if (!usedSlugs.has(baseSlug)) return baseSlug
+    let index = 2
+    while (usedSlugs.has(`${baseSlug}-${index}`)) {
+      index += 1
+    }
+    return `${baseSlug}-${index}`
+  }
+
+  private resolveValueSlugForCreate(label: string, usedSlugs: Set<string>): string {
+    const baseSlug = this.slugifyLabel(label)
+    if (!baseSlug) {
+      throw new ConflictException(`Некоректна назва значення: «${label}».`)
+    }
+    return this.uniqueValueSlug(baseSlug, usedSlugs)
+  }
+
+  private decimalOrNull(value: number | null | undefined): number | null {
+    return value != null && !Number.isNaN(value) ? value : null
+  }
+
+  private toNumber(value: Prisma.Decimal | null): number | null {
+    return value != null ? Number(value) : null
+  }
+
+  private validateAttributeMeta(_valueType: VariantAttributeType, _unit?: string | null) {
+    // Одиниця виміру опційна — можна заповнити разом із числовими полями пізніше.
+  }
+
+  private validateValueForType(valueType: VariantAttributeType, value: ValueDto, label: string) {
+    const min = this.decimalOrNull(value.numericMin ?? undefined)
+    const max = this.decimalOrNull(value.numericMax ?? undefined)
+
+    switch (valueType) {
+      case 'RANGE':
+        if (min != null && max != null && max < min) {
+          throw new BadRequestException(`«${label}»: Max не може бути меншим за Min.`)
+        }
+        break
+      case 'NUMBER':
+        break
+      case 'COLOR': {
+        const hex = value.colorHex?.trim()
+        if (hex && !/^#[0-9A-Fa-f]{6}$/.test(hex)) {
+          throw new BadRequestException(`«${label}»: HEX має бути у форматі #RRGGBB.`)
+        }
+        break
+      }
+      case 'CONTAINER':
+      case 'UNIVERSAL':
+        break
+      default:
+        break
+    }
+  }
+
+  /** Оновлює лише поля поточного типу — інші колонки в БД не чіпає (безпечна зміна типу). */
+  private valueFieldsFromDto(
+    valueType: VariantAttributeType,
+    value: ValueDto & { packagingKind?: PackagingKind | null; label?: string; slug?: string },
+  ) {
+    switch (valueType) {
+      case 'RANGE':
+        return {
+          numericMin: this.decimalOrNull(value.numericMin ?? undefined),
+          numericMax: this.decimalOrNull(value.numericMax ?? undefined),
+        }
+      case 'NUMBER':
+        return {
+          numericMin: this.decimalOrNull(value.numericMin ?? undefined),
+        }
+      case 'CONTAINER': {
+        const label = value.label?.trim() ?? ''
+        const slug = value.slug?.trim().toLowerCase() ?? ''
+        return {
+          volumeLiters: this.decimalOrNull(value.volumeLiters ?? undefined),
+          potDiameterCm: this.decimalOrNull(value.potDiameterCm ?? undefined),
+          potHeightCm: this.decimalOrNull(value.potHeightCm ?? undefined),
+          tareWeightKg: this.decimalOrNull(value.tareWeightKg ?? undefined),
+          packagingKind: resolvePackagingKind(label, slug, value.packagingKind ?? null),
+        }
+      }
+      case 'COLOR':
+        return {
+          colorHex: value.colorHex?.trim().toUpperCase() || null,
+        }
+      case 'UNIVERSAL':
+      default:
+        return {}
+    }
+  }
+
   private toValueNode(
     row: {
       id: string
       slug: string
       legacyId: string | null
       sortOrder: number
+      numericMin: Prisma.Decimal | null
+      numericMax: Prisma.Decimal | null
+      volumeLiters: Prisma.Decimal | null
+      potDiameterCm: Prisma.Decimal | null
+      potHeightCm: Prisma.Decimal | null
+      tareWeightKg: Prisma.Decimal | null
+      colorHex: string | null
+      packagingKind: PackagingKind | null
       translations: Array<{ label: string }>
     },
     fallback?: string,
@@ -64,6 +186,14 @@ export class VariantAttributesService {
       label: row.translations[0]?.label ?? fallback ?? row.slug,
       legacyId: row.legacyId,
       sortOrder: row.sortOrder,
+      numericMin: this.toNumber(row.numericMin),
+      numericMax: this.toNumber(row.numericMax),
+      volumeLiters: this.toNumber(row.volumeLiters),
+      potDiameterCm: this.toNumber(row.potDiameterCm),
+      potHeightCm: this.toNumber(row.potHeightCm),
+      tareWeightKg: this.toNumber(row.tareWeightKg),
+      colorHex: row.colorHex,
+      packagingKind: row.packagingKind,
     }
   }
 
@@ -73,12 +203,24 @@ export class VariantAttributesService {
       slug: string
       legacyId: string | null
       sortOrder: number
-      translations: Array<{ name: string }>
+      valueType: VariantAttributeType
+      unit: string | null
+      isFilterable: boolean
+      participatesInLabel: boolean
+      translations: Array<{ name: string; description: string | null }>
       values: Array<{
         id: string
         slug: string
         legacyId: string | null
         sortOrder: number
+        numericMin: Prisma.Decimal | null
+        numericMax: Prisma.Decimal | null
+        volumeLiters: Prisma.Decimal | null
+        potDiameterCm: Prisma.Decimal | null
+        potHeightCm: Prisma.Decimal | null
+        tareWeightKg: Prisma.Decimal | null
+        colorHex: string | null
+        packagingKind: PackagingKind | null
         translations: Array<{ label: string }>
       }>
     },
@@ -88,17 +230,23 @@ export class VariantAttributesService {
       id: row.id,
       slug: row.slug,
       name: row.translations[0]?.name ?? slugFallback ?? row.slug,
+      description: row.translations[0]?.description ?? null,
       legacyId: row.legacyId,
       sortOrder: row.sortOrder,
+      valueType: row.valueType,
+      unit: row.unit,
+      isFilterable: row.isFilterable,
+      participatesInLabel: row.participatesInLabel,
       values: row.values
         .map((v) => this.toValueNode(v))
         .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, 'uk')),
     }
   }
 
-  async findAll(locale?: string): Promise<VariantAttributeNode[]> {
+  async findAll(locale?: string, filterableOnly = false): Promise<VariantAttributeNode[]> {
     const loc = this.defaultLocale(locale)
     const rows = await this.prisma.variantAttribute.findMany({
+      where: filterableOnly ? { isFilterable: true } : undefined,
       include: {
         translations: { where: { locale: loc } },
         values: {
@@ -115,6 +263,11 @@ export class VariantAttributesService {
   async create(dto: CreateVariantAttributeDto) {
     const locale = this.defaultLocale(dto.locale)
     const slug = (dto.slug?.trim() || this.slugifyLabel(dto.name)).toLowerCase()
+    this.validateAttributeMeta(dto.valueType, dto.unit)
+
+    for (const value of dto.values) {
+      this.validateValueForType(dto.valueType, value, value.label.trim())
+    }
 
     const slugTaken = await this.prisma.variantAttribute.findUnique({ where: { slug } })
     if (slugTaken) throw new ConflictException('Атрибут з таким slug вже існує.')
@@ -124,8 +277,16 @@ export class VariantAttributesService {
         slug,
         legacyId: dto.legacyId?.trim() || null,
         sortOrder: dto.sortOrder ?? 0,
+        valueType: dto.valueType,
+        unit: dto.unit?.trim() || null,
+        isFilterable: dto.isFilterable ?? true,
+        participatesInLabel: dto.participatesInLabel ?? true,
         translations: {
-          create: { locale, name: dto.name.trim() },
+          create: {
+            locale,
+            name: dto.name.trim(),
+            description: dto.description?.trim() || null,
+          },
         },
         values: {
           create: dto.values.map((value, index) => {
@@ -134,6 +295,7 @@ export class VariantAttributesService {
               slug: valueSlug,
               legacyId: value.legacyId?.trim() || null,
               sortOrder: value.sortOrder ?? index,
+              ...this.valueFieldsFromDto(dto.valueType, { ...value, slug: valueSlug }),
               translations: {
                 create: { locale, label: value.label.trim() },
               },
@@ -156,6 +318,10 @@ export class VariantAttributesService {
     const locale = this.defaultLocale(dto.locale)
     const attribute = await this.prisma.variantAttribute.findUnique({ where: { id: attributeId } })
     if (!attribute) throw new NotFoundException('Атрибут не знайдено.')
+
+    for (const value of dto.values) {
+      this.validateValueForType(attribute.valueType, value, value.label.trim())
+    }
 
     const existing = await this.prisma.variantAttributeValue.findMany({
       where: { attributeId },
@@ -180,6 +346,7 @@ export class VariantAttributesService {
             slug: valueSlug,
             legacyId: value.legacyId?.trim() || null,
             sortOrder: value.sortOrder ?? index,
+            ...this.valueFieldsFromDto(attribute.valueType, { ...value, slug: valueSlug }),
             translations: {
               create: { locale, label: value.label.trim() },
             },
@@ -213,26 +380,65 @@ export class VariantAttributesService {
     })
     if (!existing) throw new NotFoundException('Атрибут не знайдено.')
 
+    const effectiveValueType = dto.valueType ?? existing.valueType
+
+    if (dto.unit !== undefined || dto.valueType !== undefined) {
+      this.validateAttributeMeta(effectiveValueType, dto.unit ?? existing.unit)
+    }
+
+    if (dto.values) {
+      for (const value of dto.values) {
+        this.validateValueForType(effectiveValueType, value, value.label.trim())
+      }
+    }
+
     await this.prisma.$transaction(async (tx) => {
+      const attributePatch: Prisma.VariantAttributeUpdateInput = {
+        ...(dto.valueType !== undefined ? { valueType: dto.valueType } : {}),
+        ...(dto.legacyId !== undefined ? { legacyId: dto.legacyId?.trim() || null } : {}),
+        ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
+        ...(dto.unit !== undefined ? { unit: dto.unit?.trim() || null } : {}),
+        ...(dto.isFilterable !== undefined ? { isFilterable: dto.isFilterable } : {}),
+        ...(dto.participatesInLabel !== undefined
+          ? { participatesInLabel: dto.participatesInLabel }
+          : {}),
+      }
+
+      if (dto.slug !== undefined) {
+        const nextSlug = dto.slug.trim().toLowerCase()
+        if (!nextSlug) {
+          throw new BadRequestException('Slug атрибута не може бути порожнім.')
+        }
+        if (nextSlug !== existing.slug) {
+          const slugTaken = await tx.variantAttribute.findFirst({
+            where: { slug: nextSlug, NOT: { id: attributeId } },
+          })
+          if (slugTaken) {
+            throw new ConflictException('Атрибут з таким slug вже існує.')
+          }
+          attributePatch.slug = nextSlug
+        }
+      }
+
       await tx.variantAttribute.update({
         where: { id: attributeId },
-        data: {
-          ...(dto.legacyId !== undefined ? { legacyId: dto.legacyId?.trim() || null } : {}),
-          ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
-        },
+        data: attributePatch,
       })
 
       const translation = existing.translations[0]
       const name = dto.name?.trim() ?? translation?.name
+      const description =
+        dto.description !== undefined ? dto.description?.trim() || null : translation?.description
+
       if (name) {
         if (translation) {
           await tx.variantAttributeTranslation.update({
             where: { id: translation.id },
-            data: { name },
+            data: { name, ...(dto.description !== undefined ? { description } : {}) },
           })
         } else {
           await tx.variantAttributeTranslation.create({
-            data: { attributeId, locale, name },
+            data: { attributeId, locale, name, description: description ?? null },
           })
         }
       }
@@ -245,39 +451,32 @@ export class VariantAttributesService {
         for (let index = 0; index < dto.values.length; index++) {
           const entry = dto.values[index]
           const label = entry.label.trim()
-          const valueSlug = this.slugifyLabel(label)
-          if (!valueSlug) {
-            throw new ConflictException(`Некоректна назва значення: «${label}».`)
-          }
+          const fields = this.valueFieldsFromDto(effectiveValueType, {
+            ...entry,
+            label,
+            slug: entry.id ? existingById.get(entry.id)?.slug : undefined,
+          })
 
           if (entry.id) {
             const row = existingById.get(entry.id)
             if (!row || row.attributeId !== attributeId) {
               throw new NotFoundException(`Значення ${entry.id} не знайдено.`)
             }
-            if (usedSlugs.has(valueSlug) && row.slug !== valueSlug) {
+
+            // Зберігаємо технічний slug існуючого значення — назва для показу, slug для фільтрів/API.
+            const valueSlug = row.slug
+            if (usedSlugs.has(valueSlug)) {
               throw new ConflictException(`Дубль slug «${valueSlug}» у цьому атрибуті.`)
             }
             usedSlugs.add(valueSlug)
             keptIds.add(entry.id)
 
-            const slugConflict = await tx.variantAttributeValue.findFirst({
-              where: {
-                attributeId,
-                slug: valueSlug,
-                NOT: { id: entry.id },
-              },
-            })
-            if (slugConflict) {
-              throw new ConflictException(`Значення «${label}» вже існує.`)
-            }
-
             await tx.variantAttributeValue.update({
               where: { id: entry.id },
               data: {
-                slug: valueSlug,
                 legacyId: entry.legacyId !== undefined ? entry.legacyId?.trim() || null : undefined,
                 sortOrder: entry.sortOrder ?? index,
+                ...fields,
               },
             })
 
@@ -293,17 +492,8 @@ export class VariantAttributesService {
               })
             }
           } else {
-            if (usedSlugs.has(valueSlug)) {
-              throw new ConflictException(`Дубль значення «${label}».`)
-            }
+            const valueSlug = this.resolveValueSlugForCreate(label, usedSlugs)
             usedSlugs.add(valueSlug)
-
-            const slugConflict = await tx.variantAttributeValue.findFirst({
-              where: { attributeId, slug: valueSlug },
-            })
-            if (slugConflict) {
-              throw new ConflictException(`Значення «${label}» вже існує.`)
-            }
 
             await tx.variantAttributeValue.create({
               data: {
@@ -311,6 +501,11 @@ export class VariantAttributesService {
                 slug: valueSlug,
                 legacyId: entry.legacyId?.trim() || null,
                 sortOrder: entry.sortOrder ?? index,
+                ...this.valueFieldsFromDto(effectiveValueType, {
+                  ...entry,
+                  label,
+                  slug: valueSlug,
+                }),
                 translations: { create: { locale, label } },
               },
             })

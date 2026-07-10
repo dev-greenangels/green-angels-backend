@@ -45,7 +45,25 @@ export class QuotePricingDto {
   promoCode?: string
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  promoCodes?: string[]
+
+  @IsOptional()
   @IsString()
   @MaxLength(64)
   deliveryMethod?: string
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(2)
+  splitOrderParts?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  splitOrderPartIndex?: number
 }
