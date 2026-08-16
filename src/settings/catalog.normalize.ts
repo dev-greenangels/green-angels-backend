@@ -3,6 +3,7 @@ import {
   DEFAULT_PLANTS_ALPHABET_FILTERS_VISIBILITY,
   type CatalogFiltersVisibilitySettings,
 } from './catalog-filters.types'
+import { normalizeFreshPhotosLimit } from '../photos/fresh-photo-variants'
 import {
   DEFAULT_CATALOG_SETTINGS,
   DEFAULT_CATEGORY_GRID_COLUMNS,
@@ -85,5 +86,6 @@ export function normalizeCatalogPageSettings(
       input?.plantsAlphabetFilters,
       DEFAULT_PLANTS_ALPHABET_FILTERS_VISIBILITY,
     ),
+    freshPhotosLimit: normalizeFreshPhotosLimit(input?.freshPhotosLimit),
   }
 }

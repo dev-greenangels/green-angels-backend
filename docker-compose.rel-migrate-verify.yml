@@ -1,0 +1,85 @@
+# Isolated production-like stack for REL-MIGRATE-001 local verification.
+# Does NOT use the development compose project, ports 5432/6379/3001, or
+# named containers (green-angels-postgres / api / redis).
+#
+#   docker compose -p ga-rel-migrate-verify -f docker-compose.rel-migrate-verify.yml up -d --build
+#
+# Tear down: docker compose -p ga-rel-migrate-verify -f docker-compose.rel-migrate-verify.yml down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ga_rel_migrate
+      POSTGRES_PASSWORD: ga_rel_migrate
+      POSTGRES_DB: ga_rel_migrate
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ga_rel_migrate -d ga_rel_migrate']
+      interval: 5s
+      timeout: 5s
+      retries: 8
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--requirepass', 'ga_rel_migrate']
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', 'ga_rel_migrate', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 8
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate
+    restart: 'no'
+    command: ['npx', '--no-install', 'prisma', 'migrate', 'deploy']
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://ga_rel_migrate:ga_rel_migrate@postgres:5432/ga_rel_migrate?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    ports:
+      - '13001:3001'
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://ga_rel_migrate:ga_rel_migrate@postgres:5432/ga_rel_migrate?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ga_rel_migrate
+      JWT_SECRET: rel-migrate-verify-jwt-secret-min-32-chars
+      CORS_ORIGIN: http://localhost:3000
+      MEDIA_DRIVER: r2
+      R2_ENDPOINT: https://example.r2.cloudflarestorage.com
+      R2_ACCESS_KEY_ID: verify-not-a-secret
+      R2_SECRET_ACCESS_KEY: verify-not-a-secret
+      R2_BUCKET: verify-bucket
+      R2_REGION: auto
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3001/health']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+volumes:
+  postgres_data:

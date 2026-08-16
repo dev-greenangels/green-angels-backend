@@ -3,19 +3,41 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  NotFoundException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { createPublicKey, createVerify } from 'crypto'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { FlexiQueueService } from '../flexi/flexi.queue.service'
+import { MonopaySyncTokenService } from './monopay-sync-token.service'
 import {
   MONOPAY_API_BASE,
   MONOPAY_CURRENCY_UAH,
   MONOPAY_INVOICE_VALIDITY_SEC,
   MONOPAY_PAYMENT_METHOD,
   type MonopayCreateInvoiceResponse,
+  type MonopayInvoiceStatus,
   type MonopayWebhookPayload,
 } from './monopay.constants'
+
+type OrderPaymentRow = {
+  id: string
+  status: string
+  paymentMethod: string
+  orderNumber: number
+  monopayInvoiceId: string | null
+  monopayModifiedAt: Date | null
+  paymentStatus: string | null
+}
+
+export type MonopaySyncResult = {
+  orderId: string
+  orderNumber: string
+  status: string
+  paymentStatus: string | null
+  synced: boolean
+}
 
 @Injectable()
 export class MonopayService {
@@ -25,6 +47,8 @@ export class MonopayService {
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly flexiQueue: FlexiQueueService,
+    private readonly syncTokens: MonopaySyncTokenService,
   ) {}
 
   private formatOrderNumber(orderNumber: number): string {
@@ -45,15 +69,31 @@ export class MonopayService {
     return token
   }
 
+  /** Public shop origin — redirect after Mono payment. */
   private getShopPublicUrl(): string {
-    return this.config.get<string>('SHOP_PUBLIC_URL')?.trim()
+    return (
+      this.config.get<string>('SHOP_PUBLIC_URL')?.trim()
       || this.config.get<string>('CORS_ORIGIN', 'http://localhost:3000').trim()
+    )
   }
 
+  /** Public Nest API origin (tunnel / prod API host). */
+  private getApiPublicUrl(): string {
+    const fromEnv = this.config.get<string>('API_PUBLIC_URL')?.trim()
+    if (fromEnv) return fromEnv.replace(/\/$/, '')
+    const port = this.config.get<string>('PORT')?.trim() || '3001'
+    return `http://localhost:${port}`
+  }
+
+  /**
+   * Mono → Nest напряму.
+   * 1) MONOPAY_WEBHOOK_URL (явний override)
+   * 2) {API_PUBLIC_URL}/payments/monopay/webhook
+   */
   private getWebhookUrl(): string {
     const explicit = this.config.get<string>('MONOPAY_WEBHOOK_URL')?.trim()
-    if (explicit) return explicit
-    return `${this.getShopPublicUrl()}/api/payments/monopay/webhook`
+    if (explicit) return explicit.replace(/\/$/, '')
+    return `${this.getApiPublicUrl()}/payments/monopay/webhook`
   }
 
   private toKopecks(amount: number): number {
@@ -84,7 +124,7 @@ export class MonopayService {
         || (typeof data.errorDescription === 'string' && data.errorDescription)
         || `Monopay API error (${res.status})`
       this.logger.error(`Monopay ${path} failed: ${message}`)
-      throw new BadRequestException('Не вдалося створити рахунок для оплати. Спробуйте пізніше.')
+      throw new BadRequestException('Не вдалося виконати запит до MonoPay. Спробуйте пізніше.')
     }
 
     return data
@@ -127,7 +167,10 @@ export class MonopayService {
     }
   }
 
-  async createInvoiceForOrder(orderId: string): Promise<string> {
+  async createInvoiceForOrder(
+    orderId: string,
+    options?: { confirmationToken?: string },
+  ): Promise<{ invoiceId: string; pageUrl: string }> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true },
@@ -141,7 +184,12 @@ export class MonopayService {
 
     const orderNumber = this.formatOrderNumber(order.orderNumber)
     const amountKopecks = this.toKopecks(Number(order.totalAmount))
-    const redirectUrl = `${this.getShopPublicUrl()}/checkout/success?order=${encodeURIComponent(orderNumber)}`
+    const syncToken = this.syncTokens.sign(orderNumber)
+    const confirmationToken = options?.confirmationToken?.trim() || ''
+    const confirmationQuery = confirmationToken
+      ? `&confirmation=${encodeURIComponent(confirmationToken)}`
+      : ''
+    const redirectUrl = `${this.getShopPublicUrl()}/checkout/success?order=${encodeURIComponent(orderNumber)}&sync=${encodeURIComponent(syncToken)}${confirmationQuery}`
     const basketOrder = order.items.map((item) => {
       const unitKopecks = this.toKopecks(Number(item.priceAtPurchase))
       const lineTotalKopecks = unitKopecks * item.quantity
@@ -191,7 +239,7 @@ export class MonopayService {
       },
     })
 
-    return created.pageUrl
+    return { invoiceId: created.invoiceId, pageUrl: created.pageUrl }
   }
 
   async handleWebhook(rawBody: Buffer, xSignBase64: string): Promise<void> {
@@ -212,44 +260,153 @@ export class MonopayService {
       throw new BadRequestException('Invalid webhook payload')
     }
 
-    const order = await this.prisma.order.findFirst({
-      where: {
-        OR: [
-          { monopayInvoiceId: payload.invoiceId },
-          { id: payload.reference ?? '' },
-        ],
-      },
-    })
-
+    const order = await this.findOrderForInvoice(payload.invoiceId, payload.reference)
     if (!order) {
       this.logger.warn(`Monopay webhook: order not found for invoice ${payload.invoiceId}`)
       return
     }
 
+    await this.applyInvoiceStatus(order, payload)
+  }
+
+  /**
+   * Server-side reconciliation: Nest asks Mono for invoice status and updates the order.
+   * Used by Next BFF when the user returns to /checkout/success (webhook may lag).
+   */
+  async syncByOrderNumber(rawOrderNumber: string): Promise<MonopaySyncResult> {
+    const order = await this.findOrderByOrderNumber(rawOrderNumber)
+    if (!order) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+    if (order.paymentMethod !== MONOPAY_PAYMENT_METHOD) {
+      return {
+        orderId: order.id,
+        orderNumber: this.formatOrderNumber(order.orderNumber),
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        synced: false,
+      }
+    }
+    if (!order.monopayInvoiceId) {
+      throw new BadRequestException('Для замовлення ще не створено рахунок MonoPay.')
+    }
+
+    const invoice = await this.monopayFetch<MonopayWebhookPayload>(
+      `/api/merchant/invoice/status?invoiceId=${encodeURIComponent(order.monopayInvoiceId)}`,
+    )
+
+    if (!invoice.invoiceId || !invoice.status) {
+      throw new BadRequestException('MonoPay не повернув статус рахунку.')
+    }
+
+    const updated = await this.applyInvoiceStatus(order, invoice)
+    return {
+      orderId: updated.id,
+      orderNumber: this.formatOrderNumber(updated.orderNumber),
+      status: updated.status,
+      paymentStatus: updated.paymentStatus,
+      synced: true,
+    }
+  }
+
+  private async findOrderByOrderNumber(rawOrderNumber: string): Promise<OrderPaymentRow | null> {
+    const match = rawOrderNumber.trim().match(/(\d+)$/)
+    const numeric = match ? Number(match[1]) : Number.NaN
+    if (!Number.isFinite(numeric) || numeric <= 0) return null
+
+    return this.prisma.order.findUnique({
+      where: { orderNumber: numeric },
+      select: {
+        id: true,
+        status: true,
+        paymentMethod: true,
+        orderNumber: true,
+        monopayInvoiceId: true,
+        monopayModifiedAt: true,
+        paymentStatus: true,
+      },
+    })
+  }
+
+  private async findOrderForInvoice(
+    invoiceId: string,
+    reference?: string,
+  ): Promise<OrderPaymentRow | null> {
+    return this.prisma.order.findFirst({
+      where: {
+        OR: [
+          { monopayInvoiceId: invoiceId },
+          { id: reference ?? '' },
+        ],
+      },
+      select: {
+        id: true,
+        status: true,
+        paymentMethod: true,
+        orderNumber: true,
+        monopayInvoiceId: true,
+        monopayModifiedAt: true,
+        paymentStatus: true,
+      },
+    })
+  }
+
+  private async applyInvoiceStatus(
+    order: OrderPaymentRow,
+    payload: Pick<MonopayWebhookPayload, 'status' | 'modifiedDate' | 'invoiceId'>,
+  ): Promise<OrderPaymentRow> {
     const incomingModified = payload.modifiedDate
       ? new Date(payload.modifiedDate).getTime()
       : 0
     const storedModified = order.monopayModifiedAt?.getTime() ?? 0
     if (incomingModified > 0 && storedModified > 0 && incomingModified <= storedModified) {
-      return
+      return order
     }
 
-    const nextStatus = this.mapPaymentToOrderStatus(payload.status)
-    await this.prisma.order.update({
+    const nextStatus = this.mapPaymentToOrderStatus(payload.status, order.status)
+    const updated = await this.prisma.order.update({
       where: { id: order.id },
       data: {
         paymentStatus: payload.status,
+        monopayInvoiceId: order.monopayInvoiceId ?? payload.invoiceId,
         monopayModifiedAt: payload.modifiedDate
           ? new Date(payload.modifiedDate)
           : new Date(),
         ...(nextStatus ? { status: nextStatus } : {}),
       },
+      select: {
+        id: true,
+        status: true,
+        paymentMethod: true,
+        orderNumber: true,
+        monopayInvoiceId: true,
+        monopayModifiedAt: true,
+        paymentStatus: true,
+      },
     })
+
+    if (payload.status === 'success') {
+      void this.flexiQueue.enqueueExportOrderAfterOnlineCardPaid(order.id).catch((err) => {
+        this.logger.warn(
+          `Flexi export after MonoPay paid failed for ${order.id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
+    }
+
+    return updated
   }
 
-  private mapPaymentToOrderStatus(status: string): string | null {
-    if (status === 'success') return 'PROCESSING'
-    if (status === 'failure' || status === 'reversed' || status === 'expired') return 'PENDING'
+  /** Only advances order status on successful payment; unpaid/failed leave AWAITING_PAYMENT. */
+  private mapPaymentToOrderStatus(
+    paymentStatus: MonopayInvoiceStatus | string,
+    currentOrderStatus: string,
+  ): string | null {
+    if (paymentStatus !== 'success') return null
+    if (currentOrderStatus === 'AWAITING_PAYMENT' || currentOrderStatus === 'PENDING') {
+      return 'PROCESSING'
+    }
     return null
   }
 }

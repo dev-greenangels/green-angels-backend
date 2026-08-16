@@ -16,7 +16,7 @@ import type { Request } from 'express'
 import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
-import { JwtAuthGuard } from '../auth/jwt-auth.guard'
+import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard'
 import type { SessionJwtPayload } from '../auth/auth.constants'
 import { CreateReviewDto } from './dto/create-review.dto'
 import { ReviewQueryDto } from './dto/review-query.dto'
@@ -34,12 +34,12 @@ export class ReviewsController {
   }
 
   @Post()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   create(
     @Body() dto: CreateReviewDto,
-    @Req() req: Request & { user: SessionJwtPayload },
+    @Req() req: Request & { user?: SessionJwtPayload },
   ) {
-    return this.reviews.create(req.user.userId, dto)
+    return this.reviews.create(req.user?.userId, dto)
   }
 
   @Get('backstage/all')

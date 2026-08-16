@@ -1,11 +1,13 @@
 import { Injectable } from '@nestjs/common'
 
+import { CommerceService } from '../commerce/commerce.service'
 import { PrismaService } from '../prisma/prisma.service'
 import {
   DEFAULT_CART_CHECKOUT_SETTINGS,
   DEFAULT_CATALOG_SETTINGS,
   DEFAULT_HOME_SETTINGS,
   DEFAULT_LOCALIZATION_SETTINGS,
+  DEFAULT_MARKET_SETTINGS,
   DEFAULT_RECENTLY_VIEWED_SETTINGS,
   DEFAULT_STORE_SETTINGS,
   DEFAULT_VARIANT_LABEL_SETTINGS,
@@ -14,6 +16,7 @@ import {
   type CatalogPageSettings,
   type HomePageSettings,
   type LocalizationSettings,
+  type MarketSettings,
   type RecentlyViewedSettings,
   type StoreContactSettings,
   type VariantLabelSettings,
@@ -23,6 +26,9 @@ import { normalizeRecentlyViewedSettings } from './recently-viewed.normalize'
 import { normalizeCartCheckoutSettings } from './cart-checkout.normalize'
 import { normalizeCatalogPageSettings } from './catalog.normalize'
 import { normalizeVariantLabelSettings } from './variant-label.normalize'
+import { normalizeMarketSettings, taxIncludedFromPriceBasis, isPhonePolicy } from './market.types'
+import type { InventoryAuthorityMode } from './market.types'
+import { DispatchCalendarService } from './dispatch-calendar.service'
 import { UpdateStoreSettingsDto } from './dto/update-store-settings.dto'
 import { normalizeStoreContactSettings } from './store-contact.normalize'
 import { normalizeNavigationSettings } from './navigation.normalize'
@@ -30,6 +36,11 @@ import {
   DEFAULT_NAVIGATION_SETTINGS,
   type NavigationSettings,
 } from './navigation.types'
+import {
+  DEFAULT_PRESTA_IMPORT_SETTINGS,
+  normalizePrestaImportSettings,
+  type PrestaImportSettings,
+} from './presta-import.types'
 
 export type PublicSiteSettings = {
   store: StoreContactSettings
@@ -39,13 +50,20 @@ export type PublicSiteSettings = {
   recentlyViewed: RecentlyViewedSettings
   localization: LocalizationSettings
   navigation: NavigationSettings
+  market: MarketSettings
+  dispatchCalendar: { enabled: boolean }
 }
 
-export type BackstageSiteSettings = PublicSiteSettings
-
+export type BackstageSiteSettings = PublicSiteSettings & {
+  prestaImport: PrestaImportSettings
+}
 @Injectable()
 export class SettingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly commerce: CommerceService,
+    private readonly dispatchCalendar: DispatchCalendarService,
+  ) {}
 
   private parseJson<T extends Record<string, unknown>>(raw: string | null | undefined, fallback: T): T {
     if (!raw?.trim()) return fallback
@@ -107,6 +125,10 @@ export class SettingsService {
     return normalizeStoreContactSettings(raw)
   }
 
+  async getStoreContactSettings(): Promise<StoreContactSettings> {
+    return this.readStoreSettings()
+  }
+
   async getCartCheckoutSettings(): Promise<CartCheckoutSettings> {
     const raw = await this.readSetting(SETTINGS_KEYS.CART_CHECKOUT, DEFAULT_CART_CHECKOUT_SETTINGS)
     return normalizeCartCheckoutSettings(raw)
@@ -137,21 +159,75 @@ export class SettingsService {
     return normalizeNavigationSettings(raw)
   }
 
+  async getMarketSettings(): Promise<MarketSettings> {
+    // Do not deep-merge UA-centric DEFAULT_MARKET_SETTINGS before normalize —
+    // that poisons SK with priceBasis=inc_vat and checkout stops adding VAT.
+    const raw = await this.readSetting(
+      SETTINGS_KEYS.COMMERCE_MARKET,
+      {} as MarketSettings,
+    )
+    const market = normalizeMarketSettings(raw)
+    const defaultCurrency = await this.commerce.getDefaultCurrencyCode()
+    return { ...market, defaultCurrency }
+  }
+
+  /** INV-MODE-001 / DEC-004 — does not alter checkout until later ERP batches. */
+  async getInventoryAuthorityMode(): Promise<InventoryAuthorityMode> {
+    const market = await this.getMarketSettings()
+    return market.inventoryMode
+  }
+
+  async isLocalInventoryMode(): Promise<boolean> {
+    return (await this.getInventoryAuthorityMode()) === 'local'
+  }
+
+  async isExternalInventoryMode(): Promise<boolean> {
+    return (await this.getInventoryAuthorityMode()) === 'external'
+  }
+
   async getPublicSettings(): Promise<PublicSiteSettings> {
-    const [store, home, cart, catalog, recentlyViewed, localization, navigation] = await Promise.all([
-      this.readStoreSettings(),
-      this.readSetting(SETTINGS_KEYS.HOME_PAGE, DEFAULT_HOME_SETTINGS),
-      this.getCartCheckoutSettings(),
-      this.getCatalogPageSettings(),
-      this.getRecentlyViewedSettings(),
-      this.getLocalizationSettings(),
-      this.getNavigationSettings(),
-    ])
-    return { store, home, cart, catalog, recentlyViewed, localization, navigation }
+    const [store, home, cart, catalog, recentlyViewed, localization, navigation, market, dispatch] =
+      await Promise.all([
+        this.readStoreSettings(),
+        this.readSetting(SETTINGS_KEYS.HOME_PAGE, DEFAULT_HOME_SETTINGS),
+        this.getCartCheckoutSettings(),
+        this.getCatalogPageSettings(),
+        this.getRecentlyViewedSettings(),
+        this.getLocalizationSettings(),
+        this.getNavigationSettings(),
+        this.getMarketSettings(),
+        this.dispatchCalendar.getSettings(),
+      ])
+    return {
+      store,
+      home,
+      cart,
+      catalog,
+      recentlyViewed,
+      localization,
+      navigation,
+      market,
+      dispatchCalendar: { enabled: dispatch.enabled },
+    }
   }
 
   async getBackstageSettings(): Promise<BackstageSiteSettings> {
-    return this.getPublicSettings()
+    const [publicSettings, prestaImport] = await Promise.all([
+      this.getPublicSettings(),
+      this.getPrestaImportSettings(),
+    ])
+    return { ...publicSettings, prestaImport }
+  }
+
+  async getPrestaImportSettings(): Promise<PrestaImportSettings> {
+    const raw = await this.readSetting(SETTINGS_KEYS.PRESTA_IMPORT, DEFAULT_PRESTA_IMPORT_SETTINGS)
+    return normalizePrestaImportSettings(raw)
+  }
+
+  async updatePrestaImport(patch: Partial<PrestaImportSettings>): Promise<PrestaImportSettings> {
+    const current = await this.getPrestaImportSettings()
+    const next = normalizePrestaImportSettings({ ...current, ...patch })
+    return this.writeSetting(SETTINGS_KEYS.PRESTA_IMPORT, next)
   }
 
   async updateStore(dto: UpdateStoreSettingsDto): Promise<StoreContactSettings> {
@@ -188,6 +264,13 @@ export class SettingsService {
             },
           }
         : current.social,
+      companyDetails: dto.companyDetails
+        ? { ...current.companyDetails, ...dto.companyDetails }
+        : current.companyDetails,
+      showCompanyOnContacts:
+        dto.showCompanyOnContacts !== undefined
+          ? dto.showCompanyOnContacts
+          : current.showCompanyOnContacts,
     })
     return this.writeSetting(SETTINGS_KEYS.STORE, next)
   }
@@ -262,5 +345,32 @@ export class SettingsService {
       items: patch.items ?? current.items,
     })
     return this.writeSetting(SETTINGS_KEYS.NAVIGATION, next)
+  }
+
+  async updateMarket(patch: Partial<MarketSettings>): Promise<MarketSettings> {
+    const mapped: Partial<MarketSettings> = { ...patch }
+    // Legacy single knob → auth only (delivery keeps its own field / region default).
+    if (mapped.authPhonePolicy === undefined && isPhonePolicy(mapped.phonePolicy)) {
+      mapped.authPhonePolicy = mapped.phonePolicy
+    }
+    const raw = await this.readSetting(
+      SETTINGS_KEYS.COMMERCE_MARKET,
+      {} as MarketSettings,
+    )
+    const next = normalizeMarketSettings({ ...normalizeMarketSettings(raw), ...mapped })
+
+    // Single source of truth for catalog/orders currency lives in commerce.defaults.
+    await this.commerce.updateDefaults({ defaultCurrencyCode: next.defaultCurrency })
+
+    await this.writeSetting(SETTINGS_KEYS.COMMERCE_MARKET, next)
+
+    // Keep cart.checkout.taxIncluded aligned for any consumers still reading the flag.
+    const cart = await this.getCartCheckoutSettings()
+    const taxIncluded = taxIncludedFromPriceBasis(next.priceBasis)
+    if (cart.taxIncluded !== taxIncluded) {
+      await this.writeSetting(SETTINGS_KEYS.CART_CHECKOUT, { ...cart, taxIncluded })
+    }
+
+    return this.getMarketSettings()
   }
 }

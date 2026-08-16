@@ -68,4 +68,51 @@ export class MailService {
       html,
     })
   }
+
+  async sendOrderConfirmationEmail(input: {
+    to: string
+    orderNumber: string
+    pdf: Buffer
+    locale?: string
+    region?: 'ua' | 'sk'
+  }): Promise<void> {
+    if (!this.isConfigured()) {
+      this.logger.warn(
+        `SMTP не налаштовано — підтвердження замовлення ${input.orderNumber} не надіслано на ${input.to}`,
+      )
+      return
+    }
+
+    const isSk = input.region === 'sk'
+    const subject = isSk
+      ? `Potvrdenie objednávky ${input.orderNumber} / Order confirmation`
+      : `Підтвердження замовлення ${input.orderNumber}`
+    const text = isSk
+      ? `Ďakujeme za objednávku ${input.orderNumber}. V prílohe nájdete PDF potvrdenie.`
+      : `Дякуємо за замовлення ${input.orderNumber}. У вкладенні — PDF-підтвердження.`
+    const html = isSk
+      ? `
+      <p>Ďakujeme za objednávku <strong>${input.orderNumber}</strong>.</p>
+      <p>V prílohe nájdete PDF potvrdenie podľa požiadaviek SK/EU.</p>
+    `.trim()
+      : `
+      <p>Дякуємо за замовлення <strong>${input.orderNumber}</strong>.</p>
+      <p>У вкладенні — PDF-підтвердження замовлення.</p>
+    `.trim()
+
+    await this.getTransporter().sendMail({
+      from: this.getFromAddress(),
+      to: input.to,
+      subject,
+      text,
+      html,
+      attachments: [
+        {
+          filename: `order-${input.orderNumber}.pdf`,
+          content: input.pdf,
+          contentType: 'application/pdf',
+        },
+      ],
+    })
+  }
 }

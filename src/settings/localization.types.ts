@@ -1,4 +1,4 @@
-export const SUPPORTED_LOCALES = ['uk', 'en', 'sk'] as const
+export const SUPPORTED_LOCALES = ['uk', 'en', 'sk', 'hu', 'de', 'cs'] as const
 
 export type AppLocale = (typeof SUPPORTED_LOCALES)[number]
 
@@ -19,5 +19,8 @@ export const DEFAULT_LOCALIZATION_SETTINGS: LocalizationSettings = {
     uk: {},
     en: {},
     sk: {},
+    hu: {},
+    de: {},
+    cs: {},
   },
 }

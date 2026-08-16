@@ -57,6 +57,30 @@ export class CreateProductVariantDto {
   availableFrom?: string
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  weight?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  lengthCm?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  widthCm?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  heightCm?: number
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => VariantQuantityPriceDto)

@@ -1,18 +1,24 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
+  forwardRef,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
 import { AuthProvider, Role } from '@prisma/client'
 import * as bcrypt from 'bcrypt'
-import { Response } from 'express'
+import { Request, Response } from 'express'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { isOtpChannelEnabled, type OtpPurpose } from '../settings/market.types'
+import { SettingsService } from '../settings/settings.service'
 import { UsersService } from '../users/users.service'
 import { OtpService } from './otp.service'
+import { validatePhoneForPolicy } from './market-phone.util'
 import {
   BACKSTAGE_SESSION_COOKIE_NAME,
   BACKSTAGE_SESSION_MAX_AGE_SEC,
@@ -37,7 +43,19 @@ import { SendOtpDto } from './dto/send-otp.dto'
 import { VerifyOtpDto } from './dto/verify-otp.dto'
 import { RegisterDto } from './dto/register.dto'
 import { CheckoutIdentityDto } from './dto/checkout-identity.dto'
+import { CheckoutIdentityHintDto } from './dto/checkout-identity-hint.dto'
 import type { GoogleIdTokenInfo, GoogleOAuthProfile, GoogleTokenResponse } from './google-oauth.utils'
+import {
+  CHECKOUT_ACCOUNT_LOCKED,
+  CHECKOUT_LOCK_COOKIE_NAME,
+  CHECKOUT_LOCK_JWT_PURPOSE,
+  CHECKOUT_LOCK_MAX_AGE_SEC,
+  decideCheckoutAuthLock,
+  decideCheckoutHintLock,
+  parseCheckoutLockPayload,
+  shouldRejectCheckoutAuth,
+  type CheckoutLockState,
+} from './checkout-account-lock'
 
 @Injectable()
 export class AuthService {
@@ -47,6 +65,8 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly otp: OtpService,
+    @Inject(forwardRef(() => SettingsService))
+    private readonly settings: SettingsService,
   ) {}
 
   private signToken(userId: string, role: ApiUserRole): string {
@@ -146,9 +166,100 @@ export class AuthService {
     })
   }
 
+  private checkoutLockCookieOptions() {
+    const secure = this.config.get<string>('NODE_ENV') === 'production'
+    return {
+      httpOnly: true,
+      sameSite: 'lax' as const,
+      secure,
+      path: '/',
+    }
+  }
+
+  private checkoutAccountLockedException() {
+    return new ConflictException({
+      code: CHECKOUT_ACCOUNT_LOCKED,
+      message:
+        'Це оформлення вже використовує інший акаунт. Змініть акаунт, щоб продовжити з іншим.',
+    })
+  }
+
+  private peekCheckoutLock(req: Request): CheckoutLockState | null {
+    const raw = req.cookies?.[CHECKOUT_LOCK_COOKIE_NAME]
+    if (typeof raw !== 'string' || !raw.trim()) return null
+    try {
+      const payload = this.jwt.verify(raw)
+      return parseCheckoutLockPayload(payload)
+    } catch {
+      return null
+    }
+  }
+
+  private writeCheckoutLockCookie(res: Response, state: CheckoutLockState) {
+    const token = this.jwt.sign(
+      {
+        v: 1,
+        purpose: CHECKOUT_LOCK_JWT_PURPOSE,
+        t: state.t,
+        ...(state.t === 'locked' ? { uid: state.uid } : {}),
+      },
+      {
+        subject: state.t === 'locked' ? state.uid : 'pending',
+        expiresIn: CHECKOUT_LOCK_MAX_AGE_SEC,
+      },
+    )
+    res.cookie(CHECKOUT_LOCK_COOKIE_NAME, token, {
+      ...this.checkoutLockCookieOptions(),
+      maxAge: CHECKOUT_LOCK_MAX_AGE_SEC * 1000,
+    })
+  }
+
+  clearCheckoutLockCookie(res: Response) {
+    res.clearCookie(CHECKOUT_LOCK_COOKIE_NAME, this.checkoutLockCookieOptions())
+  }
+
+  private enforceCheckoutAuthLock(req: Request, res: Response, userId: string) {
+    const decision = decideCheckoutAuthLock(this.peekCheckoutLock(req), userId)
+    if (decision.type === 'reject') {
+      throw this.checkoutAccountLockedException()
+    }
+    if (decision.type === 'bind') {
+      this.writeCheckoutLockCookie(res, { t: 'locked', uid: userId })
+    }
+  }
+
+  private assertCheckoutLockAllowsCreate(req: Request) {
+    if (this.peekCheckoutLock(req)?.t === 'locked') {
+      throw this.checkoutAccountLockedException()
+    }
+  }
+
+  private applyHintCheckoutLock(
+    req: Request,
+    res: Response,
+    identityResolution: 'none' | 'single' | 'conflict',
+  ) {
+    const action = decideCheckoutHintLock(this.peekCheckoutLock(req), identityResolution)
+    if (action === 'pending') {
+      this.writeCheckoutLockCookie(res, { t: 'pending' })
+    } else if (action === 'clear') {
+      this.clearCheckoutLockCookie(res)
+    }
+  }
+
+  switchCheckoutAccount(res: Response) {
+    this.clearCustomerAuth(res)
+    return { ok: true as const }
+  }
+
   backstageLogout(res: Response) {
     this.clearBackstageSessionCookie(res)
     return { ok: true }
+  }
+
+  clearCustomerAuth(res: Response) {
+    this.clearSessionCookie(res)
+    this.clearCheckoutLockCookie(res)
   }
 
   async backstageLogin(dto: BackstageLoginDto, res: Response) {
@@ -175,7 +286,7 @@ export class AuthService {
     return { ok: true, ...this.toLegacySessionResponse(sessionUser) }
   }
 
-  async register(dto: RegisterDto, res: Response) {
+  async register(dto: RegisterDto, res: Response, req: Request) {
     const email = dto.email.trim().toLowerCase()
     const existing = await this.prisma.user.findUnique({ where: { email } })
     if (existing) {
@@ -197,85 +308,83 @@ export class AuthService {
       }
     }
 
+    // Registration is not proof of contact ownership — contacts stay unverified
+    // until profile/login/checkout OTP (or Google / staff). No Account(PHONE).
+    this.assertCheckoutLockAllowsCreate(req)
     const user = await this.prisma.user.create({
       data: {
         email,
-        emailVerified: true,
+        emailVerified: false,
         phone,
-        phoneVerified: Boolean(phone),
+        phoneVerified: false,
         firstName: dto.firstName?.trim() || null,
         lastName: dto.lastName?.trim() || null,
         passwordHash,
         role: apiRoleToPrisma(role),
-        accounts: phone
-          ? {
-              create: {
-                provider: AuthProvider.PHONE,
-                providerId: phone,
-              },
-            }
-          : undefined,
       },
     })
 
-    await this.users.linkOrphanOrdersToUser(user.id, { phone, email })
+    // Register does not prove mailbox/SMS ownership — do not bulk-link orphans.
 
     const sessionUser = this.toSessionUser(user)
     const token = this.signToken(user.id, sessionUser.role)
+    this.enforceCheckoutAuthLock(req, res, user.id)
     this.setSessionCookie(res, token)
 
     return { ok: true, ...this.toLegacySessionResponse(sessionUser) }
   }
 
-  async login(dto: LoginDto, res: Response) {
+  async login(dto: LoginDto, res: Response, req: Request) {
     const email = dto.email.trim().toLowerCase()
-    let user = await this.prisma.user.findUnique({ where: { email } })
+    const user = await this.prisma.user.findUnique({ where: { email } })
 
     if (!user) {
-      const role = roleFromEmail(email)
-      user = await this.prisma.user.create({
-        data: {
-          email,
-          emailVerified: true,
-          role: apiRoleToPrisma(role),
-        },
-      })
-      await this.users.linkOrphanOrdersToUser(user.id, { email })
+      throw new UnauthorizedException('Невірний email або пароль.')
     }
 
-    if (user.passwordHash && dto.password) {
-      const valid = await bcrypt.compare(dto.password, user.passwordHash)
-      if (!valid) {
-        throw new UnauthorizedException('Невірний email або пароль.')
-      }
+    if (!user.passwordHash) {
+      throw new UnauthorizedException('Невірний email або пароль.')
+    }
+
+    const valid = await bcrypt.compare(dto.password, user.passwordHash)
+    if (!valid) {
+      throw new UnauthorizedException('Невірний email або пароль.')
     }
 
     const sessionUser = this.toSessionUser(user)
     const token = this.signToken(user.id, sessionUser.role)
+    this.enforceCheckoutAuthLock(req, res, user.id)
     this.setSessionCookie(res, token)
 
     return { ok: true, ...this.toLegacySessionResponse(sessionUser) }
   }
 
-  async phoneSession(dto: PhoneSessionDto, res: Response) {
-    const phone = normalizePhoneE164(dto.phone)
+  async phoneSession(dto: PhoneSessionDto, res: Response, req: Request) {
+    const market = await this.settings.getMarketSettings()
+    const phone = validatePhoneForPolicy(dto.phone, market.authPhonePolicy)
     if (!phone) {
       throw new BadRequestException('Невірний формат телефону.')
     }
 
-    const isUkrainian = phone.startsWith('+380')
-    if (isUkrainian) {
-      if (!dto.verificationToken) {
-        throw new UnauthorizedException('Потрібна верифікація телефону.')
-      }
-      const verified = await this.otp.consumeVerificationToken(
-        dto.verificationToken,
-        'phone',
-        phone,
-      )
-      if (!verified) {
-        throw new UnauthorizedException('Невалідний або прострочений токен верифікації.')
-      }
+    if (!dto.verificationToken) {
+      throw new UnauthorizedException('Потрібна верифікація телефону.')
+    }
+
+    const existing = await this.prisma.user.findUnique({ where: { phone }, select: { id: true } })
+    if (existing) {
+      this.enforceCheckoutAuthLock(req, res, existing.id)
+    } else {
+      this.assertCheckoutLockAllowsCreate(req)
+    }
+
+    const verified = await this.otp.consumeVerificationToken(
+      dto.verificationToken,
+      'phone',
+      phone,
+      'login',
+    )
+    if (!verified) {
+      throw new UnauthorizedException('Невалідний або прострочений токен верифікації.')
     }
 
     const userId = await this.users.findOrCreateCustomer({ phone })
@@ -288,20 +397,32 @@ export class AuthService {
       },
     })
 
+    await this.users.ensureVerifiedPhoneAccount(user.id, phone)
+    await this.users.linkOrphanOrdersToUser(user.id, { phone })
+
     const sessionUser = this.toSessionUser(user)
     const token = this.signToken(user.id, sessionUser.role)
+    this.enforceCheckoutAuthLock(req, res, user.id)
     this.setSessionCookie(res, token)
 
     return { ok: true, ...this.toLegacySessionResponse(sessionUser) }
   }
 
-  async emailSession(dto: EmailSessionDto, res: Response) {
+  async emailSession(dto: EmailSessionDto, res: Response, req: Request) {
     const email = dto.email.trim().toLowerCase()
+
+    const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } })
+    if (existing) {
+      this.enforceCheckoutAuthLock(req, res, existing.id)
+    } else {
+      this.assertCheckoutLockAllowsCreate(req)
+    }
 
     const verified = await this.otp.consumeVerificationToken(
       dto.verificationToken,
       'email',
       email,
+      'login',
     )
     if (!verified) {
       throw new UnauthorizedException('Невалідний або прострочений токен верифікації.')
@@ -317,86 +438,183 @@ export class AuthService {
       },
     })
 
+    await this.users.linkOrphanOrdersToUser(user.id, { email })
+
     const sessionUser = this.toSessionUser(user)
     const token = this.signToken(user.id, sessionUser.role)
+    this.enforceCheckoutAuthLock(req, res, user.id)
     this.setSessionCookie(res, token)
 
     return { ok: true, ...this.toLegacySessionResponse(sessionUser) }
   }
 
-  async sendOtp(dto: SendOtpDto) {
+  async sendOtp(dto: SendOtpDto, ip?: string) {
+    const market = await this.settings.getMarketSettings()
+    const purpose: OtpPurpose = dto.purpose ?? 'login'
+
     if (dto.phone?.trim()) {
-      await this.otp.sendPhoneOtp(dto.phone)
+      if (!isOtpChannelEnabled(market, 'sms', purpose)) {
+        throw new BadRequestException('SMS OTP вимкнено для цієї поверхні.')
+      }
+      await this.otp.sendPhoneOtp(dto.phone, market.authPhonePolicy, ip, purpose)
       return { ok: true }
     }
     if (dto.email?.trim()) {
-      await this.otp.sendEmailOtp(dto.email)
+      if (!isOtpChannelEnabled(market, 'email', purpose)) {
+        throw new BadRequestException('Email OTP вимкнено для цієї поверхні.')
+      }
+      await this.otp.sendEmailOtp(dto.email, ip, purpose)
       return { ok: true }
     }
     throw new BadRequestException('Вкажіть телефон або email.')
   }
 
-  async verifyOtp(dto: VerifyOtpDto) {
+  async verifyOtp(dto: VerifyOtpDto, ip?: string) {
+    const market = await this.settings.getMarketSettings()
+    const purpose: OtpPurpose = dto.purpose ?? 'login'
     if (dto.phone?.trim()) {
-      return this.otp.verifyPhoneOtp(dto.phone, dto.code)
+      return this.otp.verifyPhoneOtp(dto.phone, dto.code, market.authPhonePolicy, ip, purpose)
     }
     if (dto.email?.trim()) {
-      return this.otp.verifyEmailOtp(dto.email, dto.code)
+      return this.otp.verifyEmailOtp(dto.email, dto.code, ip, purpose)
     }
     throw new BadRequestException('Вкажіть телефон або email.')
   }
 
-  async customerByPhone(phoneRaw: string) {
-    const phone = normalizePhoneE164(phoneRaw)
-    if (!phone) {
+  async resolveCheckoutIdentityHint(
+    dto: CheckoutIdentityHintDto,
+    ip: string | undefined,
+    req: Request,
+    res: Response,
+  ) {
+    const market = await this.settings.getMarketSettings()
+    if (market.guestCheckoutMode !== 'soft') {
+      throw new NotFoundException('Identity hint is unavailable for this checkout mode.')
+    }
+
+    await this.otp.consumeIdentityHintIpLimit(ip)
+
+    const emailOtpEnabled = isOtpChannelEnabled(market, 'email', 'checkout')
+    const smsOtpEnabled = isOtpChannelEnabled(market, 'sms', 'checkout')
+
+    if (!emailOtpEnabled && !smsOtpEnabled) {
+      this.applyHintCheckoutLock(req, res, 'none')
+      return { identityResolution: 'none' as const, suggestedAuth: null }
+    }
+
+    const emailCandidate = dto.email?.trim().toLowerCase() || null
+    const phoneCandidate = dto.phone?.trim()
+      ? validatePhoneForPolicy(dto.phone, market.authPhonePolicy)
+      : null
+
+    const emailLookupReady = Boolean(emailOtpEnabled && emailCandidate)
+    const phoneLookupReady = Boolean(smsOtpEnabled && phoneCandidate)
+
+    if (!emailLookupReady && !phoneLookupReady) {
+      throw new BadRequestException('Вкажіть коректний email або телефон для перевірки акаунта.')
+    }
+
+    const emailUser = emailLookupReady
+      ? await this.prisma.user.findUnique({
+          where: { email: emailCandidate! },
+          select: { id: true },
+        })
+      : null
+    const phoneUser = phoneLookupReady
+      ? await this.prisma.user.findUnique({
+          where: { phone: phoneCandidate! },
+          select: { id: true },
+        })
+      : null
+
+    let identityResolution: 'none' | 'single' | 'conflict' = 'none'
+    let suggestedAuth: 'email' | 'phone' | 'either' | null = null
+
+    if (emailOtpEnabled && smsOtpEnabled) {
+      if (!emailUser && !phoneUser) {
+        identityResolution = 'none'
+      } else if (emailUser && phoneUser) {
+        if (emailUser.id === phoneUser.id) {
+          identityResolution = 'single'
+          suggestedAuth = 'either'
+        } else {
+          identityResolution = 'conflict'
+        }
+      } else if (emailUser) {
+        identityResolution = 'single'
+        suggestedAuth = 'email'
+      } else {
+        identityResolution = 'single'
+        suggestedAuth = 'phone'
+      }
+    } else if (emailOtpEnabled) {
+      if (emailUser) {
+        identityResolution = 'single'
+        suggestedAuth = 'email'
+      }
+    } else if (phoneUser) {
+      identityResolution = 'single'
+      suggestedAuth = 'phone'
+    }
+
+    this.applyHintCheckoutLock(req, res, identityResolution)
+    return { identityResolution, suggestedAuth }
+  }
+
+  async resolveCheckoutIdentity(dto: CheckoutIdentityDto, res: Response, req: Request) {
+    const market = await this.settings.getMarketSettings()
+    const phoneCandidate = dto.phone?.trim()
+      ? validatePhoneForPolicy(dto.phone, market.authPhonePolicy)
+      : null
+    const emailCandidate = dto.email?.trim().toLowerCase() || null
+
+    if (dto.phone?.trim() && !phoneCandidate) {
       throw new BadRequestException('Невірний формат телефону.')
     }
 
-    const user = await this.prisma.user.findUnique({ where: { phone } })
-    if (!user) {
-      return { found: false as const }
-    }
-
-    return this.buildCustomerLookupWithDiscount(user)
-  }
-
-  async customerByEmail(emailRaw: string) {
-    const email = emailRaw.trim().toLowerCase()
-    if (!email || !email.includes('@')) {
-      throw new BadRequestException('Невірний формат email.')
-    }
-
-    const user = await this.prisma.user.findUnique({ where: { email } })
-    if (!user) {
-      return { found: false as const }
-    }
-
-    return this.buildCustomerLookupWithDiscount(user)
-  }
-
-  async resolveCheckoutIdentity(dto: CheckoutIdentityDto, res: Response) {
-    const phone = dto.phone?.trim() ? normalizePhoneE164(dto.phone) : null
-    const email = dto.email?.trim().toLowerCase() || null
-
-    if (!phone && !email) {
+    if (!phoneCandidate && !emailCandidate) {
       throw new BadRequestException('Вкажіть телефон або email.')
     }
 
-    const channel = phone ? ('phone' as const) : ('email' as const)
-    const identity = phone ?? email!
+    // OTP proves exactly one channel. Ignore unproven sibling contacts for identity.
+    let channel: 'phone' | 'email' | null = null
+    let provenPhone: string | null = null
+    let provenEmail: string | null = null
 
-    const tokenValid = await this.otp.matchVerificationToken(
-      dto.verificationToken,
-      channel,
-      identity,
-    )
-    if (!tokenValid) {
+    if (phoneCandidate) {
+      const phoneTokenOk = await this.otp.matchVerificationToken(
+        dto.verificationToken,
+        'phone',
+        phoneCandidate,
+        'checkout',
+      )
+      if (phoneTokenOk) {
+        channel = 'phone'
+        provenPhone = phoneCandidate
+      }
+    }
+    if (!channel && emailCandidate) {
+      const emailTokenOk = await this.otp.matchVerificationToken(
+        dto.verificationToken,
+        'email',
+        emailCandidate,
+        'checkout',
+      )
+      if (emailTokenOk) {
+        channel = 'email'
+        provenEmail = emailCandidate
+      }
+    }
+    if (!channel) {
       throw new UnauthorizedException('Невалідний або прострочений токен верифікації.')
     }
 
-    let user = phone
-      ? await this.prisma.user.findUnique({ where: { phone } })
-      : await this.prisma.user.findUnique({ where: { email: email! } })
+    const identity = provenPhone ?? provenEmail!
+
+    let user =
+      channel === 'phone'
+        ? await this.prisma.user.findUnique({ where: { phone: provenPhone! } })
+        : await this.prisma.user.findUnique({ where: { email: provenEmail! } })
 
     if (!user) {
       const firstName = dto.firstName?.trim() || null
@@ -405,30 +623,40 @@ export class AuthService {
         return { found: false as const, needsProfile: true as const }
       }
 
-      const userId = await this.users.findOrCreateCustomer({
-        phone: phone ?? undefined,
-        email: email ?? undefined,
-        firstName,
-        lastName,
-      })
+      this.assertCheckoutLockAllowsCreate(req)
+      const userId = await this.users.findOrCreateCustomer(
+        channel === 'phone'
+          ? { phone: provenPhone!, firstName, lastName }
+          : { email: provenEmail!, firstName, lastName },
+      )
       user = await this.prisma.user.findUnique({ where: { id: userId } })
       if (!user) {
         throw new BadRequestException('Не вдалося створити профіль замовника.')
       }
+    } else {
+      this.enforceCheckoutAuthLock(req, res, user.id)
     }
 
-    await this.otp.consumeVerificationToken(dto.verificationToken, channel, identity)
+    await this.otp.consumeVerificationToken(dto.verificationToken, channel, identity, 'checkout')
 
     user = await this.prisma.user.update({
       where: { id: user.id },
-      data: {
-        ...(phone ? { phone, phoneVerified: true } : {}),
-        ...(email ? { email, emailVerified: true } : {}),
-      },
+      data:
+        channel === 'phone'
+          ? { phone: provenPhone!, phoneVerified: true }
+          : { email: provenEmail!, emailVerified: true },
     })
+
+    if (channel === 'phone') {
+      await this.users.ensureVerifiedPhoneAccount(user.id, provenPhone!)
+      await this.users.linkOrphanOrdersToUser(user.id, { phone: provenPhone! })
+    } else {
+      await this.users.linkOrphanOrdersToUser(user.id, { email: provenEmail! })
+    }
 
     const sessionUser = this.toSessionUser(user)
     const jwt = this.signToken(user.id, sessionUser.role)
+    this.enforceCheckoutAuthLock(req, res, user.id)
     this.setSessionCookie(res, jwt)
 
     const profile = await this.buildCustomerLookupWithDiscount(user)
@@ -436,8 +664,8 @@ export class AuthService {
       ok: true as const,
       needsProfile: false as const,
       ...profile,
-      phone: user.phone ?? phone ?? undefined,
-      email: user.email ?? email ?? undefined,
+      phone: user.phone ?? provenPhone ?? undefined,
+      email: user.email ?? provenEmail ?? undefined,
       user: this.toLegacySessionResponse(sessionUser).user,
     }
   }
@@ -516,20 +744,31 @@ export class AuthService {
     return profile
   }
 
-  private async upsertGoogleUser(profile: GoogleOAuthProfile) {
+  private async resolveExistingGoogleUserId(profile: GoogleOAuthProfile): Promise<string | null> {
     const email = profile.email.trim().toLowerCase()
-
-    let account = await this.prisma.account.findUnique({
+    const account = await this.prisma.account.findUnique({
       where: {
         provider_providerId: {
           provider: AuthProvider.GOOGLE,
           providerId: profile.sub,
         },
       },
-      include: { user: true },
+      select: { userId: true },
     })
+    if (account?.userId) return account.userId
+    const byEmail = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    })
+    return byEmail?.id ?? null
+  }
 
-    let user = account?.user ?? (await this.prisma.user.findUnique({ where: { email } }))
+  private async upsertGoogleUser(profile: GoogleOAuthProfile) {
+    const email = profile.email.trim().toLowerCase()
+    const existingId = await this.resolveExistingGoogleUserId(profile)
+    let user = existingId
+      ? await this.prisma.user.findUnique({ where: { id: existingId } })
+      : null
 
     if (!user) {
       user = await this.prisma.user.create({
@@ -547,52 +786,70 @@ export class AuthService {
           },
         },
       })
-    } else {
-      await this.prisma.account.upsert({
-        where: {
-          provider_providerId: {
-            provider: AuthProvider.GOOGLE,
-            providerId: profile.sub,
-          },
-        },
-        create: {
-          provider: AuthProvider.GOOGLE,
-          providerId: profile.sub,
-          userId: user.id,
-        },
-        update: {},
-      })
-
-      const updates: {
-        email?: string
-        emailVerified?: boolean
-        firstName?: string | null
-        lastName?: string | null
-      } = {}
-
-      if (!user.email) {
-        updates.email = email
-        updates.emailVerified = true
-      } else if (!user.emailVerified) {
-        updates.emailVerified = true
-      }
-
-      if (!user.firstName?.trim() && profile.firstName) {
-        updates.firstName = profile.firstName
-      }
-      if (!user.lastName?.trim() && profile.lastName) {
-        updates.lastName = profile.lastName
-      }
-
-      if (Object.keys(updates).length > 0) {
-        user = await this.prisma.user.update({
-          where: { id: user.id },
-          data: updates,
-        })
-      }
+      await this.users.linkOrphanOrdersToUser(user.id, { email })
+      return user
     }
 
-    await this.users.linkOrphanOrdersToUser(user.id, { email })
+    await this.prisma.account.upsert({
+      where: {
+        provider_providerId: {
+          provider: AuthProvider.GOOGLE,
+          providerId: profile.sub,
+        },
+      },
+      create: {
+        provider: AuthProvider.GOOGLE,
+        providerId: profile.sub,
+        userId: user.id,
+      },
+      update: {},
+    })
+
+    const updates: {
+      email?: string
+      emailVerified?: boolean
+      firstName?: string | null
+      lastName?: string | null
+    } = {}
+
+    const storedEmail = user.email?.trim().toLowerCase() || null
+
+    if (!storedEmail) {
+      const emailOwner = await this.prisma.user.findUnique({
+        where: { email },
+        select: { id: true },
+      })
+      if (emailOwner && emailOwner.id !== user.id) {
+        // Google proved email, but another User already owns it — no merge / no steal.
+      } else {
+        updates.email = email
+        updates.emailVerified = true
+      }
+    } else if (storedEmail === email) {
+      if (!user.emailVerified) {
+        updates.emailVerified = true
+      }
+    }
+    // storedEmail !== Google email: never mark stored email verified from Google proof of a different address.
+
+    if (!user.firstName?.trim() && profile.firstName) {
+      updates.firstName = profile.firstName
+    }
+    if (!user.lastName?.trim() && profile.lastName) {
+      updates.lastName = profile.lastName
+    }
+
+    if (Object.keys(updates).length > 0) {
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: updates,
+      })
+    }
+
+    const finalEmail = user.email?.trim().toLowerCase() || null
+    if (finalEmail === email && user.emailVerified) {
+      await this.users.linkOrphanOrdersToUser(user.id, { email })
+    }
 
     return user
   }
@@ -600,8 +857,18 @@ export class AuthService {
   private async completeGoogleOAuth(
     profile: GoogleOAuthProfile,
     res: Response,
+    req: Request,
   ) {
+    const existingUserId = await this.resolveExistingGoogleUserId(profile)
+    if (shouldRejectCheckoutAuth(this.peekCheckoutLock(req), existingUserId)) {
+      throw this.checkoutAccountLockedException()
+    }
+    if (existingUserId) {
+      this.enforceCheckoutAuthLock(req, res, existingUserId)
+    }
+
     const user = await this.upsertGoogleUser(profile)
+    this.enforceCheckoutAuthLock(req, res, user.id)
     const sessionUser = this.toSessionUser(user)
     const token = this.signToken(user.id, sessionUser.role)
     this.setSessionCookie(res, token)
@@ -678,10 +945,10 @@ export class AuthService {
     }
   }
 
-  async googleOAuthCallback(dto: GoogleOAuthCallbackDto, res: Response) {
+  async googleOAuthCallback(dto: GoogleOAuthCallbackDto, res: Response, req: Request) {
     const idToken = await this.fetchGoogleIdToken(dto.code, dto.redirectUri.trim())
     const profile = await this.verifyGoogleIdToken(idToken)
-    return this.completeGoogleOAuth(profile, res)
+    return this.completeGoogleOAuth(profile, res, req)
   }
 
   async sessionFromPayload(payload: SessionJwtPayload) {

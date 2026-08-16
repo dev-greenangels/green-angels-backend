@@ -25,6 +25,7 @@ import { StockNotificationsModule } from './stock-notifications/stock-notificati
 import { UsersModule } from './users/users.module'
 import { NovaPoshtaModule } from './nova-poshta/nova-poshta.module'
 import { MonopayModule } from './monopay/monopay.module'
+import { PaymentsModule } from './payments/payments.module'
 import { RedisModule } from './redis/redis.module'
 import { CommerceModule } from './commerce/commerce.module'
 import { CurrenciesModule } from './currencies/currencies.module'
@@ -32,6 +33,17 @@ import { UnitsOfMeasureModule } from './units-of-measure/units-of-measure.module
 import { RedirectsModule } from './redirects/redirects.module'
 import { PhotosModule } from './photos/photos.module'
 import { ViberPhotosModule } from './viber-photos/viber-photos.module'
+import { OrderStatusesModule } from './order-statuses/order-statuses.module'
+import { CancellationReasonsModule } from './cancellation-reasons/cancellation-reasons.module'
+import { ImportModule } from './import/import.module'
+import { CatalogExcelModule } from './catalog-excel/catalog-excel.module'
+import { ReferralsModule } from './referrals/referrals.module'
+import { MediaModule } from './media/media.module'
+import { FlexiModule } from './flexi/flexi.module'
+import { PacketaModule } from './packeta/packeta.module'
+import { GlsModule } from './gls/gls.module'
+import { ViesModule } from './vies/vies.module'
+import { TedbModule } from './tedb/tedb.module'
 
 @Module({
   imports: [
@@ -46,6 +58,7 @@ import { ViberPhotosModule } from './viber-photos/viber-photos.module'
         connection: {
           host: config.get<string>('REDIS_HOST', 'localhost'),
           port: config.get<number>('REDIS_PORT', 6379),
+          password: config.get<string>('REDIS_PASSWORD') || undefined,
         },
       }),
     }),
@@ -73,12 +86,24 @@ import { ViberPhotosModule } from './viber-photos/viber-photos.module'
     UsersModule,
     NovaPoshtaModule,
     MonopayModule,
+    PaymentsModule,
     CommerceModule,
     CurrenciesModule,
     UnitsOfMeasureModule,
     RedirectsModule,
     PhotosModule,
     ViberPhotosModule,
+    OrderStatusesModule,
+    CancellationReasonsModule,
+    ImportModule,
+    CatalogExcelModule,
+    ReferralsModule,
+    FlexiModule,
+    PacketaModule,
+    GlsModule,
+    ViesModule,
+    TedbModule,
+    MediaModule,
   ],
 })
 export class AppModule {}

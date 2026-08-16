@@ -1,9 +1,15 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator'
+import { IsNotEmpty, IsOptional, IsString, ValidateIf } from 'class-validator'
 
 export class EanCacheItem {
+  /** Legacy RN Estimate cache key — EAN. Optional when `sku` is set. */
+  @ValidateIf((item: EanCacheItem) => !item.sku?.trim())
   @IsString()
   @IsNotEmpty()
-  ean!: string
+  ean?: string
+
+  @IsOptional()
+  @IsString()
+  sku?: string | null
 
   @IsString()
   @IsOptional()

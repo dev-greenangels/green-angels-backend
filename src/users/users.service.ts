@@ -11,8 +11,9 @@ import * as bcrypt from 'bcrypt'
 import { normalizePhoneE164 } from '../auth/auth.utils'
 import { CreateStaffDto } from './dto/create-staff.dto'
 import { UpdateUserDto } from './dto/update-user.dto'
+import { UpdateUserGroupsDto } from './dto/update-user-groups.dto'
 import { PrismaService } from '../prisma/prisma.service'
-import { isOrderStatus, type OrderStatus } from '../orders/order-status.constants'
+import { type OrderStatus } from '../orders/order-status.constants'
 
 export type FindOrCreateCustomerParams = {
   phone?: string | null
@@ -22,6 +23,10 @@ export type FindOrCreateCustomerParams = {
   patronymic?: string | null
 }
 
+/**
+ * Only pass contacts that were just proven by the current auth flow
+ * (Email OTP / Phone OTP / Google). Do not pass unverified sibling identifiers.
+ */
 export type LinkOrphanOrdersParams = {
   phone?: string | null
   email?: string | null
@@ -58,6 +63,7 @@ export type BackstageUserOrderSummary = {
   currency: string
   itemCount: number
   createdAt: string
+  trackingNumber: string | null
   receiverFirstName: string
   receiverLastName: string
   receiverPatronymic: string | null
@@ -72,6 +78,7 @@ export type BackstageUserOrderSummary = {
 
 export type BackstageUserDetail = BackstageUserListItem & {
   orders: BackstageUserOrderSummary[]
+  groupIds: string[]
 }
 
 const CUSTOMER_ROLES: Role[] = [Role.USER, Role.WHOLESALER, Role.GUEST]
@@ -88,8 +95,7 @@ export class UsersService {
   }
 
   private normalizeOrderStatus(status: string): OrderStatus {
-    const upper = status.toUpperCase()
-    return isOrderStatus(upper) ? upper : 'PENDING'
+    return status.trim().toUpperCase() || 'PENDING'
   }
 
   async createStaff(dto: CreateStaffDto): Promise<BackstageUserListItem> {
@@ -124,6 +130,15 @@ export class UsersService {
       orderCount: user._count.orders,
       createdAt: user.createdAt.toISOString(),
     }
+  }
+
+  async count(query: { segment?: string }): Promise<{ total: number }> {
+    const segment: BackstageUserSegment =
+      query.segment?.trim().toLowerCase() === 'staff' ? 'staff' : 'customers'
+    const total = await this.prisma.user.count({
+      where: { role: { in: segment === 'staff' ? STAFF_ROLES : CUSTOMER_ROLES } },
+    })
+    return { total }
   }
 
   async findAll(query: {
@@ -315,6 +330,37 @@ export class UsersService {
     return this.findOne(id)
   }
 
+  async updateGroups(id: string, dto: UpdateUserGroupsDto): Promise<BackstageUserDetail> {
+    const user = await this.prisma.user.findUnique({ where: { id }, select: { id: true } })
+    if (!user) {
+      throw new NotFoundException('Користувача не знайдено.')
+    }
+
+    const groupIds = [...new Set(dto.groupIds)]
+    if (groupIds.length) {
+      const existingGroups = await this.prisma.customerGroup.findMany({
+        where: { id: { in: groupIds } },
+        select: { id: true },
+      })
+      if (existingGroups.length !== groupIds.length) {
+        throw new BadRequestException('Одну або кілька груп клієнтів не знайдено.')
+      }
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.userCustomerGroup.deleteMany({ where: { userId: id } }),
+      ...(groupIds.length
+        ? [
+            this.prisma.userCustomerGroup.createMany({
+              data: groupIds.map((groupId) => ({ userId: id, groupId })),
+            }),
+          ]
+        : []),
+    ])
+
+    return this.findOne(id)
+  }
+
   async findOne(id: string): Promise<BackstageUserDetail> {
     const user = await this.prisma.user.findUnique({
       where: { id },
@@ -327,6 +373,7 @@ export class UsersService {
             },
           },
         },
+        customerGroups: { select: { groupId: true } },
         _count: { select: { orders: true } },
       },
     })
@@ -345,6 +392,7 @@ export class UsersService {
       role: user.role,
       orderCount: user._count.orders,
       createdAt: user.createdAt.toISOString(),
+      groupIds: user.customerGroups.map((row) => row.groupId),
       orders: user.orders.map((order) => ({
         id: order.id,
         orderNumber: this.formatOrderNumber(order.orderNumber),
@@ -353,6 +401,7 @@ export class UsersService {
         currency: order.currency,
         itemCount: order.items.reduce((sum, item) => sum + item.quantity, 0),
         createdAt: order.createdAt.toISOString(),
+        trackingNumber: order.trackingNumber,
         receiverFirstName: order.receiverFirstName,
         receiverLastName: order.receiverLastName,
         receiverPatronymic: order.receiverPatronymic,
@@ -416,46 +465,6 @@ export class UsersService {
     return filters
   }
 
-  private async findUserIdFromHistoricalOrders(
-    phone: string | null,
-    email: string | null,
-  ): Promise<string | null> {
-    if (phone) {
-      const order = await this.prisma.order.findFirst({
-        where: { customerPhone: phone, userId: { not: null } },
-        orderBy: { createdAt: 'desc' },
-        select: { userId: true },
-      })
-      if (order?.userId) {
-        const user = await this.prisma.user.findUnique({
-          where: { id: order.userId },
-          select: { id: true },
-        })
-        if (user) return user.id
-      }
-    }
-
-    if (!phone && email) {
-      const order = await this.prisma.order.findFirst({
-        where: {
-          customerEmail: { equals: email, mode: 'insensitive' },
-          userId: { not: null },
-        },
-        orderBy: { createdAt: 'desc' },
-        select: { userId: true },
-      })
-      if (order?.userId) {
-        const user = await this.prisma.user.findUnique({
-          where: { id: order.userId },
-          select: { id: true },
-        })
-        if (user) return user.id
-      }
-    }
-
-    return null
-  }
-
   async linkOrphanOrdersToUser(
     userId: string,
     params: LinkOrphanOrdersParams,
@@ -467,14 +476,79 @@ export class UsersService {
     const matchFilters = this.buildOrderMatchFilters(phone, email)
     if (!matchFilters.length) return 0
 
-    const result = await this.prisma.order.updateMany({
+    const candidates = await this.prisma.order.findMany({
       where: { userId: null, OR: matchFilters },
+      select: { id: true, customerEmail: true, customerPhone: true },
+    })
+    if (!candidates.length) return 0
+
+    const safeIds: string[] = []
+    for (const order of candidates) {
+      if (await this.orderHasConflictingPurchaserIdentities(order)) continue
+      safeIds.push(order.id)
+    }
+    if (!safeIds.length) return 0
+
+    const result = await this.prisma.order.updateMany({
+      where: { id: { in: safeIds }, userId: null },
       data: { userId },
     })
 
     return result.count
   }
 
+  /**
+   * True when order.customerEmail and order.customerPhone each belong to
+   * different existing Users — automatic attach must not choose one.
+   */
+  async orderHasConflictingPurchaserIdentities(order: {
+    customerEmail: string | null
+    customerPhone: string
+  }): Promise<boolean> {
+    const email = order.customerEmail?.trim().toLowerCase() || null
+    const rawPhone = order.customerPhone.trim()
+    const phone = normalizePhoneE164(rawPhone) ?? (rawPhone || null)
+    if (!email || !phone) return false
+
+    const [emailOwner, phoneOwner] = await Promise.all([
+      this.prisma.user.findUnique({ where: { email }, select: { id: true } }),
+      this.prisma.user.findUnique({ where: { phone }, select: { id: true } }),
+    ])
+    if (!emailOwner || !phoneOwner) return false
+    return emailOwner.id !== phoneOwner.id
+  }
+
+  /**
+   * Upsert Account(PHONE) only after phone ownership is proven (OTP / staff).
+   * Callers must already have set User.phone + phoneVerified=true.
+   */
+  async ensureVerifiedPhoneAccount(userId: string, phone: string): Promise<void> {
+    const normalized = normalizePhoneE164(phone) ?? phone.trim()
+    if (!normalized) {
+      throw new BadRequestException('Невірний формат телефону.')
+    }
+
+    await this.prisma.account.upsert({
+      where: {
+        provider_providerId: {
+          provider: AuthProvider.PHONE,
+          providerId: normalized,
+        },
+      },
+      create: {
+        provider: AuthProvider.PHONE,
+        providerId: normalized,
+        userId,
+      },
+      update: { userId },
+    })
+  }
+
+  /**
+   * Mutate name / optionally attach missing contact strings.
+   * Never sets emailVerified / phoneVerified and never creates Account(PHONE).
+   * Verification and phone Account ownership are the caller's responsibility.
+   */
   private async updateCustomerProfile(
     userId: string,
     params: {
@@ -509,30 +583,14 @@ export class UsersService {
         ...(firstName ? { firstName } : {}),
         ...(lastName ? { lastName } : {}),
         patronymic,
-        ...(phone && !existing.phone ? { phone } : {}),
-        ...(email && !existing.email ? { email, emailVerified: true } : {}),
+        // Missing contacts may be stored as unverified PII only — never as proof.
+        ...(phone && !existing.phone ? { phone, phoneVerified: false } : {}),
+        ...(email && !existing.email ? { email, emailVerified: false } : {}),
       },
-      select: { id: true, phone: true },
+      select: { id: true },
     })
 
-    if (phone) {
-      await this.prisma.account.upsert({
-        where: {
-          provider_providerId: {
-            provider: AuthProvider.PHONE,
-            providerId: phone,
-          },
-        },
-        create: {
-          provider: AuthProvider.PHONE,
-          providerId: phone,
-          userId: updated.id,
-        },
-        update: { userId: updated.id },
-      })
-    }
-
-    await this.linkOrphanOrdersToUser(updated.id, { phone, email })
+    // Orphan linking is the caller's responsibility with proven contacts only.
     return updated.id
   }
 
@@ -575,38 +633,23 @@ export class UsersService {
       }
     }
 
-    const userIdFromOrders = await this.findUserIdFromHistoricalOrders(phone, email)
-    if (userIdFromOrders) {
-      return this.updateCustomerProfile(userIdFromOrders, {
-        phone,
-        email,
-        firstName,
-        lastName,
-        patronymic,
-      })
-    }
-
+    // Proven contact is not on any User. Order.customerPhone / customerEmail
+    // are checkout PII, not auth identity — never reuse Order.userId here.
     const created = await this.prisma.user.create({
       data: {
         phone,
         email,
-        emailVerified: Boolean(email),
+        emailVerified: false,
+        phoneVerified: false,
         firstName,
         lastName,
         patronymic,
-        accounts: phone
-          ? {
-              create: {
-                provider: AuthProvider.PHONE,
-                providerId: phone,
-              },
-            }
-          : undefined,
+        role: Role.USER,
       },
       select: { id: true },
     })
 
-    await this.linkOrphanOrdersToUser(created.id, { phone, email })
+    // Orphan linking is the caller's responsibility with proven contacts only.
     return created.id
   }
 }

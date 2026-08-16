@@ -24,30 +24,50 @@ enum AuthProvider {
   PHONE
 }
 
-model User {
-  id            String   @id @default(uuid())
-  phone         String?  @unique
-  email         String?  @unique
-  firstName     String?
-  lastName      String?
-  patronymic    String?
-  phoneVerified Boolean  @default(false)
-  emailVerified Boolean  @default(false)
-  deliveryDefaults Json?
-  passwordHash  String?
-  role          Role     @default(USER)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+/// Fresh Photos identity: UA uses EAN, SK uses SKU. Same PhotoIndex table.
+enum PhotoIdentifierType {
+  EAN
+  SKU
+}
 
-  accounts           Account[]
-  contractorProfiles ContractorProfile[]
-  cart               Cart?
-  orders             Order[]
-  reviews            Review[]
-  favorites          UserFavorite[]
-  customerGroups     UserCustomerGroup[]
-  promoCodeUsages    PromoCodeUsage[]
-  promoCodeAllowances PromoCodeUser[]
+model User {
+  id                 String    @id @default(uuid())
+  phone              String?   @unique
+  email              String?   @unique
+  firstName          String?
+  lastName           String?
+  patronymic         String?
+  phoneVerified      Boolean   @default(false)
+  emailVerified      Boolean   @default(false)
+  deliveryDefaults   Json?
+  passwordHash       String?
+  role               Role      @default(USER)
+  /// PrestaShop id_customer (import)
+  legacyId           String?
+  legacySource       String?
+  newsletter         Boolean   @default(false)
+  optin              Boolean   @default(false)
+  marketingConsentAt DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  accounts                       Account[]
+  contractorProfiles             ContractorProfile[]
+  cart                           Cart?
+  orders                         Order[]
+  reviews                        Review[]
+  favorites                      UserFavorite[]
+  customerGroups                 UserCustomerGroup[]
+  promoCodeUsages                PromoCodeUsage[]
+  promoCodeAllowances            PromoCodeUser[]
+  discountRuleAllowances         DiscountRuleUser[]
+  referralCode                   ReferralCode?
+  referralAttributionsAsReferrer ReferralAttribution[] @relation("ReferralReferrer")
+  referralAttributionsAsReferee  ReferralAttribution[] @relation("ReferralReferee")
+  pointsLedger                   PointsLedgerEntry[]
+
+  @@unique([legacySource, legacyId])
+  @@index([legacyId])
 }
 
 model Account {
@@ -76,18 +96,20 @@ model ContractorProfile {
 // ==========================================
 
 model Category {
-  id            String  @id @default(uuid())
-  slug          String  @unique
-  image         String?
-  legacyId      Int?    @unique
-  isActive      Boolean @default(true)
-  isCatalogRoot Boolean @default(false)
-  position      Int     @default(0)
-  parentId      String?
-  parent   Category?  @relation("CategoryToParent", fields: [parentId], references: [id])
-  children Category[] @relation("CategoryToParent")
-  products            Product[]
-  additionalProducts  ProductAdditionalCategory[]
+  id                 String                      @id @default(uuid())
+  slug               String                      @unique
+  image              String?
+  /// Latin / scientific name from Flexi strom.nazev (not a display translation)
+  latinName          String?
+  legacyId           Int?                        @unique
+  isActive           Boolean                     @default(true)
+  isCatalogRoot      Boolean                     @default(false)
+  position           Int                         @default(0)
+  parentId           String?
+  parent             Category?                   @relation("CategoryToParent", fields: [parentId], references: [id])
+  children           Category[]                  @relation("CategoryToParent")
+  products           Product[]
+  additionalProducts ProductAdditionalCategory[]
 
   translations CategoryTranslation[]
 }
@@ -108,29 +130,37 @@ model CategoryTranslation {
 }
 
 model Product {
-  id          String   @id @default(uuid())
-  slug        String   @unique
-  latinName   String?
-  legacyId    String?  @unique
-  isPublished Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  /** Коли товар знову став доступним після повного відсутності на складі */
-  restockedAt        DateTime?
-  /** Коли всі розміри вичерпались (для визначення повторного надходження) */
-  fullyOutOfStockAt  DateTime?
+  id                String    @id @default(uuid())
+  slug              String    @unique
+  latinName         String?
+  /// Combined Nomenclature / Intrastat code from Flexi (e.g. 060290)
+  cnCode            String?
+  legacyId          String?   @unique
+  isPublished       Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  /**
+   * Коли товар знову став доступним після повного відсутності на складі
+   */
+  restockedAt       DateTime?
+  /**
+   * Коли всі розміри вичерпались (для визначення повторного надходження)
+   */
+  fullyOutOfStockAt DateTime?
 
   categoryId String
   category   Category @relation(fields: [categoryId], references: [id])
 
-  translations           ProductTranslation[]
-  additionalCategories   ProductAdditionalCategory[]
-  variants               ProductVariant[]
-  images                 ProductImage[]
-  characteristics        ProductCharacteristic[]
-  stockNotifications     ProductStockNotification[]
-  reviews                Review[]
-  favorites              UserFavorite[]
+  translations         ProductTranslation[]
+  additionalCategories ProductAdditionalCategory[]
+  variants             ProductVariant[]
+  images               ProductImage[]
+  characteristics      ProductCharacteristic[]
+  stockNotifications   ProductStockNotification[]
+  reviews              Review[]
+  favorites            UserFavorite[]
+
+  @@index([cnCode])
 }
 
 /// Підписка «повідомити, коли зʼявиться на складі» (будь-який розмір товару)
@@ -196,14 +226,15 @@ enum PackagingKind {
 
 /// Довідник характеристик (створюється в бек-офісі): висота, світло, полив тощо
 model Characteristic {
-  id           String                  @id @default(uuid())
-  slug         String                  @unique
-  valueType    CharacteristicValueType
-  unit         String?
-  sortOrder    Int                     @default(0)
-  isFilterable Boolean                 @default(true)
-  showOnProductPage Boolean            @default(false)
-  icon         String?
+  id                String                  @id @default(uuid())
+  slug              String                  @unique
+  legacyId          String?                 @unique
+  valueType         CharacteristicValueType
+  unit              String?
+  sortOrder         Int                     @default(0)
+  isFilterable      Boolean                 @default(true)
+  showOnProductPage Boolean                 @default(false)
+  icon              String?
 
   translations  CharacteristicTranslation[]
   options       CharacteristicOption[]
@@ -211,7 +242,7 @@ model Characteristic {
 }
 
 model CharacteristicTranslation {
-  id   String @id @default(uuid())
+  id     String @id @default(uuid())
   locale String
   name   String
 
@@ -223,11 +254,12 @@ model CharacteristicTranslation {
 
 /// Варіанти значення для SELECT / MULTI_SELECT (напр. «повне сонце», «напівтінь»)
 model CharacteristicOption {
-  id             String @id @default(uuid())
-  slug           String
-  sortOrder      Int    @default(0)
+  id               String         @id @default(uuid())
+  slug             String
+  legacyId         String?        @unique
+  sortOrder        Int            @default(0)
   characteristicId String
-  characteristic Characteristic @relation(fields: [characteristicId], references: [id], onDelete: Cascade)
+  characteristic   Characteristic @relation(fields: [characteristicId], references: [id], onDelete: Cascade)
 
   translations  CharacteristicOptionTranslation[]
   productValues ProductCharacteristic[]
@@ -253,9 +285,9 @@ model ProductCharacteristic {
   textValue   String?
 
   productId        String
-  product          Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product          Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
   characteristicId String
-  characteristic   Characteristic       @relation(fields: [characteristicId], references: [id], onDelete: Cascade)
+  characteristic   Characteristic        @relation(fields: [characteristicId], references: [id], onDelete: Cascade)
   optionId         String?
   option           CharacteristicOption? @relation(fields: [optionId], references: [id], onDelete: SetNull)
 
@@ -266,7 +298,7 @@ model ProductCharacteristic {
 model VariantAttribute {
   id                  String               @id @default(uuid())
   slug                String               @unique
-  legacyId            String?
+  legacyId            String?              @unique
   sortOrder           Int                  @default(0)
   valueType           VariantAttributeType @default(UNIVERSAL)
   /// Одиниця для RANGE / NUMBER (см, грн…)
@@ -291,23 +323,23 @@ model VariantAttributeTranslation {
 }
 
 model VariantAttributeValue {
-  id         String   @id @default(uuid())
-  slug       String
-  legacyId   String?
-  sortOrder  Int      @default(0)
+  id            String         @id @default(uuid())
+  slug          String
+  legacyId      String?        @unique
+  sortOrder     Int            @default(0)
   /// RANGE min / NUMBER value
-  numericMin Decimal? @db.Decimal(12, 3)
+  numericMin    Decimal?       @db.Decimal(12, 3)
   /// RANGE max (null = «від Min», напр. H80+)
-  numericMax Decimal? @db.Decimal(12, 3)
+  numericMax    Decimal?       @db.Decimal(12, 3)
   /// CONTAINER — усі поля опційні (WRB без параметрів)
-  volumeLiters    Decimal? @db.Decimal(12, 3)
-  potDiameterCm   Decimal? @db.Decimal(12, 3)
-  potHeightCm     Decimal? @db.Decimal(12, 3)
-  tareWeightKg    Decimal? @db.Decimal(12, 3)
+  volumeLiters  Decimal?       @db.Decimal(12, 3)
+  potDiameterCm Decimal?       @db.Decimal(12, 3)
+  potHeightCm   Decimal?       @db.Decimal(12, 3)
+  tareWeightKg  Decimal?       @db.Decimal(12, 3)
   /// CONTAINER — тип упаковки / стан кореневої системи для фільтра
-  packagingKind   PackagingKind?
+  packagingKind PackagingKind?
   /// COLOR
-  colorHex        String?
+  colorHex      String?
 
   attributeId String
   attribute   VariantAttribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
@@ -330,15 +362,20 @@ model VariantAttributeValueTranslation {
 }
 
 model ProductVariant {
-  id            String    @id @default(uuid())
-  sku           String?   @unique
-  ean           String?   @unique
-  stock         Int       @default(0)
-  weight        Float?
-  volume        Float?
-  legacyId      String?
+  id                 String    @id @default(uuid())
+  sku                String?   @unique
+  ean                String?   @unique
+  stock              Int       @default(0)
+  weight             Float?
+  volume             Float?
+  /// Габарити упаковки для розрахунку доставки (см / кг)
+  lengthCm           Float?
+  widthCm            Float?
+  heightCm           Float?
+  volumetricWeightKg Float?
+  legacyId           String?   @unique
   /// Орієнтовна дата доступності (бронювання при нульовому залишку)
-  availableFrom DateTime?
+  availableFrom      DateTime?
 
   productId String
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -348,6 +385,7 @@ model ProductVariant {
 
   attributeValues ProductVariantAttributeValue[]
   prices          ProductPrice[]
+  priceHistory    PriceHistory[]
   quantityPrices  ProductVariantQuantityPrice[]
   cartItems       CartItem[]
   orderItems      OrderItem[]
@@ -398,6 +436,20 @@ model ProductPrice {
   @@unique([productVariantId, priceType, currency])
 }
 
+/// Історія зміни ціни (EU Omnibus Directive — «найнижча ціна за 30 днів» перед знижкою).
+model PriceHistory {
+  id         String   @id @default(uuid())
+  value      Decimal  @db.Decimal(10, 2)
+  recordedAt DateTime @default(now())
+
+  productVariantId String
+  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  priceType        String         @default("роздріб")
+  currency         String         @default("UAH")
+
+  @@index([productVariantId, priceType, currency, recordedAt])
+}
+
 enum UnitOfMeasureType {
   COUNT
   WEIGHT
@@ -422,7 +474,7 @@ model Currency {
 }
 
 model CurrencyTranslation {
-  id   String @id @default(uuid())
+  id     String @id @default(uuid())
   locale String
   name   String
 
@@ -463,6 +515,8 @@ model ProductImage {
   url       String
   isMain    Boolean @default(false)
   sortOrder Int     @default(0)
+  /// PrestaShop id_image
+  legacyId  String? @unique
 
   productId String
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -501,6 +555,13 @@ enum PromoDiscountCombinationMode {
   BEST_PRICE
 }
 
+/// How auto discount rules combine with retail / qty / contractor prices
+enum DiscountRuleCombinationMode {
+  BEST_PRICE
+  STACK
+  MAX_OF
+}
+
 model CustomerGroup {
   id          String   @id @default(uuid())
   name        String
@@ -510,9 +571,10 @@ model CustomerGroup {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  users         UserCustomerGroup[]
-  discountRules DiscountRuleGroup[]
-  promoCodes    PromoCodeGroup[]
+  users            UserCustomerGroup[]
+  discountRules    DiscountRuleGroup[]
+  promoCodes       PromoCodeGroup[]
+  referralPrograms ReferralProgramGroup[]
 }
 
 model UserCustomerGroup {
@@ -526,22 +588,27 @@ model UserCustomerGroup {
 }
 
 model DiscountRule {
-  id              String            @id @default(uuid())
-  name            String
-  type            DiscountValueType
-  value           Decimal           @db.Decimal(10, 2)
-  target          DiscountTarget
-  targetId        String?
-  targetIds       String[]          @default([])
-  onlyForRoles    Role[]
-  minCartSubtotal Decimal?          @db.Decimal(10, 2)
-  startDate       DateTime?
-  endDate         DateTime?
-  isActive        Boolean           @default(true)
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  id                         String                      @id @default(uuid())
+  name                       String
+  type                       DiscountValueType
+  value                      Decimal                     @db.Decimal(10, 2)
+  target                     DiscountTarget
+  targetId                   String?
+  targetIds                  String[]                    @default([])
+  excludeProductIds          String[]                    @default([])
+  excludeVariantIds          String[]                    @default([])
+  excludeCategoryIds         String[]                    @default([])
+  onlyForRoles               Role[]
+  combinesWithOtherDiscounts DiscountRuleCombinationMode @default(BEST_PRICE)
+  minCartSubtotal            Decimal?                    @db.Decimal(10, 2)
+  startDate                  DateTime?
+  endDate                    DateTime?
+  isActive                   Boolean                     @default(true)
+  createdAt                  DateTime                    @default(now())
+  updatedAt                  DateTime                    @updatedAt
 
-  groups DiscountRuleGroup[]
+  groups       DiscountRuleGroup[]
+  allowedUsers DiscountRuleUser[]
 }
 
 model DiscountRuleGroup {
@@ -553,39 +620,49 @@ model DiscountRuleGroup {
   @@id([discountRuleId, groupId])
 }
 
-model PromoCode {
-  id                  String             @id @default(uuid())
-  code                String             @unique
-  name                String
-  description         String?
-  discountType        DiscountValueType?
-  value               Decimal?           @db.Decimal(10, 2)
-  discountApplicationScope DiscountApplicationScope @default(LINE_ITEMS)
-  combinesWithOtherDiscounts PromoDiscountCombinationMode @default(BEST_PRICE)
-  stackingMode        PromoStackingMode  @default(NONE)
-  compatiblePromoCodeIds String[]        @default([])
-  target              DiscountTarget
-  targetId            String?
-  targetIds           String[]           @default([])
-  excludeProductIds   String[]           @default([])
-  excludeVariantIds   String[]           @default([])
-  excludeCategoryIds  String[]           @default([])
-  minCartSubtotal     Decimal?           @db.Decimal(10, 2)
-  giftVariantId       String?
-  giftQuantity        Int                @default(1)
-  usageLimitTotal     Int?
-  usageLimitPerUser   Int?
-  validFrom           DateTime?
-  validTo             DateTime?
-  isActive            Boolean            @default(true)
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
+model DiscountRuleUser {
+  discountRuleId String
+  userId         String
+  discountRule   DiscountRule @relation(fields: [discountRuleId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  groups        PromoCodeGroup[]
-  allowedUsers  PromoCodeUser[]
-  usages        PromoCodeUsage[]
-  orders        Order[]
-  orderLinks    OrderPromoCode[]
+  @@id([discountRuleId, userId])
+  @@index([userId])
+}
+
+model PromoCode {
+  id                         String                       @id @default(uuid())
+  code                       String                       @unique
+  name                       String
+  description                String?
+  discountType               DiscountValueType?
+  value                      Decimal?                     @db.Decimal(10, 2)
+  discountApplicationScope   DiscountApplicationScope     @default(LINE_ITEMS)
+  combinesWithOtherDiscounts PromoDiscountCombinationMode @default(BEST_PRICE)
+  stackingMode               PromoStackingMode            @default(NONE)
+  compatiblePromoCodeIds     String[]                     @default([])
+  target                     DiscountTarget
+  targetId                   String?
+  targetIds                  String[]                     @default([])
+  excludeProductIds          String[]                     @default([])
+  excludeVariantIds          String[]                     @default([])
+  excludeCategoryIds         String[]                     @default([])
+  minCartSubtotal            Decimal?                     @db.Decimal(10, 2)
+  giftVariantId              String?
+  giftQuantity               Int                          @default(1)
+  usageLimitTotal            Int?
+  usageLimitPerUser          Int?
+  validFrom                  DateTime?
+  validTo                    DateTime?
+  isActive                   Boolean                      @default(true)
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime                     @updatedAt
+
+  groups       PromoCodeGroup[]
+  allowedUsers PromoCodeUser[]
+  usages       PromoCodeUsage[]
+  orders       Order[]
+  orderLinks   OrderPromoCode[]
 }
 
 model PromoCodeUser {
@@ -647,43 +724,166 @@ model CartItem {
   @@unique([cartId, productVariantId])
 }
 
+model OrderStatusDefinition {
+  id           String   @id @default(uuid())
+  /// Stable slug used on Order.status (PENDING, AWAITING_PAYMENT, …)
+  code         String   @unique
+  nameUk       String
+  nameEn       String?
+  nameSk       String?
+  /// Badge color key: yellow | orange | blue | purple | green | red | gray
+  color        String   @default("yellow")
+  sortOrder    Int      @default(0)
+  isActive     Boolean  @default(true)
+  /// Seeded system statuses cannot be deleted
+  isSystem     Boolean  @default(false)
+  isTerminal   Boolean  @default(false)
+  /// Optional mapping code for 1C / ERP
+  externalCode String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model CancellationReason {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  nameUk      String
+  nameEn      String?
+  nameSk      String?
+  allowAdmin  Boolean  @default(true)
+  allowUser   Boolean  @default(false)
+  allowSystem Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  orders      Order[]
+}
+
 model Order {
-  id                String   @id @default(uuid())
-  orderNumber       Int      @unique @default(autoincrement())
-  status            String   @default("PENDING")
-  totalAmount       Decimal  @db.Decimal(10, 2)
-  productsSubtotal  Decimal? @db.Decimal(10, 2)
-  deliveryAmount    Decimal? @db.Decimal(10, 2)
-  packagingAmount   Decimal? @db.Decimal(10, 2)
-  taxAmount         Decimal? @db.Decimal(10, 2)
-  currency          String   @default("UAH")
-  customerFirstName  String
-  customerLastName   String
-  customerPatronymic String?
-  customerPhone      String
-  customerEmail      String?
-  receiverFirstName  String
-  receiverLastName   String
-  receiverPatronymic String?
-  receiverPhone      String
-  deliveryMethod     String   @default("nova-poshta-branch")
-  deliveryCity       String?
-  deliveryBranch     String?
-  deliveryStreet     String?
-  deliveryHouseNumber String?
-  paymentMethod     String
-  comment           String?  @db.Text
-  monopayInvoiceId  String?  @unique
-  paymentStatus     String?
-  monopayModifiedAt DateTime?
-  externalId1C      String?
-  userId            String?
-  user              User?    @relation(fields: [userId], references: [id])
-  promoCodeId       String?
-  promoCode         PromoCode? @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
-  promoCodes        OrderPromoCode[]
-  items             OrderItem[]
-  createdAt         DateTime @default(now())
+  id                     String               @id @default(uuid())
+  orderNumber            Int                  @unique @default(autoincrement())
+  status                 String               @default("PENDING")
+  totalAmount            Decimal              @db.Decimal(10, 2)
+  productsSubtotal       Decimal?             @db.Decimal(10, 2)
+  deliveryAmount         Decimal?             @db.Decimal(10, 2)
+  packagingAmount        Decimal?             @db.Decimal(10, 2)
+  /// Snapshot: boxes used for packaging fee (packagingMode=boxes)
+  packagingBoxCount      Int?
+  /// Snapshot: full pallets charged in packaging fee
+  packagingPalletCount   Int?
+  taxAmount              Decimal?             @db.Decimal(10, 2)
+  /// Snapshot of applied VAT % at checkout (SK multi-domain / OSS)
+  taxRatePercent         Float?
+  /// Destination / seller country code used for VAT (sk|hu|at)
+  taxCountryCode         String?
+  /// seller | destination | reverse_charge
+  taxRegime              String?
+  /// EUR→HUF rate used when currency is HUF
+  fxRateUsed             Float?
+  /// individual | company
+  buyerType              String?
+  /// Комісія за післяплату (dobierka / COD), якщо застосовна
+  codFeeAmount           Decimal?             @db.Decimal(10, 2)
+  pointsDiscountAmount   Decimal?             @db.Decimal(10, 2)
+  currency               String               @default("UAH")
+  customerFirstName      String
+  customerLastName       String
+  customerPatronymic     String?
+  customerPhone          String
+  customerEmail          String?
+  receiverFirstName      String
+  receiverLastName       String
+  receiverPatronymic     String?
+  receiverPhone          String
+  deliveryMethod         String               @default("nova-poshta-branch")
+  deliveryCity           String?
+  deliveryBranch         String?
+  deliveryStreet         String?
+  deliveryHouseNumber    String?
+  /// SK/EU courier postal code (PSČ)
+  deliveryPostalCode     String?
+  /// Shipping destination country (sk|hu|at) for SK multi-site
+  deliveryCountryCode    String?
+  /// Optional company/org name on package recipient (not billing entity)
+  receiverCompanyName    String?
+  /// Human-readable Packeta / branch label (id stored in deliveryBranch)
+  deliveryBranchLabel    String?
+  paymentMethod          String
+  comment                String?              @db.Text
+  /// B2B buyer identity (SK IČO / DIČ / IČ DPH or UA ЄДРПОУ)
+  companyLegalName       String?
+  companyIco             String?
+  companyDic             String?
+  companyVatId           String?
+  /// B2B billing address (optional; delivery used as fallback in ERP export)
+  companyStreet          String?
+  companyCity            String?
+  companyPostalCode      String?
+  /// Customer-selected preferred dispatch / ship date
+  preferredShipDate      DateTime?
+  monopayInvoiceId       String?              @unique
+  /// Stripe PaymentIntent / Checkout Session id
+  stripePaymentId        String?              @unique
+  paymentProvider        String?
+  paymentStatus          String?
+  monopayModifiedAt      DateTime?
+  privacyConsentAt       DateTime?
+  privacyConsentVersion  String?
+  createAccountRequested Boolean              @default(false)
+  /// Nova Poshta TTN / tracking number
+  trackingNumber         String?
+  trackingCarrier        String?
+  npDocumentRef          String?
+  trackingSyncedAt       DateTime?
+  shippedAt              DateTime?
+  cancellationReasonId   String?
+  cancellationReason     CancellationReason?  @relation(fields: [cancellationReasonId], references: [id], onDelete: SetNull)
+  /// ADMIN | USER | SYSTEM
+  cancellationSource     String?
+  cancellationNote       String?              @db.Text
+  cancelledAt            DateTime?
+  /// ERP correlation id only (Flexi ext:GA:{uuid} / legacy). NOT the native ERP document number.
+  externalErpId          String?
+  /// @deprecated Use externalErpId
+  externalId1C           String?
+  /// ERP-SYNC-001: sync FSM separate from Order.status (customer lifecycle).
+  /// NOT_REQUIRED | PENDING_ERP | RETRYING | SYNCED | ERP_CONFLICT | FAILED | CANCEL_*
+  erpSyncStatus          String?
+  /// Native ERP/Flexi internal document id when known (populated in later batches).
+  erpNativeId            String?
+  /// Native ERP/Flexi document number/kod for display when known.
+  erpNativeKod           String?
+  erpSyncAttempts        Int                  @default(0)
+  erpLastErrorCode       String?
+  erpLastErrorMessage    String?              @db.Text
+  erpLastSyncAt          DateTime?
+  erpSyncedAt            DateTime?
+  legacyId               String?
+  legacySource           String?
+  legacyReference        String?
+  userId                 String?
+  user                   User?                @relation(fields: [userId], references: [id])
+  promoCodeId            String?
+  promoCode              PromoCode?           @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
+  promoCodes             OrderPromoCode[]
+  items                  OrderItem[]
+  referralAttribution    ReferralAttribution?
+  pointsLedger           PointsLedgerEntry[]
+  createdAt              DateTime             @default(now())
+
+  @@unique([legacySource, legacyId])
+  @@index([trackingNumber])
+  @@index([cancellationReasonId])
+  @@index([legacyId])
+  @@index([externalErpId])
+  @@index([erpSyncStatus])
+  @@index([erpNativeKod])
+  @@index([companyIco])
+  @@index([preferredShipDate])
+  @@index([createdAt])
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
 }
 
 model OrderPromoCode {
@@ -697,15 +897,15 @@ model OrderPromoCode {
 }
 
 model OrderItem {
-  id               String         @id @default(uuid())
+  id               String          @id @default(uuid())
   quantity         Int
-  priceAtPurchase  Decimal        @db.Decimal(10, 2)
+  priceAtPurchase  Decimal         @db.Decimal(10, 2)
   productName      String
   productSlug      String
   variantLabel     String?
   sku              String?
   orderId          String
-  order            Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order            Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productVariantId String?
   productVariant   ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
 }
@@ -737,21 +937,25 @@ model Redirect {
   @@index([isActive])
 }
 
-/// Індекс/маніфест estimate-фото (локальне сховище + кеш для клієнта)
+/// Індекс/маніфест estimate-фото (R2 або local driver + кеш для клієнта).
+/// `ean` stores the identifier *value* (EAN or SKU). Discriminator is identifierType.
 model PhotoIndex {
-  id            String   @id @default(uuid())
-  ean           String
+  id             String              @id @default(uuid())
+  identifierType PhotoIdentifierType @default(EAN) @map("identifier_type")
+  /// Identifier value: ProductVariant.ean (UA) or ProductVariant.sku (SK)
+  ean            String
   /// Унікальний id файлу (раніше google_id) — клієнтський кеш звіряється з ним
-  fileId        String   @unique @map("file_id")
-  hash          String
-  url           String
-  relativePath  String   @map("relative_path")
-  fileSizeBytes Int      @default(0) @map("file_size_bytes")
-  appProperties Json     @default("{}") @map("app_properties")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  fileId         String              @unique @map("file_id")
+  hash           String
+  /// URL будується на льоту з relativePath (PhotoStorageService.buildPublicUrl)
+  relativePath   String              @map("relative_path")
+  fileSizeBytes  Int                 @default(0) @map("file_size_bytes")
+  appProperties  Json                @default("{}") @map("app_properties")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
 
   @@index([ean])
+  @@index([identifierType, ean])
   @@index([updatedAt(sort: Desc)])
   @@map("photo_index")
 }
@@ -761,18 +965,18 @@ model PhotoIndex {
 // ==========================================
 
 model NpSettlement {
-  ref                String   @id
-  description        String
-  descriptionRu      String?
+  ref                 String   @id
+  description         String
+  descriptionRu       String?
   descriptionTranslit String?
-  settlementType     String?
-  areaDescription    String?
-  regionsDescription String?
-  latitude           String?
-  longitude          String?
-  hasWarehouse       Boolean  @default(true)
-  searchText         String
-  updatedAt          DateTime @updatedAt
+  settlementType      String?
+  areaDescription     String?
+  regionsDescription  String?
+  latitude            String?
+  longitude           String?
+  hasWarehouse        Boolean  @default(true)
+  searchText          String
+  updatedAt           DateTime @updatedAt
 
   warehouses NpWarehouse[]
 
@@ -820,13 +1024,26 @@ model NpSyncRun {
 }
 
 model BlogPost {
-  id        String   @id @default(uuid())
-  slug      String   @unique
-  title     String
-  content   String   @db.Text
-  image     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String   @id @default(uuid())
+  slug            String   @unique
+  title           String
+  content         String   @db.Text
+  /// Короткий опис (Presta content_short); для карток / SEO fallback
+  excerpt         String?  @db.Text
+  image           String?
+  /// Автор статті (Presta author); на фронті fallback — «Зелені Янголи»
+  author          String?
+  metaTitle       String?
+  metaDescription String?  @db.Text
+  metaKeywords    String?
+  /// Видимість на публічному сайті
+  isPublished     Boolean  @default(true)
+  /// PrestaShop st_blog id_st_blog
+  legacyId        String?  @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([isPublished, createdAt(sort: Desc)])
 }
 
 enum ReviewStatus {
@@ -836,31 +1053,32 @@ enum ReviewStatus {
 }
 
 model Review {
-  id           String       @id @default(uuid())
-  userId       String?
-  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
-  productId    String?
-  product      Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
-  authorName   String
-  email        String?
-  phone        String?
-  text         String       @db.Text
-  image        String?
-  images       String[]     @default([])
-  rating       Int          @default(5)
-  storeReplyText       String?   @db.Text
+  id                   String       @id @default(uuid())
+  userId               String?
+  user                 User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  productId            String?
+  product              Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+  authorName           String
+  email                String?
+  phone                String?
+  text                 String       @db.Text
+  image                String?
+  images               String[]     @default([])
+  rating               Int          @default(5)
+  storeReplyText       String?      @db.Text
   storeReplyAuthorName String?
   storeReplyAt         DateTime?
-  status       ReviewStatus @default(PENDING)
-  legacyId     String?
-  legacySource String?
-  importedAt   DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  status               ReviewStatus @default(PENDING)
+  legacyId             String?
+  legacySource         String?
+  importedAt           DateTime?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
 
   @@unique([legacySource, legacyId])
   @@index([status, createdAt(sort: Desc)])
   @@index([productId, status, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
   @@index([rating])
 }
 
@@ -874,4 +1092,143 @@ model UserFavorite {
 
   @@unique([userId, productId])
   @@index([userId, createdAt(sort: Desc)])
+}
+
+// ==========================================
+// 6. РЕФЕРАЛКА ТА БАЛИ
+// ==========================================
+
+model ReferralProgram {
+  id                   String            @id @default(uuid())
+  name                 String
+  isActive             Boolean           @default(false)
+  /// Discount for referee (friend)
+  refereeDiscountType  DiscountValueType @default(PERCENT)
+  refereeDiscountValue Decimal           @default(0) @db.Decimal(10, 2)
+  /// Points awarded to referrer when friend completes qualifying order
+  referrerPoints       Int               @default(0)
+  minOrderSubtotal     Decimal?          @db.Decimal(10, 2)
+  maxRefereeDiscount   Decimal?          @db.Decimal(10, 2)
+  excludeProductIds    String[]          @default([])
+  excludeCategoryIds   String[]          @default([])
+  /// Empty onlyForRoles + empty groups = everyone eligible as referrer
+  onlyForRoles         Role[]            @default([])
+  cookieDays           Int               @default(30)
+  pointsExpireDays     Int?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  groups ReferralProgramGroup[]
+}
+
+model ReferralProgramGroup {
+  programId String
+  groupId   String
+  program   ReferralProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  group     CustomerGroup   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([programId, groupId])
+}
+
+model ReferralCode {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  attributions ReferralAttribution[]
+}
+
+model ReferralAttribution {
+  id             String       @id @default(uuid())
+  referralCodeId String
+  referralCode   ReferralCode @relation(fields: [referralCodeId], references: [id], onDelete: Cascade)
+  referrerUserId String
+  referrer       User         @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  refereeUserId  String?
+  referee        User?        @relation("ReferralReferee", fields: [refereeUserId], references: [id], onDelete: SetNull)
+  orderId        String?      @unique
+  order          Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  status         String       @default("pending") // pending | rewarded | cancelled
+  createdAt      DateTime     @default(now())
+  rewardedAt     DateTime?
+
+  @@index([referrerUserId, createdAt(sort: Desc)])
+  @@index([referralCodeId])
+}
+
+model PointsLedgerEntry {
+  id           String    @id @default(uuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  delta        Int
+  balanceAfter Int
+  reason       String
+  orderId      String?
+  order        Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([orderId])
+}
+
+/// EU VAT rates by country (seed + TEDB sync). Manual rows are not overwritten by TEDB.
+model VatCountryRate {
+  id          String   @id @default(uuid())
+  /// ISO 3166-1 alpha-2 lowercase (sk, cz, de, …)
+  countryCode String
+  /// standard | reduced
+  rateType    String
+  percent     Float
+  /// CN prefixes that qualify for this reduced rate, e.g. ["0601","0602"]
+  cnPrefixes  String[] @default([])
+  /// tedb | manual | seed
+  source      String   @default("seed")
+  validFrom   DateTime @default(now())
+  syncedAt    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([countryCode, rateType, percent])
+  @@index([countryCode, rateType])
+}
+
+/// ERP-WEBHOOK-002A: durable Flexi WebHook / Changes API notification intake.
+/// Payload is change evidence only — not full cenik/order bodies.
+model FlexiChangeEvent {
+  id               String    @id @default(uuid())
+  /// e.g. cenik, objednavka-prijata, strom
+  evidence         String
+  /// Flexi object id (string). Sentinel "*" for strom-wide coalesce when id absent.
+  objectId         String
+  operation        String    @default("")
+  /// Ordering key: @in-version when present, else row globalVersion, else 0
+  changeVersion    Int       @default(0)
+  inVersion        Int?
+  rowGlobalVersion Int?
+  /// PENDING | PROCESSING | PROCESSED | FAILED | SUPERSEDED
+  status           String    @default("PENDING")
+  attempts         Int       @default(0)
+  lastError        String?   @db.Text
+  processedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([evidence, objectId, changeVersion])
+  @@index([status, changeVersion])
+  @@index([status, evidence, objectId])
+  @@index([changeVersion])
+}
+
+/// REL-004: Stripe webhook event.id dedupe (Mono untouched).
+model StripeWebhookEvent {
+  /// Stripe Event.id (evt_…)
+  id          String   @id
+  type        String
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
 }

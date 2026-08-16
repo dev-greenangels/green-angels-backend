@@ -10,6 +10,8 @@ import {
   ValidateNested,
 } from 'class-validator'
 
+import { CheckoutBankDetailsDto } from './update-cart-checkout-settings.dto'
+
 class StoreContactLineDto {
   @IsIn(['phone', 'email', 'viber', 'telegram', 'whatsapp', 'link'])
   type!: 'phone' | 'email' | 'viber' | 'telegram' | 'whatsapp' | 'link'
@@ -95,6 +97,10 @@ class StoreFooterVisibilityDto {
   @IsOptional()
   @IsBoolean()
   showSchedules?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  showCompanyDetails?: boolean
 
   /** @deprecated використовуйте окремі поля showPhone, showViber тощо */
   @IsOptional()
@@ -212,4 +218,13 @@ export class UpdateStoreSettingsDto {
   @ValidateNested()
   @Type(() => StoreSocialLinksDto)
   social?: StoreSocialLinksDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CheckoutBankDetailsDto)
+  companyDetails?: CheckoutBankDetailsDto
+
+  @IsOptional()
+  @IsBoolean()
+  showCompanyOnContacts?: boolean
 }

@@ -9,6 +9,12 @@ class PhotosByEansBodyDto {
   eans!: string[]
 }
 
+class PhotosBySkusBodyDto {
+  @IsArray()
+  @IsString({ each: true })
+  skus!: string[]
+}
+
 class PublicPhotosQueryDto {
   @IsOptional()
   @IsString()
@@ -50,5 +56,15 @@ export class CatalogPhotosController {
   @Post('by-eans')
   byEans(@Body() body: PhotosByEansBodyDto) {
     return this.photosService.listByEans(body.eans ?? [])
+  }
+
+  @Get('by-sku')
+  bySku(@Query('sku') sku?: string) {
+    return this.photosService.listBySku(sku ?? '')
+  }
+
+  @Post('by-skus')
+  bySkus(@Body() body: PhotosBySkusBodyDto) {
+    return this.photosService.listBySkus(body.skus ?? [])
   }
 }

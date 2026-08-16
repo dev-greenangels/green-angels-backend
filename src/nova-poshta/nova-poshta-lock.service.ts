@@ -12,6 +12,7 @@ export class NovaPoshtaLockService implements OnModuleDestroy {
     this.redis = new Redis({
       host: config.get<string>('REDIS_HOST', 'localhost'),
       port: config.get<number>('REDIS_PORT', 6379),
+      password: config.get<string>('REDIS_PASSWORD') || undefined,
       maxRetriesPerRequest: null,
     })
   }

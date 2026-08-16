@@ -1,0 +1,875 @@
+import { Injectable, Logger } from '@nestjs/common'
+
+import {
+  FLEXI_API_WARN_THRESHOLD,
+  FLEXI_HTTP_TIMEOUT_MS,
+  FLEXI_STOCK_FILTER_CHUNK,
+} from './flexi.constants'
+import { FlexiSettingsService } from './flexi.settings.service'
+import { parseStromLocaleFields } from './flexi-locale-json'
+import type {
+  FlexiCenikItem,
+  FlexiSettings,
+  FlexiStromCenikLink,
+  FlexiStromNode,
+} from './flexi.types'
+
+type FlexiListResponse = {
+  winstrom?: Record<string, unknown>
+} & Record<string, unknown>
+
+/**
+ * Cenik detail for SK sync:
+ * - price: prefer including VAT (cenaZakl / cenaZaklVcDph / prodejCena), then bez DPH
+ * - nomen: Intrastat Combined Nomenclature (CN)
+ * - Available=sumDostupMj, net weight=hmotMj
+ */
+const CENIK_DETAIL =
+  'custom:id,kod,nazev,cenaZakl,cenaZaklVcDph,prodejCena,cenaZaklBezDph,sumDostupMj,sumStavMj,stavMJ,skladem,hmotMj,hmotObal,nomen'
+
+/** Stock card: Available quantity = dostupMj (excludes pending issues). */
+const SKLAD_KARTA_DETAIL = 'custom:cenik(kod),stavMJ,dostupMj,rezervovanoMj'
+
+@Injectable()
+export class FlexiClient {
+  private readonly logger = new Logger(FlexiClient.name)
+  private cachedPeriodId: { id: string; fetchedAt: number } | null = null
+
+  constructor(private readonly settingsService: FlexiSettingsService) {}
+
+  private authHeader(settings: FlexiSettings): string {
+    const token = Buffer.from(`${settings.username}:${settings.password}`).toString('base64')
+    return `Basic ${token}`
+  }
+
+  private companyBase(settings: FlexiSettings): string {
+    return `${settings.baseUrl}/c/${encodeURIComponent(settings.companyId)}`
+  }
+
+  async request<T = unknown>(
+    method: string,
+    path: string,
+    body?: unknown,
+    settingsOverride?: FlexiSettings,
+  ): Promise<T> {
+    const settings = settingsOverride ?? (await this.settingsService.getSettings())
+    if (!settings.baseUrl || !settings.companyId) {
+      throw new Error('ABRA Flexi не налаштовано (baseUrl / companyId).')
+    }
+
+    const url = path.startsWith('http')
+      ? path
+      : `${this.companyBase(settings)}${path.startsWith('/') ? path : `/${path}`}`
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), FLEXI_HTTP_TIMEOUT_MS)
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: {
+          Authorization: this.authHeader(settings),
+          Accept: 'application/json',
+          ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      })
+
+      void this.settingsService.incrementApiCalls(1).then((count) => {
+        if (count === FLEXI_API_WARN_THRESHOLD || count === FLEXI_API_WARN_THRESHOLD + 1) {
+          this.logger.warn(
+            `Flexi REST API calls today ≈ ${count} (поріг попередження ${FLEXI_API_WARN_THRESHOLD}).`,
+          )
+        }
+      })
+
+      const text = await response.text()
+      let json: unknown = null
+      if (text.trim()) {
+        try {
+          json = JSON.parse(text)
+        } catch {
+          json = { raw: text }
+        }
+      }
+      if (!response.ok) {
+        const detail =
+          typeof json === 'object' && json && 'winstrom' in json
+            ? JSON.stringify((json as FlexiListResponse).winstrom)
+            : text.slice(0, 500)
+        throw new Error(`Flexi HTTP ${response.status}: ${detail || response.statusText}`)
+      }
+      return json as T
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  async testConnection(): Promise<{ ok: boolean; message: string }> {
+    const settings = await this.settingsService.getSettings()
+    try {
+      await this.request('GET', '/cenik.json?limit=1&detail=id', undefined, settings)
+      return { ok: true, message: 'Зʼєднання з ABRA Flexi успішне.' }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`Flexi testConnection failed: ${message}`)
+      return { ok: false, message }
+    }
+  }
+
+  async registerWebhook(
+    url: string,
+    secKey: string,
+    lastVersion = 0,
+    skipUrlTest = false,
+  ): Promise<void> {
+    const settings = await this.settingsService.getSettings()
+    const qs = new URLSearchParams({
+      url,
+      format: 'JSON',
+      lastVersion: String(lastVersion),
+      secKey,
+    })
+    if (skipUrlTest) qs.set('skipUrlTest', 'true')
+    await this.request('PUT', `/hooks.json?${qs.toString()}`, undefined, settings)
+  }
+
+  private asArray<T>(value: unknown): T[] {
+    if (Array.isArray(value)) return value as T[]
+    if (value && typeof value === 'object') return [value as T]
+    return []
+  }
+
+  private extractEvidence<T>(payload: unknown, evidence: string): T[] {
+    if (!payload || typeof payload !== 'object') return []
+    const root = payload as FlexiListResponse
+    const winstrom = root.winstrom ?? root
+    return this.asArray<T>((winstrom as Record<string, unknown>)[evidence])
+  }
+
+  private num(value: unknown, fallback = 0): number {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : fallback
+  }
+
+  /** First finite price > 0 — Flexi often sends cenaZaklBezDph=0 while cenaZakl/prodejCena is set. */
+  private firstPositiveNum(...candidates: unknown[]): number {
+    for (const value of candidates) {
+      if (value === null || value === undefined || value === '') continue
+      const n = Number(value)
+      if (Number.isFinite(n) && n > 0) return n
+    }
+    return 0
+  }
+
+  /** Prefer dostupMj / sumStavMj; ignore boolean skladem. */
+  private parseStockQty(...candidates: unknown[]): number {
+    for (const value of candidates) {
+      if (value === null || value === undefined || value === '' || typeof value === 'boolean') {
+        continue
+      }
+      const n = Number(value)
+      if (Number.isFinite(n)) return Math.max(0, Math.floor(n))
+    }
+    return 0
+  }
+
+  private escapeFlexiLiteral(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+  }
+
+  private extractCenikKod(cenik: unknown): string | null {
+    if (typeof cenik === 'string') {
+      const s = cenik.trim()
+      if (s.startsWith('code:')) return s.slice(5).trim() || null
+      // "code:XXX" sometimes nested; bare kod
+      if (s && !/^\d+$/.test(s)) return s
+      return null
+    }
+    if (cenik && typeof cenik === 'object') {
+      const o = cenik as Record<string, unknown>
+      const kod = o.kod ?? o.code
+      if (kod != null && String(kod).trim()) return String(kod).trim()
+      const show = o['@showAs'] ?? o.showAs
+      if (typeof show === 'string' && show.includes(':')) {
+        // e.g. "PENN-ALO-LADYU-C2: Name"
+        return show.split(':')[0]?.trim() || null
+      }
+    }
+    return null
+  }
+
+  /**
+   * Intrastat Combined Nomenclature from cenik.nomen (relation) or string aliases.
+   * Flexi often returns `code:060290` or `{ kod: "060290" }`.
+   */
+  private parseCnCode(row: Record<string, unknown>): string | null {
+    const candidates: unknown[] = [
+      row.nomen,
+      row['nomen@ref'],
+      row.nomenklatura,
+      row.intrastatNomen,
+      row.kodNomen,
+      row.cnCode,
+      row.nomenKod,
+    ]
+    for (const value of candidates) {
+      const code = this.extractRelationCode(value)
+      if (code) return code.replace(/\s/g, '')
+    }
+    return null
+  }
+
+  /** Relation / code:XXX / nested kod → bare code string. */
+  private extractRelationCode(value: unknown): string | null {
+    if (value == null || value === '') return null
+    if (typeof value === 'string') {
+      const s = value.trim()
+      if (!s) return null
+      if (s.startsWith('code:')) return s.slice(5).trim() || null
+      // "@showAs" style "060290: Live plants…" or bare CN digits
+      if (/^\d{4,}/.test(s)) return s.split(/[:\s]/)[0]?.trim() || null
+      return s
+    }
+    if (typeof value === 'object') {
+      const o = value as Record<string, unknown>
+      const kod = o.kod ?? o.code ?? o.cnCode
+      if (kod != null && String(kod).trim()) return String(kod).trim()
+      const show = o['@showAs'] ?? o.showAs
+      if (typeof show === 'string' && show.trim()) {
+        const head = show.split(':')[0]?.trim()
+        if (head) return head
+      }
+    }
+    return null
+  }
+
+  /** Current accounting period id (cached ~1h). */
+  async getCurrentAccountingPeriodId(): Promise<string | null> {
+    const now = Date.now()
+    if (this.cachedPeriodId && now - this.cachedPeriodId.fetchedAt < 60 * 60 * 1000) {
+      return this.cachedPeriodId.id
+    }
+    try {
+      const today = new Date().toISOString().slice(0, 10)
+      const filter = encodeURIComponent(
+        `platiOdData <= '${today}' and platiDoData >= '${today}'`,
+      )
+      let payload = await this.request<unknown>(
+        'GET',
+        `/ucetni-obdobi.json?limit=1&detail=custom:id,kod,platiOdData,platiDoData&filter=${filter}`,
+      )
+      let rows = this.extractEvidence<Record<string, unknown>>(payload, 'ucetni-obdobi')
+      if (rows.length === 0) {
+        payload = await this.request<unknown>(
+          'GET',
+          '/ucetni-obdobi.json?limit=0&detail=custom:id,kod,platiOdData,platiDoData',
+        )
+        rows = this.extractEvidence<Record<string, unknown>>(payload, 'ucetni-obdobi')
+        rows = rows.filter((row) => {
+          const from = String(row.platiOdData ?? '').slice(0, 10)
+          const to = String(row.platiDoData ?? '').slice(0, 10)
+          return (!from || from <= today) && (!to || to >= today)
+        })
+      }
+      const id = rows[0]?.id != null ? String(rows[0].id) : null
+      if (id) {
+        this.cachedPeriodId = { id, fetchedAt: now }
+        return id
+      }
+    } catch (error) {
+      this.logger.warn(
+        `ucetni-obdobi lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+    return this.cachedPeriodId?.id ?? null
+  }
+
+  parseCenikRow(row: Record<string, unknown>): FlexiCenikItem | null {
+    const kod = String(row.kod ?? row.code ?? '').trim()
+    if (!kod) return null
+    const nazev = String(row.nazev ?? row.name ?? kod).trim() || kod
+    // Available on cenik form = sumDostupMj; sumStavMj = on-hand; stavMJ often 0 on cenik
+    const stock = this.parseStockQty(
+      row.sumDostupMj,
+      row.sumDostupMJ,
+      row.dostupMj,
+      row.sumStavMj,
+      row.sumStavMJ,
+      row['sumStavMj@sum'],
+      row.stavMJ,
+      row.stavMj,
+      row.stavSkladu,
+      row['stavMJ@sum'],
+      row.pocetMJ,
+    )
+    // SK Flexi stores gross (inc_vat): prefer including-VAT fields first.
+    // cenaZakl = Prodejní cena (s DPH when typCeny.sDph); cenaZaklVcDph = explicit s DPH.
+    // Do not treat explicit 0 as "present" — fall through to other Flexi price fields.
+    const price = this.firstPositiveNum(
+      row.cenaZakl,
+      row.cenaZaklVcDph,
+      row.prodejCena,
+      row.cenaZaklBezDph,
+      row.cenaBezDph,
+      row.cenaMj,
+      row.sumZkl,
+    )
+    const cnCode = this.parseCnCode(row)
+    const weightRaw = this.num(row.hmotMj ?? row.hmotnost ?? row.hmotNetto ?? 0, NaN)
+    const weight = Number.isFinite(weightRaw) && weightRaw > 0 ? weightRaw : null
+    const quantityPrices: FlexiCenikItem['quantityPrices'] = []
+    const odberatele = this.asArray<Record<string, unknown>>(
+      row.odberatele ?? row['cenik-odberatel'] ?? row.cenikOdberatel,
+    )
+    for (const o of odberatele) {
+      const minQuantity = Math.max(1, Math.floor(this.num(o.pocetMj ?? o.minPocet ?? o.mnozMj ?? 0)))
+      const percent = this.num(o.slevaProc ?? o.rabat ?? o.procento ?? 0)
+      if (minQuantity > 1 && percent > 0) {
+        quantityPrices.push({ minQuantity, percent })
+      }
+    }
+    return {
+      id: String(row.id ?? kod),
+      kod,
+      nazev,
+      stock,
+      price,
+      cnCode,
+      weight,
+      quantityPrices,
+    }
+  }
+
+  async fetchCenikPage(start: number, limit: number): Promise<FlexiCenikItem[]> {
+    const path = `/cenik.json?start=${start}&limit=${limit}&detail=${encodeURIComponent(CENIK_DETAIL)}`
+    const payload = await this.request<unknown>('GET', path)
+    const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
+    return rows.map((row) => this.parseCenikRow(row)).filter((x): x is FlexiCenikItem => Boolean(x))
+  }
+
+  async fetchCenikById(id: string): Promise<FlexiCenikItem | null> {
+    const path = `/cenik/${encodeURIComponent(id)}.json?detail=${encodeURIComponent(CENIK_DETAIL)}`
+    const payload = await this.request<unknown>('GET', path)
+    const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
+    if (!rows[0]) return null
+    return this.parseCenikRow(rows[0])
+  }
+
+  /**
+   * ERP-WEBHOOK-002B: batch cenik by Flexi internal ids.
+   * LIVE-VERIFIED: path filter `/cenik/(id='1' or id='2').json` only.
+   * Do NOT use `?filter=` for id lists (observed unsafe: returned unrelated rows).
+   */
+  async fetchCenikByIds(ids: string[]): Promise<Map<string, FlexiCenikItem>> {
+    const result = new Map<string, FlexiCenikItem>()
+    const unique = [...new Set(ids.map((id) => String(id).trim()).filter(Boolean))]
+    if (unique.length === 0) return result
+
+    for (let i = 0; i < unique.length; i += FLEXI_STOCK_FILTER_CHUNK) {
+      const chunk = unique.slice(i, i + FLEXI_STOCK_FILTER_CHUNK)
+      const filter = chunk.map((id) => `id='${this.escapeFlexiLiteral(id)}'`).join(' or ')
+      const path = `/cenik/(${encodeURIComponent(filter)}).json?limit=0&detail=${encodeURIComponent(CENIK_DETAIL)}`
+      const payload = await this.request<unknown>('GET', path)
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
+      for (const row of rows) {
+        const item = this.parseCenikRow(row)
+        if (item) result.set(item.id, item)
+      }
+    }
+    return result
+  }
+
+  /** Resolve skladova-karta id → cenik internal id via cenik@ref (LIVE-VERIFIED). */
+  async resolveCenikIdFromSkladovaKarta(cardId: string): Promise<string | null> {
+    const path = `/skladova-karta/${encodeURIComponent(cardId)}.json?detail=custom:id,cenik,cenik(kod),dostupMj,stavMJ`
+    const payload = await this.request<unknown>('GET', path)
+    const rows = this.extractEvidence<Record<string, unknown>>(payload, 'skladova-karta')
+    const row = rows[0]
+    if (!row) return null
+    const ref = row['cenik@ref']
+    if (typeof ref === 'string') {
+      const m = ref.match(/\/cenik\/([^/.]+)/i)
+      if (m?.[1]) return decodeURIComponent(m[1])
+    }
+    if (typeof row.cenik === 'string' && /^\d+$/.test(row.cenik.trim())) {
+      return row.cenik.trim()
+    }
+    return null
+  }
+
+  async listHooks(): Promise<
+    Array<{ id: string; url: string; lastVersion?: number; format?: string }>
+  > {
+    const settings = await this.settingsService.getSettings()
+    const payload = await this.request<unknown>('GET', '/hooks.json', undefined, settings)
+    const rows = this.extractEvidence<Record<string, unknown>>(payload, 'hooks')
+    const alt = rows.length ? rows : this.extractEvidence<Record<string, unknown>>(payload, 'hook')
+    const out: Array<{ id: string; url: string; lastVersion?: number; format?: string }> = []
+    for (const row of alt) {
+      const id = String(row.id ?? row['@id'] ?? '').trim()
+      const url = String(row.url ?? row['@url'] ?? '').trim()
+      if (!id || !url) continue
+      const lastVersion = this.num(row.lastVersion ?? row['@lastVersion'], 0)
+      const format = String(row.format ?? row['@format'] ?? '').trim()
+      out.push({
+        id,
+        url,
+        ...(lastVersion > 0 ? { lastVersion } : {}),
+        ...(format ? { format } : {}),
+      })
+    }
+    return out
+  }
+
+  async deleteHook(hookId: string): Promise<void> {
+    const settings = await this.settingsService.getSettings()
+    await this.request(
+      'DELETE',
+      `/hooks/${encodeURIComponent(hookId)}.json`,
+      undefined,
+      settings,
+    )
+  }
+
+  async fetchCenikByKod(kod: string): Promise<FlexiCenikItem | null> {
+    const map = await this.fetchStockAndCenikBySkus([kod])
+    return map.get(kod.trim()) ?? null
+  }
+
+  /**
+   * Live stock for checkout / sync.
+   * Prefer cenik.sumDostupMj (Available on price list). When defaultStockCode is set,
+   * also try skladova-karta for that warehouse and prefer it when rows exist.
+   */
+  async fetchStockBySkus(skus: string[]): Promise<Map<string, number>> {
+    const result = new Map<string, number>()
+    const unique = [...new Set(skus.map((s) => s.trim()).filter(Boolean))]
+    for (const sku of unique) result.set(sku, 0)
+    if (unique.length === 0) return result
+
+    const fromCenik = await this.fetchStockAndCenikBySkus(unique)
+    for (const sku of unique) {
+      result.set(sku, fromCenik.get(sku)?.stock ?? 0)
+    }
+
+    const settings = await this.settingsService.getSettings()
+    if (!settings.defaultStockCode.trim()) {
+      return result
+    }
+
+    const fromCards = await this.fetchStockFromSkladoveKarty(unique, true)
+    if (fromCards.size > 0) {
+      for (const [sku, qty] of fromCards) {
+        result.set(sku, qty)
+      }
+    }
+    return result
+  }
+
+  /**
+   * Checkout-only: propagate transport failure when Flexi is entirely unreachable.
+   * Avoids misclassifying outage as "0 available" business rejection.
+   */
+  async fetchStockBySkusForCheckout(skus: string[]): Promise<Map<string, number>> {
+    const unique = [...new Set(skus.map((s) => s.trim()).filter(Boolean))]
+    const fromCenik = await this.fetchStockAndCenikBySkusForCheckout(unique)
+    const result = new Map<string, number>()
+    for (const sku of unique) {
+      result.set(sku, fromCenik.get(sku)?.stock ?? 0)
+    }
+
+    const settings = await this.settingsService.getSettings()
+    if (!settings.defaultStockCode.trim()) {
+      return result
+    }
+
+    const fromCards = await this.fetchStockFromSkladoveKarty(unique, true)
+    if (fromCards.size > 0) {
+      for (const [sku, qty] of fromCards) {
+        result.set(sku, qty)
+      }
+    }
+    return result
+  }
+
+  private async fetchStockAndCenikBySkusForCheckout(
+    skus: string[],
+  ): Promise<Map<string, FlexiCenikItem>> {
+    const result = new Map<string, FlexiCenikItem>()
+    const unique = [...new Set(skus.map((s) => s.trim()).filter(Boolean))]
+    if (unique.length === 0) return result
+
+    let lastTransportError: Error | null = null
+    let anySuccess = false
+
+    for (let i = 0; i < unique.length; i += FLEXI_STOCK_FILTER_CHUNK) {
+      const chunk = unique.slice(i, i + FLEXI_STOCK_FILTER_CHUNK)
+      const filter = chunk.map((kod) => `kod='${this.escapeFlexiLiteral(kod)}'`).join(' or ')
+      const path = `/cenik/(${encodeURIComponent(filter)}).json?limit=0&detail=${encodeURIComponent(CENIK_DETAIL)}`
+      try {
+        const payload = await this.request<unknown>('GET', path)
+        const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
+        for (const row of rows) {
+          const item = this.parseCenikRow(row)
+          if (item) result.set(item.kod, item)
+        }
+        anySuccess = true
+      } catch (error) {
+        lastTransportError =
+          error instanceof Error ? error : new Error(String(error))
+        let chunkSuccess = false
+        for (const kod of chunk) {
+          const filterEnc = encodeURIComponent(`kod='${this.escapeFlexiLiteral(kod)}'`)
+          const single = `/cenik.json?limit=1&detail=${encodeURIComponent(CENIK_DETAIL)}&filter=${filterEnc}`
+          try {
+            const payload = await this.request<unknown>('GET', single)
+            const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
+            const item = rows[0] ? this.parseCenikRow(rows[0]) : null
+            if (item) {
+              result.set(item.kod, item)
+              chunkSuccess = true
+            }
+          } catch (singleError) {
+            lastTransportError =
+              singleError instanceof Error ? singleError : new Error(String(singleError))
+          }
+        }
+        if (chunkSuccess) anySuccess = true
+      }
+    }
+
+    if (!anySuccess && lastTransportError) {
+      throw lastTransportError
+    }
+
+    return result
+  }
+
+  private async fetchStockFromSkladoveKarty(
+    skus: string[],
+    useConfiguredWarehouse: boolean,
+  ): Promise<Map<string, number>> {
+    const result = new Map<string, number>()
+    const periodId = await this.getCurrentAccountingPeriodId()
+    if (!periodId) {
+      this.logger.warn('Flexi stock: no accounting period — skip skladova-karta')
+      return result
+    }
+
+    const settings = await this.settingsService.getSettings()
+    const stockCode =
+      useConfiguredWarehouse && settings.defaultStockCode.trim()
+        ? settings.defaultStockCode.trim()
+        : ''
+
+    for (let i = 0; i < skus.length; i += FLEXI_STOCK_FILTER_CHUNK) {
+      const chunk = skus.slice(i, i + FLEXI_STOCK_FILTER_CHUNK)
+      const cenikOr = chunk
+        .map((kod) => `cenik='code:${this.escapeFlexiLiteral(kod)}'`)
+        .join(' or ')
+      let filter = `ucetObdobi = ${periodId} and (${cenikOr})`
+      if (stockCode) {
+        filter += ` and sklad = 'code:${this.escapeFlexiLiteral(stockCode)}'`
+      }
+
+      const path =
+        `/skladova-karta/(${encodeURIComponent(filter)}).json` +
+        `?detail=${encodeURIComponent(SKLAD_KARTA_DETAIL)}&limit=0&no-ext-ids=true`
+
+      try {
+        const payload = await this.request<unknown>('GET', path)
+        const rows = this.extractEvidence<Record<string, unknown>>(payload, 'skladova-karta')
+        for (const row of rows) {
+          const kod = this.extractCenikKod(row.cenik ?? row['cenik@ref'])
+          if (!kod) continue
+          const qty = this.parseStockQty(row.dostupMj, row.dostupMJ, row.stavMJ, row.stavMj)
+          result.set(kod, (result.get(kod) ?? 0) + qty)
+        }
+      } catch (error) {
+        this.logger.warn(
+          `skladova-karta stock fetch failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+      }
+    }
+    return result
+  }
+
+  async fetchStockAndCenikBySkus(skus: string[]): Promise<Map<string, FlexiCenikItem>> {
+    const result = new Map<string, FlexiCenikItem>()
+    const unique = [...new Set(skus.map((s) => s.trim()).filter(Boolean))]
+    if (unique.length === 0) return result
+
+    for (let i = 0; i < unique.length; i += FLEXI_STOCK_FILTER_CHUNK) {
+      const chunk = unique.slice(i, i + FLEXI_STOCK_FILTER_CHUNK)
+      const filter = chunk.map((kod) => `kod='${this.escapeFlexiLiteral(kod)}'`).join(' or ')
+      const path = `/cenik/(${encodeURIComponent(filter)}).json?limit=0&detail=${encodeURIComponent(CENIK_DETAIL)}`
+      try {
+        const payload = await this.request<unknown>('GET', path)
+        const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
+        for (const row of rows) {
+          const item = this.parseCenikRow(row)
+          if (item) result.set(item.kod, item)
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Batched cenik fetch failed, falling back per-SKU: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+        for (const kod of chunk) {
+          const filterEnc = encodeURIComponent(`kod='${this.escapeFlexiLiteral(kod)}'`)
+          const single = `/cenik.json?limit=1&detail=${encodeURIComponent(CENIK_DETAIL)}&filter=${filterEnc}`
+          try {
+            const payload = await this.request<unknown>('GET', single)
+            const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
+            const item = rows[0] ? this.parseCenikRow(rows[0]) : null
+            if (item) result.set(item.kod, item)
+          } catch {
+            /* leave missing */
+          }
+        }
+      }
+    }
+    return result
+  }
+
+  async putObjednavkaPrijata(document: Record<string, unknown>): Promise<{
+    nativeId: string | null
+    ref: string | null
+    raw: unknown
+  }> {
+    const payload = await this.request<unknown>('PUT', '/objednavka-prijata.json', {
+      winstrom: {
+        '@version': '1.0',
+        'objednavka-prijata': [document],
+      },
+    })
+    return this.parseWriteResult(payload)
+  }
+
+  /**
+   * REL-003 / PRE-A: official import action (`storno` | `delete`) — id only.
+   * @see https://podpora.flexibee.eu/en/articles/4725960-performing-actions
+   */
+  async putObjednavkaAction(
+    action: 'storno' | 'delete',
+    id: string,
+  ): Promise<{ nativeId: string | null; ref: string | null; raw: unknown }> {
+    const payload = await this.request<unknown>('PUT', '/objednavka-prijata.json', {
+      winstrom: {
+        '@version': '1.0',
+        'objednavka-prijata': [{ '@action': action, id }],
+      },
+    })
+    return this.parseWriteResult(payload)
+  }
+
+  /**
+   * Official Flexi PUT/POST return: success + results[].id (native).
+   * @see https://podpora.flexibee.eu/en/articles/4719646-return-values
+   */
+  parseWriteResult(payload: unknown): {
+    nativeId: string | null
+    ref: string | null
+    raw: unknown
+  } {
+    const root =
+      payload && typeof payload === 'object' && 'winstrom' in payload
+        ? ((payload as FlexiListResponse).winstrom as Record<string, unknown>)
+        : ((payload as Record<string, unknown>) ?? {})
+    const successRaw = root?.success
+    const success = successRaw === true || successRaw === 'true'
+    if (!success) {
+      const results = this.asArray<Record<string, unknown>>(root?.results ?? root?.result)
+      const messages: string[] = []
+      for (const row of results) {
+        const errors = this.asArray<Record<string, unknown>>(row.errors ?? row.error)
+        for (const err of errors) {
+          const msg = String(err.message ?? err['@message'] ?? err ?? '').trim()
+          if (msg) messages.push(msg)
+        }
+        if (typeof row.message === 'string' && row.message.trim()) {
+          messages.push(row.message.trim())
+        }
+      }
+      throw new Error(
+        messages.length > 0
+          ? `Flexi write failed: ${messages.join('; ')}`
+          : `Flexi write failed: ${JSON.stringify(root).slice(0, 500)}`,
+      )
+    }
+    const results = this.asArray<Record<string, unknown>>(root?.results ?? root?.result)
+    const first = results[0]
+    const nativeId =
+      first?.id != null && String(first.id).trim() !== '' ? String(first.id).trim() : null
+    const ref =
+      first?.ref != null && String(first.ref).trim() !== '' ? String(first.ref).trim() : null
+    return { nativeId, ref, raw: payload }
+  }
+
+  async findAdresarByExtId(extId: string): Promise<Record<string, unknown> | null> {
+    const path = `/adresar/${encodeURIComponent(extId)}.json?detail=custom:id,kod,nazev,ic,dic,email`
+    try {
+      const payload = await this.request<unknown>('GET', path)
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'adresar')
+      return rows[0] ?? null
+    } catch {
+      return null
+    }
+  }
+
+  async findAdresarByIc(ic: string): Promise<Record<string, unknown> | null> {
+    const trimmed = ic.trim()
+    if (!trimmed) return null
+    const filter = encodeURIComponent(`ic='${this.escapeFlexiLiteral(trimmed)}'`)
+    const path = `/adresar.json?limit=1&detail=custom:id,kod,nazev,ic,dic,email&filter=${filter}`
+    try {
+      const payload = await this.request<unknown>('GET', path)
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'adresar')
+      return rows[0] ?? null
+    } catch {
+      return null
+    }
+  }
+
+  async findAdresarByEmail(email: string): Promise<Record<string, unknown> | null> {
+    const trimmed = email.trim().toLowerCase()
+    if (!trimmed) return null
+    const filter = encodeURIComponent(`email='${this.escapeFlexiLiteral(trimmed)}'`)
+    const path = `/adresar.json?limit=1&detail=custom:id,kod,nazev,ic,dic,email&filter=${filter}`
+    try {
+      const payload = await this.request<unknown>('GET', path)
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'adresar')
+      return rows[0] ?? null
+    } catch {
+      return null
+    }
+  }
+
+  async putAdresar(document: Record<string, unknown>): Promise<unknown> {
+    return this.request('PUT', '/adresar.json', {
+      winstrom: {
+        '@version': '1.0',
+        adresar: [document],
+      },
+    })
+  }
+
+  /**
+   * REL-003-PRE-A: direct `/objednavka-prijata/{extId}.json` returns 404 on live Flexi.
+   * Use path-filter `/(id='ext:…')` (same class as WEBHOOK-002B multi-id). Never query `?filter=`.
+   */
+  async fetchObjednavkaByExtId(extId: string): Promise<Record<string, unknown> | null> {
+    const trimmed = extId.trim()
+    if (!trimmed) return null
+    const filter = encodeURIComponent(`id='${this.escapeFlexiLiteral(trimmed)}'`)
+    const path = `/objednavka-prijata/(${filter}).json?detail=full`
+    try {
+      const payload = await this.request<unknown>('GET', path)
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'objednavka-prijata')
+      return rows[0] ?? null
+    } catch (error) {
+      this.logger.debug(
+        `fetchObjednavkaByExtId(${extId}) failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+      return null
+    }
+  }
+
+  async fetchChanges(startVersion: number): Promise<{
+    changes: Array<{
+      evidence?: string
+      id?: string | number
+      operation?: string
+      globalVersion?: number
+      inVersion?: number
+    }>
+    nextVersion: number
+  }> {
+    const path = `/changes.json?start=${startVersion}&limit=500`
+    const payload = await this.request<Record<string, unknown>>('GET', path)
+    const winstrom = (payload.winstrom ?? payload) as Record<string, unknown>
+    const changes = this.asArray<Record<string, unknown>>(winstrom.change ?? winstrom.changes)
+    const mapped = changes.map((c) => {
+      const inRaw = c['@in-version'] ?? c.inVersion ?? c['in-version']
+      const inNum = this.num(inRaw, 0)
+      return {
+        evidence: String(c.evidence ?? c['@evidence'] ?? ''),
+        id: (c.id ?? c['@id']) as string | number | undefined,
+        operation: String(c.operation ?? c['@operation'] ?? ''),
+        globalVersion: this.num(c.globalVersion ?? c['@globalVersion'] ?? 0),
+        inVersion: inNum > 0 ? inNum : undefined,
+      }
+    })
+    const nextRaw = winstrom.next
+    const nextVersion =
+      nextRaw === 'none' || nextRaw === undefined || nextRaw === null
+        ? mapped.reduce(
+            (max, c) => Math.max(max, c.inVersion ?? c.globalVersion ?? 0),
+            startVersion,
+          )
+        : this.num(nextRaw, startVersion)
+    return { changes: mapped, nextVersion }
+  }
+
+  async fetchStromNodes(rootCode: string): Promise<FlexiStromNode[]> {
+    const filter = encodeURIComponent(`strom='code:${rootCode}'`)
+    const path = `/strom.json?limit=0&detail=full&filter=${filter}`
+    const payload = await this.request<unknown>('GET', path)
+    const rows = this.extractEvidence<Record<string, unknown>>(payload, 'strom')
+    return rows.map((row) => {
+      const id = String(row.id ?? '').trim()
+      const kod = String(row.kod ?? row.code ?? id).trim()
+      const otec = row.otec ?? row['otec@ref'] ?? row.parent
+      let parentId: string | null = null
+      let parentKod: string | null = null
+      if (typeof otec === 'string') {
+        if (otec.startsWith('code:')) parentKod = otec.slice(5)
+        else if (/^\d+$/.test(otec)) parentId = otec
+        else parentKod = otec
+      } else if (otec && typeof otec === 'object') {
+        const o = otec as Record<string, unknown>
+        parentId = o.id != null ? String(o.id) : null
+        parentKod = o.kod != null ? String(o.kod) : null
+      }
+      const localeFields = parseStromLocaleFields(row)
+      return {
+        id: id || kod,
+        kod,
+        nazev: String(row.nazev ?? row.name ?? kod).trim() || kod,
+        parentId,
+        parentKod,
+        poradi: Math.trunc(this.num(row.poradi ?? row.order ?? 0)),
+        localeNames: localeFields.localeNames,
+        localeDescriptions: localeFields.localeDescriptions,
+        localeTextAbove: localeFields.localeTextAbove,
+        localeTextBelow: localeFields.localeTextBelow,
+      }
+    })
+  }
+
+  async fetchStromCenikLinks(): Promise<FlexiStromCenikLink[]> {
+    const path = `/strom-cenik.json?limit=0&detail=full`
+    const payload = await this.request<unknown>('GET', path)
+    const rows = this.extractEvidence<Record<string, unknown>>(payload, 'strom-cenik')
+    const links: FlexiStromCenikLink[] = []
+    for (const row of rows) {
+      const uzelRaw = row.uzel ?? row['uzel@ref']
+      const uzelId =
+        typeof uzelRaw === 'object' && uzelRaw
+          ? String((uzelRaw as { id?: unknown }).id ?? '')
+          : String(uzelRaw ?? '').replace(/^code:/, '')
+      const idZaznamu = String(row.idZaznamu ?? row.cenik ?? row['idZaznamu@ref'] ?? '').trim()
+      if (!uzelId || !idZaznamu) continue
+      const cenikKod = idZaznamu.startsWith('code:') ? idZaznamu.slice(5) : idZaznamu
+      const cenikId = /^\d+$/.test(idZaznamu) ? idZaznamu : cenikKod
+      links.push({ cenikKod, cenikId, uzelId: String(uzelId).replace(/^code:/, '') })
+    }
+    return links
+  }
+}

@@ -1,4 +1,4 @@
-import { DiscountTarget, DiscountValueType, Role } from '@prisma/client'
+import { DiscountRuleCombinationMode, DiscountTarget, DiscountValueType, Role } from '@prisma/client'
 import { Type } from 'class-transformer'
 import {
   IsArray,
@@ -51,6 +51,30 @@ export class UpsertDiscountRuleDto {
   @IsArray()
   @IsUUID('4', { each: true })
   groupIds?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  allowedUserIds?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  excludeProductIds?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  excludeVariantIds?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  excludeCategoryIds?: string[]
+
+  @IsOptional()
+  @IsEnum(DiscountRuleCombinationMode)
+  combinesWithOtherDiscounts?: DiscountRuleCombinationMode
 
   @IsOptional()
   @Type(() => Number)

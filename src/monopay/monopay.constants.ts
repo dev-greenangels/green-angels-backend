@@ -6,6 +6,10 @@ export const MONOPAY_INVOICE_VALIDITY_SEC = 86_400
 
 export const MONOPAY_PAYMENT_METHOD = 'card-online'
 
+export const MONOPAY_SYNC_TOKEN_PURPOSE = 'monopay-sync' as const
+
+export const MONOPAY_SYNC_TOKEN_HEADER = 'x-monopay-sync-token'
+
 export type MonopayInvoiceStatus =
   | 'created'
   | 'processing'

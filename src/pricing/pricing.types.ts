@@ -60,7 +60,11 @@ export type CheckoutTotalsBreakdown = {
   deliveryMode: 'free' | 'carrier_rates' | 'fixed'
   deliveryIncludedInTotal: boolean
   packagingAmount: number
+  packagingBoxCount?: number
+  packagingPalletCount?: number
   taxAmount: number
+  /** Комісія за післяплату (dobierka / COD), якщо paymentMethod === 'dobierka' */
+  codFeeAmount: number
   grandTotal: number
   minOrderAmount: number | null
   belowMinOrder: boolean
@@ -70,6 +74,14 @@ export type CheckoutTotalsBreakdown = {
   showPackaging: boolean
   showTax: boolean
   taxIncluded: boolean
+  taxRatePercent?: number
+  taxRegime?: string
+  taxCountryCode?: string | null
+  /** Reverse charge + inc_vat: % to strip from gross line prices for display/payable */
+  stripVatRatePercent?: number | null
+  taxAppliesToFees?: boolean
+  /** Способи доставки, дозволені після фільтрації за deliveryWeightRules та вагою кошика */
+  allowedDeliveryMethods: string[]
 }
 
 export type PricingQuoteResult = {
@@ -87,6 +99,10 @@ export type PricingQuoteResult = {
   promoInfoMessages: string[] | null
   promoSkipped: PromoSkippedSummary[]
   checkout?: CheckoutTotalsBreakdown
+  /** Загальна вага кошика (кг), для фільтрації способів доставки */
+  cartWeightKg?: number
+  /** Об’єм кошика (л) для packagingMode=boxes */
+  cartVolumeL?: number
 }
 
 export type ScopeMatchInput = {

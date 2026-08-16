@@ -28,3 +28,20 @@ export function normalizePhoneE164(phone: string): string | null {
 export function phoneE164ToTurboSms(phone: string): string {
   return phone.replace(/\D/g, '')
 }
+
+/** Нормалізація SK телефону до E.164 (+421XXXXXXXXX). */
+export function normalizePhoneSkE164(phone: string): string | null {
+  const digits = phone.replace(/\D/g, '')
+  if (digits.startsWith('421') && digits.length === 12) return `+${digits}`
+  if (digits.startsWith('0') && digits.length === 10) return `+421${digits.slice(1)}`
+  if (digits.length === 9) return `+421${digits}`
+  if (digits.length >= 10) return `+${digits}`
+  return null
+}
+
+/** Мінімальна нормалізація довільного міжнародного номера (лише формат E.164). */
+export function normalizeIntlPhone(phone: string): string | null {
+  const digits = phone.replace(/\D/g, '')
+  if (digits.length < 7 || digits.length > 15) return null
+  return phone.trim().startsWith('+') ? `+${digits}` : `+${digits}`
+}

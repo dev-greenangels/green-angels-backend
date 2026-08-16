@@ -37,6 +37,9 @@ services:
       dockerfile: Dockerfile.dev
     container_name: green-angels-api
     restart: unless-stopped
+    # Mounted script + explicit command (override entrypoint must keep CMD args)
+    entrypoint: ["/bin/sh", "/app/docker/entrypoint.dev.sh"]
+    command: ["npm", "run", "start:dev"]
     ports:
       - '3001:3001'
     environment:
@@ -47,12 +50,17 @@ services:
       REDIS_PORT: 6379
       JWT_SECRET: dev-only-green-angels-session-secret-min-32-chars!!
       CORS_ORIGIN: http://localhost:3000
-      CHOKIDAR_USEPOLLING: 'true'
-      WATCHPACK_POLLING: 'true'
+      CHOKIDAR_USEPOLLING: 'false'
+      WATCHPACK_POLLING: 'false'
+      UPLOAD_ROOT: /data/uploads
+      # Local/dev only. Production compose has no uploads volume (R2).
+      # 1 = skip npm install + prisma generate in entrypoint (set by VS Code quick task)
+      DEV_QUICK_START: ${DEV_QUICK_START:-0}
     env_file:
       - .env
     volumes:
       - .:/app
+      - ../data/uploads:/data/uploads
       - api_node_modules:/app/node_modules
     depends_on:
       postgres:

@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString } from 'class-validator'
+import { IsIn, IsOptional, IsString, IsNotEmpty } from 'class-validator'
 
 export class PhotoUploadBodyDto {
   @IsString()
@@ -13,8 +13,22 @@ export class PhotoUploadBodyDto {
   @IsNotEmpty()
   sizeId!: string
 
+  /** Legacy RN Estimate field — EAN. Empty string is allowed when sku is set. */
+  @IsOptional()
   @IsString()
-  barcode!: string
+  barcode?: string
+
+  @IsOptional()
+  @IsString()
+  sku?: string
+
+  @IsOptional()
+  @IsString()
+  identifier?: string
+
+  @IsOptional()
+  @IsIn(['ean', 'sku', 'EAN', 'SKU'])
+  identifierType?: string
 
   @IsString()
   @IsNotEmpty()

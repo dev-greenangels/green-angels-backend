@@ -2,10 +2,12 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common'
 import { Prisma, ReviewStatus } from '@prisma/client'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { SettingsService } from '../settings/settings.service'
 import { CreateReviewDto } from './dto/create-review.dto'
 import { ReviewQueryDto, ReviewSortOrder, ReviewTypeFilter } from './dto/review-query.dto'
 import { UpdateReviewReplyDto } from './dto/update-review-reply.dto'
@@ -77,7 +79,10 @@ type ReviewRecord = {
 
 @Injectable()
 export class ReviewsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly settings: SettingsService,
+  ) {}
 
   private normalizeEmail(email?: string | null): string | null {
     const trimmed = email?.trim().toLowerCase()
@@ -154,9 +159,15 @@ export class ReviewsService {
     return where
   }
 
-  private resolveOrderBy(sort?: ReviewSortOrder): Prisma.ReviewOrderByWithRelationInput {
+  private resolveOrderBy(sort?: ReviewSortOrder): Prisma.ReviewOrderByWithRelationInput | Prisma.ReviewOrderByWithRelationInput[] {
     if (sort === ReviewSortOrder.OLDEST) {
       return { createdAt: 'asc' }
+    }
+    if (sort === ReviewSortOrder.RATING_DESC) {
+      return [{ rating: 'desc' }, { createdAt: 'desc' }]
+    }
+    if (sort === ReviewSortOrder.RATING_ASC) {
+      return [{ rating: 'asc' }, { createdAt: 'desc' }]
     }
     return { createdAt: 'desc' }
   }
@@ -253,19 +264,35 @@ export class ReviewsService {
     }
   }
 
-  async create(userId: string, dto: CreateReviewDto): Promise<ReviewListItem> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { email: true, phone: true },
-    })
-    if (!user) {
-      throw new BadRequestException('Користувача не знайдено.')
-    }
+  async create(userId: string | null | undefined, dto: CreateReviewDto): Promise<ReviewListItem> {
+    let email: string | null
+    let phone: string | null
 
-    const email = this.normalizeEmail(dto.email) ?? this.normalizeEmail(user.email)
-    const phone = this.normalizePhone(dto.phone) ?? this.normalizePhone(user.phone)
-    if (!email && !phone) {
-      throw new BadRequestException('У профілі немає email або телефону для відгуку.')
+    if (userId) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true, phone: true },
+      })
+      if (!user) {
+        throw new BadRequestException('Користувача не знайдено.')
+      }
+
+      email = this.normalizeEmail(dto.email) ?? this.normalizeEmail(user.email)
+      phone = this.normalizePhone(dto.phone) ?? this.normalizePhone(user.phone)
+      if (!email && !phone) {
+        throw new BadRequestException('У профілі немає email або телефону для відгуку.')
+      }
+    } else {
+      const market = await this.settings.getMarketSettings()
+      if (!market.allowGuestReviews) {
+        throw new UnauthorizedException('Увійдіть, щоб залишити відгук.')
+      }
+
+      email = this.normalizeEmail(dto.email)
+      phone = this.normalizePhone(dto.phone)
+      if (!email && !phone) {
+        throw new BadRequestException('Вкажіть email або телефон для відгуку.')
+      }
     }
 
     const productId = dto.productId?.trim() || null
@@ -277,7 +304,7 @@ export class ReviewsService {
 
     const created = await this.prisma.review.create({
       data: {
-        userId,
+        userId: userId || null,
         productId,
         authorName: dto.authorName.trim(),
         email,

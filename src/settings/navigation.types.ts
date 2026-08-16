@@ -2,6 +2,9 @@ export type NavigationMenuItemLabels = {
   uk?: string
   en?: string
   sk?: string
+  hu?: string
+  de?: string
+  cs?: string
 }
 
 export type NavigationMenuItem = {

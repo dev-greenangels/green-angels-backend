@@ -10,6 +10,6 @@ export class SendOtpDto {
   email?: string
 
   @IsOptional()
-  @IsIn(['login', 'checkout'])
-  purpose?: 'login' | 'checkout'
+  @IsIn(['login', 'checkout', 'review', 'profile'])
+  purpose?: 'login' | 'checkout' | 'review' | 'profile'
 }

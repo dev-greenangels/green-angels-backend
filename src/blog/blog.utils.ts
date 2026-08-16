@@ -24,3 +24,20 @@ export function buildBlogExcerpt(content: string, maxLength = 180): string {
   if (plain.length <= maxLength) return plain
   return `${plain.slice(0, maxLength).trimEnd()}…`
 }
+
+export const DEFAULT_BLOG_AUTHOR = 'Зелені Янголи'
+
+/** Прибирає артефакти CSV (`""`, зайві пробіли) з поля автора Presta. */
+export function sanitizeBlogAuthor(value: string | null | undefined): string | null {
+  if (!value) return null
+  const cleaned = value
+    .replace(/"+$/g, '')
+    .replace(/^"+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return cleaned || null
+}
+
+export function resolveBlogAuthor(author: string | null | undefined): string {
+  return sanitizeBlogAuthor(author) || DEFAULT_BLOG_AUTHOR
+}

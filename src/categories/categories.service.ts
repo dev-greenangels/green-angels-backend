@@ -20,6 +20,7 @@ export type CategoryTreeNode = {
   isCatalogRoot: boolean
   position: number
   name: string
+  latinName: string | null
   description: string | null
   footerDescription: string | null
   image: string | null
@@ -60,6 +61,7 @@ export class CategoriesService {
       slug: string
       parentId: string | null
       legacyId: number | null
+      latinName: string | null
       isActive: boolean
       isCatalogRoot: boolean
       position: number
@@ -85,6 +87,7 @@ export class CategoriesService {
       isCatalogRoot: category.isCatalogRoot,
       position: category.position,
       name: t?.name ?? slugFallback ?? category.slug,
+      latinName: category.latinName ?? null,
       description: t?.description ?? null,
       footerDescription: t?.footerDescription ?? null,
       image: category.image,

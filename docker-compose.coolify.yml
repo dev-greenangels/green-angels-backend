@@ -1,0 +1,98 @@
+# SK/EU production (Hetzner + Coolify). Shop/Next stays on Vercel.
+# Postgres and Redis are Coolify Database resources — not this file.
+# TLS is the Coolify proxy (not in-stack Caddy).
+#
+# Coolify: Docker Compose build pack, this file, Base Directory
+#   green-angels-backend. Mark service `api` as the public one.
+# Public URL: https://api.<host> (port 443). Container port is 3001.
+# Coolify Domain UI may use a :3001 suffix as a *backend* port hint only —
+# do not put :3001 on API_PUBLIC_URL, Vercel NEXT_PUBLIC_API_URL, or webhooks.
+#
+# Put every variable from .env.coolify.example in Coolify Environment Variables.
+# They are interpolated into this file (not an image .env; .env* is dockerignored).
+#
+# Startup: migrate (`prisma migrate deploy`, one-shot) → api.
+# Start Coolify Postgres + Redis first. Failed migrate → api does not start.
+# UA/HostPro: use docker-compose.prod.yml instead.
+
+services:
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate
+    restart: 'no'
+    command: ['npx', '--no-install', 'prisma', 'migrate', 'deploy']
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    expose:
+      - '3001'
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      FLEXI_SECRETS_KEY: ${FLEXI_SECRETS_KEY:-}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-}
+      SHOP_PUBLIC_URL: ${SHOP_PUBLIC_URL:-}
+      MEDIA_DRIVER: ${MEDIA_DRIVER:-r2}
+      R2_ENDPOINT: ${R2_ENDPOINT}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+      R2_BUCKET: ${R2_BUCKET}
+      R2_REGION: ${R2_REGION:-auto}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      NOVA_POSHTA_API_KEY: ${NOVA_POSHTA_API_KEY:-}
+      NOVA_POSHTA_JSON_API_URL: ${NOVA_POSHTA_JSON_API_URL:-}
+      TURBOSMS_TOKEN: ${TURBOSMS_TOKEN:-}
+      TURBOSMS_SENDER: ${TURBOSMS_SENDER:-}
+      OTP_TTL_SEC: ${OTP_TTL_SEC:-300}
+      OTP_RESEND_COOLDOWN_SEC: ${OTP_RESEND_COOLDOWN_SEC:-60}
+      OTP_VERIFY_MAX_ATTEMPTS: ${OTP_VERIFY_MAX_ATTEMPTS:-5}
+      OTP_VERIFICATION_TOKEN_TTL_SEC: ${OTP_VERIFICATION_TOKEN_TTL_SEC:-600}
+      OTP_IP_SEND_MAX: ${OTP_IP_SEND_MAX:-20}
+      OTP_IP_SEND_WINDOW_SEC: ${OTP_IP_SEND_WINDOW_SEC:-900}
+      OTP_IP_VERIFY_MAX: ${OTP_IP_VERIFY_MAX:-60}
+      OTP_IP_VERIFY_WINDOW_SEC: ${OTP_IP_VERIFY_WINDOW_SEC:-900}
+      OTP_IP_HINT_MAX: ${OTP_IP_HINT_MAX:-30}
+      OTP_IP_HINT_WINDOW_SEC: ${OTP_IP_HINT_WINDOW_SEC:-900}
+      ORDER_CONFIRMATION_TTL_SEC: ${ORDER_CONFIRMATION_TTL_SEC:-7200}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      MONOPAY_TOKEN: ${MONOPAY_TOKEN:-}
+      MONOPAY_WEBHOOK_URL: ${MONOPAY_WEBHOOK_URL:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      PHOTO_API_KEYS: ${PHOTO_API_KEYS:-}
+      ENABLE_PHOTOS_DEBUG: ${ENABLE_PHOTOS_DEBUG:-0}
+      MAX_PHOTOS_PER_SIZE: ${MAX_PHOTOS_PER_SIZE:-4}
+      PHOTO_PUBLIC_BASE_URL: ${PHOTO_PUBLIC_BASE_URL:-}
+      LEGACY_PHOTO_API_KEY: ${LEGACY_PHOTO_API_KEY:-}
+      VIBER_BOT_TOKEN: ${VIBER_BOT_TOKEN:-}
+      VIBER_USER_IDS: ${VIBER_USER_IDS:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3001/health']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s

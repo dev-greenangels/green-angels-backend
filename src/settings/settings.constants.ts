@@ -1,5 +1,8 @@
-import type { CartCheckoutSettings } from './cart-checkout.types'
-import { DEFAULT_CART_CHECKOUT_SETTINGS } from './cart-checkout.types'
+import type { CheckoutBankDetails } from './cart-checkout.types'
+import {
+  DEFAULT_CART_CHECKOUT_SETTINGS,
+  DEFAULT_CHECKOUT_BANK_DETAILS,
+} from './cart-checkout.types'
 import type { CatalogFiltersVisibilitySettings } from './catalog-filters.types'
 import {
   DEFAULT_CATALOG_FILTERS_VISIBILITY,
@@ -15,7 +18,18 @@ export const SETTINGS_KEYS = {
   LOCALIZATION: 'site.localization',
   VARIANT_LABELS: 'feature.variantLabels',
   NAVIGATION: 'site.navigation',
+  PRESTA_IMPORT: 'feature.prestaImport',
+  COMMERCE_MARKET: 'commerce.market',
+  DISPATCH_CALENDAR: 'commerce.dispatchCalendar',
 } as const
+
+export type {
+  GuestCheckoutMode,
+  MarketRegion,
+  MarketSettings,
+  PhonePolicy,
+} from './market.types'
+export { DEFAULT_MARKET_SETTINGS } from './market.types'
 
 export type {
   AppLocale,
@@ -80,6 +94,8 @@ export type CatalogPageSettings = {
   categoryGridColumns: CatalogGridColumns
   catalogFilters: CatalogFiltersVisibilitySettings
   plantsAlphabetFilters: CatalogFiltersVisibilitySettings
+  /** Max Fresh Photos per variant size (`sizeId`). Default 4. */
+  freshPhotosLimit: number
 }
 
 export type { CatalogFiltersVisibilitySettings } from './catalog-filters.types'
@@ -140,6 +156,8 @@ export type StoreFooterVisibility = {
   showWhatsApp: boolean
   showLink: boolean
   showSchedules: boolean
+  /** Реквізити компанії в футері */
+  showCompanyDetails: boolean
 }
 
 export const DEFAULT_FOOTER_VISIBILITY: StoreFooterVisibility = {
@@ -151,7 +169,12 @@ export const DEFAULT_FOOTER_VISIBILITY: StoreFooterVisibility = {
   showWhatsApp: true,
   showLink: true,
   showSchedules: false,
+  showCompanyDetails: false,
 }
+
+/** Повні реквізити продавця (UA/SK поля в одному обʼєкті; UI за market.region) */
+export type StoreCompanyDetails = CheckoutBankDetails
+export { DEFAULT_CHECKOUT_BANK_DETAILS as DEFAULT_STORE_COMPANY_DETAILS }
 
 export type StoreSocialLink = {
   show: boolean
@@ -185,6 +208,10 @@ export type StoreContactSettings = {
   schedules: StoreHoursSchedule[]
   footer: StoreFooterVisibility
   social: StoreSocialLinks
+  /** Повні реквізити компанії для контактів / футера / checkout PDF */
+  companyDetails: StoreCompanyDetails
+  /** Показувати реквізити на сторінці «Контакти» */
+  showCompanyOnContacts: boolean
 }
 
 export type HomeHighlight = {
@@ -202,13 +229,22 @@ export type HomeGalleryImage = {
   caption: string
 }
 
-export type HomeReview = {
-  name: string
-  text: string
-  rating: number
-}
+
+export type HomeSectionKey =
+  | 'categories'
+  | 'newArrivals'
+  | 'bestsellers'
+  | 'lowStock'
+  | 'whyUs'
+  | 'nurseryGallery'
+  | 'freshPlantPhotos'
+  | 'reviews'
+  | 'recentlyViewed'
+
+export type HomeReviewSort = 'newest' | 'oldest' | 'rating_desc'
 
 export type HomePageSettings = {
+  sectionOrder: HomeSectionKey[]
   hero: {
     badge: string
     title: string
@@ -257,10 +293,18 @@ export type HomePageSettings = {
     subtitle: string
     images: HomeGalleryImage[]
   }
-  reviews: {
+  freshPlantPhotos: {
+    enabled: boolean
     title: string
     subtitle: string
-    items: HomeReview[]
+    limit: number
+  }
+  reviews: {
+    enabled: boolean
+    title: string
+    subtitle: string
+    limit: number
+    sort: HomeReviewSort
   }
 }
 
@@ -317,6 +361,8 @@ export const DEFAULT_STORE_SETTINGS: StoreContactSettings = {
   ],
   footer: { ...DEFAULT_FOOTER_VISIBILITY },
   social: { ...DEFAULT_SOCIAL_LINKS },
+  companyDetails: { ...DEFAULT_CHECKOUT_BANK_DETAILS },
+  showCompanyOnContacts: false,
 }
 
 export const DEFAULT_CATALOG_SETTINGS: CatalogPageSettings = {
@@ -325,9 +371,21 @@ export const DEFAULT_CATALOG_SETTINGS: CatalogPageSettings = {
   categoryGridColumns: { ...DEFAULT_CATEGORY_GRID_COLUMNS },
   catalogFilters: { ...DEFAULT_CATALOG_FILTERS_VISIBILITY },
   plantsAlphabetFilters: { ...DEFAULT_PLANTS_ALPHABET_FILTERS_VISIBILITY },
+  freshPhotosLimit: 4,
 }
 
 export const DEFAULT_HOME_SETTINGS: HomePageSettings = {
+  sectionOrder: [
+    'categories',
+    'newArrivals',
+    'bestsellers',
+    'lowStock',
+    'whyUs',
+    'nurseryGallery',
+    'freshPlantPhotos',
+    'reviews',
+    'recentlyViewed',
+  ],
   hero: {
     badge: 'Виробник рослин · відома торгова марка',
     title: 'Розсадник «Зелені Янголи»',
@@ -399,30 +457,17 @@ export const DEFAULT_HOME_SETTINGS: HomePageSettings = {
       { url: '/images/nursery/packing.jpg', caption: 'Пакування для відправлення' },
     ],
   },
+  freshPlantPhotos: {
+    enabled: true,
+    title: 'Актуальні фото рослин',
+    subtitle: 'Свіжі знімки з розсадника — подивіться, що зараз у наявності',
+    limit: 12,
+  },
   reviews: {
+    enabled: true,
     title: 'Відгуки клієнтів',
     subtitle: 'Нам довіряють професіонали та садівники з усієї України',
-    items: [
-      {
-        name: 'Олена К.',
-        text: 'Чудовий розсадник! Рослини приїхали в ідеальному стані, добре запаковані. Туї та сосни відмінної якості.',
-        rating: 5,
-      },
-      {
-        name: 'Андрій М.',
-        text: 'Замовляв велике замовлення для ландшафтного проєкту. Якість посадкового матеріалу на висоті, працюємо вже не перший рік.',
-        rating: 5,
-      },
-      {
-        name: 'Марія С.',
-        text: 'Дуже вдячна за швидку доставку Новою Поштою. Рослини здорові, відповідають опису. Обовʼязково замовлятиму ще.',
-        rating: 5,
-      },
-      {
-        name: 'Ігор В.',
-        text: 'Купував декоративні чагарники для ділянки. Усе відповідає каталогу, рослини сильні та добре вкорінені.',
-        rating: 4,
-      },
-    ],
+    limit: 8,
+    sort: 'newest',
   },
 }

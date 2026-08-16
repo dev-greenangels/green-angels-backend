@@ -1,17 +1,31 @@
 import { Injectable } from '@nestjs/common'
-import { Prisma } from '@prisma/client'
+import { PhotoIdentifierType, Prisma } from '@prisma/client'
 import { createHash } from 'crypto'
 
 import { CategoriesService } from '../categories/categories.service'
 import { PrismaService } from '../prisma/prisma.service'
 import type { EanCacheItem } from './dto/list-photos-by-barcode-body.dto'
+import {
+  fileIdsExceedingFreshPhotoLimit,
+  freshPhotoThumbRelativePath,
+} from './fresh-photo-variants'
+import { PhotoStorageService } from './photo-storage.service'
 
 export type PhotoAppProperties = Record<string, string>
+
+export type PhotoIdentifierKind = 'ean' | 'sku'
 
 export type PhotoListItem = {
   id: string
   url: string
+  /** Gallery / fullscreen. Same as `url` for legacy originals. */
+  mainUrl: string
+  /** Card / strip. Same as `url` when variants do not exist. */
+  thumbUrl: string
   ean: string
+  identifierType: PhotoIdentifierKind
+  identifier: string
+  sku: string | null
   fileSizeBytes: number
   createdAt: string
   updatedAt: string
@@ -30,15 +44,19 @@ export type PhotoAdminListResult = {
 export type PhotoAdminSortBy = 'createdAt' | 'updatedAt' | 'ean' | 'fileSizeBytes' | 'photoDate'
 
 type PhotoIndexRow = {
+  identifierType: PhotoIdentifierType
   ean: string
   fileId: string
   updatedAt: Date
   createdAt: Date
   hash: string
-  url: string
   relativePath: string
   fileSizeBytes: number
   appProperties: PhotoAppProperties
+}
+
+function asIdentifierKind(value: unknown): PhotoIdentifierKind {
+  return value === PhotoIdentifierType.SKU || value === 'SKU' || value === 'sku' ? 'sku' : 'ean'
 }
 
 function asAppProperties(value: Prisma.JsonValue): PhotoAppProperties {
@@ -51,63 +69,79 @@ function asAppProperties(value: Prisma.JsonValue): PhotoAppProperties {
   return out
 }
 
-function toListItem(row: {
-  ean: string
-  fileId: string
-  url: string
-  fileSizeBytes: number
-  createdAt: Date
-  updatedAt: Date
-  appProperties: Prisma.JsonValue
-}): PhotoListItem {
-  return {
-    id: row.fileId,
-    url: row.url,
-    ean: row.ean,
-    fileSizeBytes: row.fileSizeBytes,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-    appProperties: asAppProperties(row.appProperties),
-  }
-}
-
 @Injectable()
 export class PhotoIndexService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly categories: CategoriesService,
+    private readonly storage: PhotoStorageService,
   ) {}
+
+  /** URL будується на льоту з relativePath — зміна домену/тунелю не ламає старі записи. */
+  private toListItem(row: {
+    identifierType?: PhotoIdentifierType | string | null
+    ean: string
+    fileId: string
+    relativePath: string
+    fileSizeBytes: number
+    createdAt: Date
+    updatedAt: Date
+    appProperties: Prisma.JsonValue
+  }): PhotoListItem {
+    const identifierType = asIdentifierKind(row.identifierType)
+    const url = this.storage.buildPublicUrl(row.relativePath)
+    const thumbRelative = freshPhotoThumbRelativePath(row.relativePath)
+    const thumbUrl =
+      thumbRelative === row.relativePath
+        ? url
+        : this.storage.buildPublicUrl(thumbRelative)
+    return {
+      id: row.fileId,
+      url,
+      mainUrl: url,
+      thumbUrl,
+      ean: row.ean,
+      identifierType,
+      identifier: row.ean,
+      sku: identifierType === 'sku' ? row.ean : null,
+      fileSizeBytes: row.fileSizeBytes,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      appProperties: asAppProperties(row.appProperties),
+    }
+  }
 
   private calculateHash(buffer: Buffer): string {
     return createHash('md5').update(buffer).digest('hex')
   }
 
   async addPhoto(params: {
+    identifierType?: PhotoIdentifierType
     ean: string
     fileId: string
     buffer: Buffer
-    url: string
     relativePath: string
     fileSizeBytes: number
     appProperties: PhotoAppProperties
   }): Promise<void> {
     const hash = this.calculateHash(params.buffer)
+    const identifierType = params.identifierType ?? PhotoIdentifierType.EAN
 
     await this.prisma.photoIndex.upsert({
       where: { fileId: params.fileId },
       create: {
+        identifierType,
         ean: params.ean.trim(),
         fileId: params.fileId,
         hash,
-        url: params.url,
         relativePath: params.relativePath,
         fileSizeBytes: params.fileSizeBytes,
         appProperties: params.appProperties,
       },
       update: {
+        identifierType,
         ean: params.ean.trim(),
         hash,
-        url: params.url,
         relativePath: params.relativePath,
         fileSizeBytes: params.fileSizeBytes,
         appProperties: params.appProperties,
@@ -132,6 +166,23 @@ export class PhotoIndexService {
     })
   }
 
+  /** IDs already imported from legacy estimate-photo server (for dedup on re-sync). */
+  async getImportedLegacySourceIds(): Promise<Set<string>> {
+    const rows = await this.prisma.photoIndex.findMany({
+      select: { appProperties: true },
+    })
+
+    const ids = new Set<string>()
+    for (const row of rows) {
+      const props = asAppProperties(row.appProperties)
+      const legacyId = props.legacyGoogleId?.trim()
+      const driveId = props.importedFromDriveId?.trim()
+      if (legacyId) ids.add(legacyId)
+      if (driveId) ids.add(driveId)
+    }
+    return ids
+  }
+
   async removePhotos(fileIds: string[]): Promise<string[]> {
     if (fileIds.length === 0) return []
 
@@ -154,9 +205,11 @@ export class PhotoIndexService {
       orderBy: { updatedAt: 'desc' },
     })
 
+    // Зовнішні клієнти (estimate-застосунок, legacy-sync іншого інстанса) потребують
+    // абсолютний URL — відносний шлях їм не підходить.
     let photos = rows.map((row) => ({
       fileId: row.fileId,
-      url: row.url,
+      url: this.storage.buildAbsolutePublicUrl(row.relativePath),
       appProperties: asAppProperties(row.appProperties),
     }))
 
@@ -177,11 +230,11 @@ export class PhotoIndexService {
     if (!trimmed) return []
 
     const rows = await this.prisma.photoIndex.findMany({
-      where: { ean: trimmed },
+      where: { identifierType: PhotoIdentifierType.EAN, ean: trimmed },
       orderBy: { createdAt: 'desc' },
     })
 
-    return rows.map(toListItem)
+    return rows.map((row) => this.toListItem(row))
   }
 
   async getPhotosByEans(eans: string[]): Promise<Record<string, PhotoListItem[]>> {
@@ -189,7 +242,7 @@ export class PhotoIndexService {
     if (unique.length === 0) return {}
 
     const rows = await this.prisma.photoIndex.findMany({
-      where: { ean: { in: unique } },
+      where: { identifierType: PhotoIdentifierType.EAN, ean: { in: unique } },
       orderBy: { createdAt: 'desc' },
     })
 
@@ -197,18 +250,51 @@ export class PhotoIndexService {
     for (const ean of unique) result[ean] = []
     for (const row of rows) {
       result[row.ean] = result[row.ean] ?? []
-      result[row.ean].push(toListItem(row))
+      result[row.ean].push(this.toListItem(row))
     }
     return result
   }
 
-  private async getInStockPublishedEans(categorySlug?: string): Promise<string[]> {
+  async getPhotosBySku(sku: string): Promise<PhotoListItem[]> {
+    const trimmed = sku.trim()
+    if (!trimmed) return []
+
+    const rows = await this.prisma.photoIndex.findMany({
+      where: { identifierType: PhotoIdentifierType.SKU, ean: trimmed },
+      orderBy: { createdAt: 'desc' },
+    })
+
+    return rows.map((row) => this.toListItem(row))
+  }
+
+  async getPhotosBySkus(skus: string[]): Promise<Record<string, PhotoListItem[]>> {
+    const unique = [...new Set(skus.map((s) => s.trim()).filter(Boolean))]
+    if (unique.length === 0) return {}
+
+    const rows = await this.prisma.photoIndex.findMany({
+      where: { identifierType: PhotoIdentifierType.SKU, ean: { in: unique } },
+      orderBy: { createdAt: 'desc' },
+    })
+
+    const result: Record<string, PhotoListItem[]> = {}
+    for (const sku of unique) result[sku] = []
+    for (const row of rows) {
+      result[row.ean] = result[row.ean] ?? []
+      result[row.ean].push(this.toListItem(row))
+    }
+    return result
+  }
+
+  private async getInStockPublishedIdentifiers(categorySlug?: string): Promise<{
+    eans: string[]
+    skus: string[]
+  }> {
     const trimmedSlug = categorySlug?.trim()
     let productWhere: Prisma.ProductWhereInput = { isPublished: true }
 
     if (trimmedSlug) {
       const categorySubtreeIds = await this.categories.findCategoryIdsInSubtreeBySlug(trimmedSlug)
-      if (categorySubtreeIds.length === 0) return []
+      if (categorySubtreeIds.length === 0) return { eans: [], skus: [] }
       productWhere = {
         isPublished: true,
         OR: [
@@ -224,13 +310,16 @@ export class PhotoIndexService {
 
     const variants = await this.prisma.productVariant.findMany({
       where: {
-        ean: { not: null },
         stock: { gt: 0 },
         product: productWhere,
+        OR: [{ ean: { not: null } }, { sku: { not: null } }],
       },
-      select: { ean: true },
+      select: { ean: true, sku: true },
     })
-    return [...new Set(variants.map((v) => v.ean!).filter(Boolean))]
+    return {
+      eans: [...new Set(variants.map((v) => v.ean?.trim()).filter((v): v is string => Boolean(v)))],
+      skus: [...new Set(variants.map((v) => v.sku?.trim()).filter((v): v is string => Boolean(v)))],
+    }
   }
 
   private parseDateBoundary(value: string | undefined, endOfDay = false): Date | null {
@@ -245,10 +334,22 @@ export class PhotoIndexService {
     return date
   }
 
+  private resolveMainImageUrl(
+    images: Array<{ url: string; isMain: boolean; sortOrder: number }>,
+  ): string | null {
+    if (!images.length) return null
+    const sorted = [...images].sort((a, b) => {
+      if (a.isMain !== b.isMain) return a.isMain ? -1 : 1
+      return a.sortOrder - b.sortOrder
+    })
+    return sorted[0]?.url ?? null
+  }
+
   private enrichVariantsByEan(
     variants: Array<{
       id: string
       ean: string | null
+      sku?: string | null
       stock: number
       availableFrom: Date | null
       product: {
@@ -257,6 +358,7 @@ export class PhotoIndexService {
         isPublished: boolean
         category: { slug: string }
         translations: Array<{ name: string; locale: string }>
+        images: Array<{ url: string; isMain: boolean; sortOrder: number }>
       }
       prices: Array<{ value: Prisma.Decimal }>
       quantityPrices: Array<{
@@ -271,11 +373,74 @@ export class PhotoIndexService {
       }>
     }>,
   ) {
+    return this.enrichVariantsByKey(variants, (v) => v.ean)
+  }
+
+  private enrichVariantsBySku(
+    variants: Array<{
+      id: string
+      ean: string | null
+      sku?: string | null
+      stock: number
+      availableFrom: Date | null
+      product: {
+        id: string
+        slug: string
+        isPublished: boolean
+        category: { slug: string }
+        translations: Array<{ name: string; locale: string }>
+        images: Array<{ url: string; isMain: boolean; sortOrder: number }>
+      }
+      prices: Array<{ value: Prisma.Decimal }>
+      quantityPrices: Array<{
+        minQuantity: number
+        discountType: string
+        value: Prisma.Decimal
+        validFrom: Date | null
+        validTo: Date | null
+      }>
+      attributeValues: Array<{
+        value: { translations: Array<{ label: string }> }
+      }>
+    }>,
+  ) {
+    return this.enrichVariantsByKey(variants, (v) => v.sku ?? null)
+  }
+
+  private enrichVariantsByKey(
+    variants: Array<{
+      id: string
+      ean: string | null
+      sku?: string | null
+      stock: number
+      availableFrom: Date | null
+      product: {
+        id: string
+        slug: string
+        isPublished: boolean
+        category: { slug: string }
+        translations: Array<{ name: string; locale: string }>
+        images: Array<{ url: string; isMain: boolean; sortOrder: number }>
+      }
+      prices: Array<{ value: Prisma.Decimal }>
+      quantityPrices: Array<{
+        minQuantity: number
+        discountType: string
+        value: Prisma.Decimal
+        validFrom: Date | null
+        validTo: Date | null
+      }>
+      attributeValues: Array<{
+        value: { translations: Array<{ label: string }> }
+      }>
+    }>,
+    keyOf: (v: { ean: string | null; sku?: string | null }) => string | null,
+  ) {
     return new Map(
       variants
-        .filter((v) => v.ean && v.product.isPublished)
+        .filter((v) => keyOf(v) && v.product.isPublished)
         .map((v) => [
-          v.ean!,
+          keyOf(v)!,
           {
             productId: v.product.id,
             productSlug: v.product.slug,
@@ -284,6 +449,7 @@ export class PhotoIndexService {
               v.product.translations.find((t) => t.locale === 'uk')?.name ||
               v.product.translations[0]?.name ||
               null,
+            productImageUrl: this.resolveMainImageUrl(v.product.images),
             variantId: v.id,
             price: v.prices[0] ? Number(v.prices[0].value) : null,
             stock: v.stock,
@@ -317,6 +483,7 @@ export class PhotoIndexService {
         productSlug: string | null
         categorySlug: string | null
         productName: string | null
+        productImageUrl: string | null
         variantId: string | null
         price: number | null
         stock: number | null
@@ -332,8 +499,8 @@ export class PhotoIndexService {
       }
     >
   }> {
-    const availableEans = await this.getInStockPublishedEans(params.categorySlug)
-    if (availableEans.length === 0) {
+    const available = await this.getInStockPublishedIdentifiers(params.categorySlug)
+    if (available.eans.length === 0 && available.skus.length === 0) {
       return {
         items: [],
         total: 0,
@@ -350,17 +517,37 @@ export class PhotoIndexService {
       pageSize: params.pageSize,
       sortBy: 'photoDate',
       sortDir: 'desc',
-      eans: availableEans,
+      eans: available.eans,
+      skus: available.skus,
     })
 
-    const eans = [...new Set(page.items.map((item) => item.ean).filter(Boolean))]
+    const eans = [
+      ...new Set(
+        page.items
+          .filter((item) => item.identifierType === 'ean')
+          .map((item) => item.identifier)
+          .filter(Boolean),
+      ),
+    ]
+    const skus = [
+      ...new Set(
+        page.items
+          .filter((item) => item.identifierType === 'sku')
+          .map((item) => item.identifier)
+          .filter(Boolean),
+      ),
+    ]
+    const or: Prisma.ProductVariantWhereInput[] = []
+    if (eans.length) or.push({ ean: { in: eans } })
+    if (skus.length) or.push({ sku: { in: skus } })
     const variants =
-      eans.length > 0
+      or.length > 0
         ? await this.prisma.productVariant.findMany({
-            where: { ean: { in: eans } },
+            where: { OR: or },
             select: {
               id: true,
               ean: true,
+              sku: true,
               stock: true,
               availableFrom: true,
               product: {
@@ -370,6 +557,10 @@ export class PhotoIndexService {
                   isPublished: true,
                   category: { select: { slug: true } },
                   translations: { select: { name: true, locale: true }, take: 5 },
+                  images: {
+                    select: { url: true, isMain: true, sortOrder: true },
+                    orderBy: [{ isMain: 'desc' as const }, { sortOrder: 'asc' as const }],
+                  },
                 },
               },
               prices: { select: { value: true }, take: 1 },
@@ -397,30 +588,35 @@ export class PhotoIndexService {
         : []
 
     const byEan = this.enrichVariantsByEan(variants)
+    const bySku = this.enrichVariantsBySku(variants)
 
     return {
       ...page,
-      items: page.items.map((item) => ({
-        ...item,
-        productId: byEan.get(item.ean)?.productId ?? item.appProperties.productId ?? null,
-        productSlug: byEan.get(item.ean)?.productSlug ?? null,
-        categorySlug: byEan.get(item.ean)?.categorySlug ?? null,
-        productName:
-          byEan.get(item.ean)?.productName ?? item.appProperties.plantName ?? null,
-        variantId: byEan.get(item.ean)?.variantId ?? null,
-        price: byEan.get(item.ean)?.price ?? null,
-        stock: byEan.get(item.ean)?.stock ?? null,
-        availableFrom: byEan.get(item.ean)?.availableFrom ?? null,
-        variantLabel:
-          byEan.get(item.ean)?.variantLabel ?? item.appProperties.plantSize ?? null,
-        quantityPrices: byEan.get(item.ean)?.quantityPrices ?? [],
-      })),
+      items: page.items.map((item) => {
+        const match =
+          item.identifierType === 'sku' ? bySku.get(item.identifier) : byEan.get(item.identifier)
+        return {
+          ...item,
+          productId: match?.productId ?? item.appProperties.productId ?? null,
+          productSlug: match?.productSlug ?? null,
+          categorySlug: match?.categorySlug ?? null,
+          productName: match?.productName ?? item.appProperties.plantName ?? null,
+          productImageUrl: match?.productImageUrl ?? null,
+          variantId: match?.variantId ?? null,
+          price: match?.price ?? null,
+          stock: match?.stock ?? null,
+          availableFrom: match?.availableFrom ?? null,
+          variantLabel: match?.variantLabel ?? item.appProperties.plantSize ?? null,
+          quantityPrices: match?.quantityPrices ?? [],
+        }
+      }),
     }
   }
 
   private buildSearchWhere(
     search?: string,
     eans?: string[],
+    skus?: string[],
   ): Prisma.PhotoIndexWhereInput {
     const clauses: Prisma.PhotoIndexWhereInput[] = []
     const trimmed = search?.trim()
@@ -449,9 +645,15 @@ export class PhotoIndexService {
         ],
       })
     }
+    const identifierOr: Prisma.PhotoIndexWhereInput[] = []
     if (eans?.length) {
-      clauses.push({ ean: { in: eans } })
+      identifierOr.push({ identifierType: PhotoIdentifierType.EAN, ean: { in: eans } })
     }
+    if (skus?.length) {
+      identifierOr.push({ identifierType: PhotoIdentifierType.SKU, ean: { in: skus } })
+    }
+    if (identifierOr.length === 1) clauses.push(identifierOr[0])
+    else if (identifierOr.length > 1) clauses.push({ OR: identifierOr })
     if (clauses.length === 0) return {}
     if (clauses.length === 1) return clauses[0]
     return { AND: clauses }
@@ -460,6 +662,7 @@ export class PhotoIndexService {
   private async listAdminByPhotoDate(params: {
     search?: string
     eans?: string[]
+    skus?: string[]
     dateFrom?: string
     dateTo?: string
     page: number
@@ -470,16 +673,17 @@ export class PhotoIndexService {
     const where = this.buildRawWhereClause(
       params.search,
       params.eans,
+      params.skus,
       params.dateFrom,
       params.dateTo,
     )
     const rows = await this.prisma.$queryRaw<
       Array<{
         id: string
+        identifier_type: PhotoIdentifierType | string | null
         ean: string
         file_id: string
         hash: string
-        url: string
         relative_path: string
         file_size_bytes: number
         app_properties: Prisma.JsonValue
@@ -499,10 +703,11 @@ export class PhotoIndexService {
     `
 
     return rows.map((row) =>
-      toListItem({
+      this.toListItem({
+        identifierType: row.identifier_type,
         ean: row.ean,
         fileId: row.file_id,
-        url: row.url,
+        relativePath: row.relative_path,
         fileSizeBytes: row.file_size_bytes,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -514,6 +719,7 @@ export class PhotoIndexService {
   private async listAdminRaw(params: {
     search?: string
     eans?: string[]
+    skus?: string[]
     dateFrom?: string
     dateTo?: string
     page: number
@@ -524,6 +730,7 @@ export class PhotoIndexService {
     const where = this.buildRawWhereClause(
       params.search,
       params.eans,
+      params.skus,
       params.dateFrom,
       params.dateTo,
     )
@@ -542,10 +749,10 @@ export class PhotoIndexService {
     const rows = await this.prisma.$queryRaw<
       Array<{
         id: string
+        identifier_type: PhotoIdentifierType | string | null
         ean: string
         file_id: string
         hash: string
-        url: string
         relative_path: string
         file_size_bytes: number
         app_properties: Prisma.JsonValue
@@ -562,10 +769,11 @@ export class PhotoIndexService {
     `
 
     return rows.map((row) =>
-      toListItem({
+      this.toListItem({
+        identifierType: row.identifier_type,
         ean: row.ean,
         fileId: row.file_id,
-        url: row.url,
+        relativePath: row.relative_path,
         fileSizeBytes: row.file_size_bytes,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -577,12 +785,14 @@ export class PhotoIndexService {
   private async countAdminRaw(params: {
     search?: string
     eans?: string[]
+    skus?: string[]
     dateFrom?: string
     dateTo?: string
   }): Promise<{ total: number; totalFileSizeBytes: number }> {
     const where = this.buildRawWhereClause(
       params.search,
       params.eans,
+      params.skus,
       params.dateFrom,
       params.dateTo,
     )
@@ -602,6 +812,7 @@ export class PhotoIndexService {
   private buildRawWhereClause(
     search?: string,
     eans?: string[],
+    skus?: string[],
     dateFrom?: string,
     dateTo?: string,
   ): Prisma.Sql {
@@ -620,8 +831,21 @@ export class PhotoIndexService {
       )`)
     }
 
+    const identifierParts: Prisma.Sql[] = []
     if (eans?.length) {
-      parts.push(Prisma.sql`ean IN (${Prisma.join(eans)})`)
+      identifierParts.push(
+        Prisma.sql`(identifier_type = 'EAN' AND ean IN (${Prisma.join(eans)}))`,
+      )
+    }
+    if (skus?.length) {
+      identifierParts.push(
+        Prisma.sql`(identifier_type = 'SKU' AND ean IN (${Prisma.join(skus)}))`,
+      )
+    }
+    if (identifierParts.length === 1) {
+      parts.push(identifierParts[0])
+    } else if (identifierParts.length > 1) {
+      parts.push(Prisma.sql`(${Prisma.join(identifierParts, ' OR ')})`)
     }
 
     const from = this.parseDateBoundary(dateFrom)
@@ -647,6 +871,7 @@ export class PhotoIndexService {
     sortBy?: PhotoAdminSortBy
     sortDir?: 'asc' | 'desc'
     eans?: string[]
+    skus?: string[]
     dateFrom?: string
     dateTo?: string
   }): Promise<PhotoAdminListResult> {
@@ -654,7 +879,7 @@ export class PhotoIndexService {
     const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 24))
     const sortBy = params.sortBy ?? 'createdAt'
     const sortDir = params.sortDir ?? 'desc'
-    const where = this.buildSearchWhere(params.search, params.eans)
+    const where = this.buildSearchWhere(params.search, params.eans, params.skus)
     const useRawQuery =
       sortBy === 'photoDate' || Boolean(params.dateFrom?.trim()) || Boolean(params.dateTo?.trim())
 
@@ -663,6 +888,7 @@ export class PhotoIndexService {
         this.countAdminRaw({
           search: params.search,
           eans: params.eans,
+          skus: params.skus,
           dateFrom: params.dateFrom,
           dateTo: params.dateTo,
         }),
@@ -670,6 +896,7 @@ export class PhotoIndexService {
           ? this.listAdminByPhotoDate({
               search: params.search,
               eans: params.eans,
+              skus: params.skus,
               dateFrom: params.dateFrom,
               dateTo: params.dateTo,
               page,
@@ -679,6 +906,7 @@ export class PhotoIndexService {
           : this.listAdminRaw({
               search: params.search,
               eans: params.eans,
+              skus: params.skus,
               dateFrom: params.dateFrom,
               dateTo: params.dateTo,
               page,
@@ -711,7 +939,7 @@ export class PhotoIndexService {
           skip: (page - 1) * pageSize,
           take: pageSize,
         })
-        .then((items) => items.map(toListItem)),
+        .then((items) => items.map((row) => this.toListItem(row))),
     ])
 
     return {
@@ -732,12 +960,12 @@ export class PhotoIndexService {
     const trimmed = sizeId.trim()
     return rows
       .map((row) => ({
+        identifierType: row.identifierType,
         ean: row.ean,
         fileId: row.fileId,
         updatedAt: row.updatedAt,
         createdAt: row.createdAt,
         hash: row.hash,
-        url: row.url,
         relativePath: row.relativePath,
         fileSizeBytes: row.fileSizeBytes,
         appProperties: asAppProperties(row.appProperties),
@@ -745,17 +973,9 @@ export class PhotoIndexService {
       .filter((photo) => photo.appProperties.sizeId === trimmed)
   }
 
-  async enforceSizeLimit(sizeId: string, maxPhotos = 4): Promise<string[]> {
+  async enforceSizeLimit(sizeId: string, maxPhotos: number): Promise<string[]> {
     const photos = await this.getPhotosBySizeId(sizeId)
-    if (photos.length < maxPhotos) return []
-
-    const sorted = [...photos].sort((a, b) => {
-      const dateA = a.appProperties.date || a.updatedAt.toISOString()
-      const dateB = b.appProperties.date || b.updatedAt.toISOString()
-      return new Date(dateA).getTime() - new Date(dateB).getTime()
-    })
-
-    return sorted.slice(0, photos.length - maxPhotos + 1).map((photo) => photo.fileId)
+    return fileIdsExceedingFreshPhotoLimit(photos, maxPhotos)
   }
 
   async checkEanCache(
@@ -772,39 +992,24 @@ export class PhotoIndexService {
   > {
     if (!items?.length) return {}
 
-    const eans = [...new Set(items.map((item) => item.ean.trim()).filter(Boolean))]
-    if (eans.length === 0) return {}
+    const eans = [...new Set(items.map((item) => item.ean?.trim()).filter((v): v is string => Boolean(v)))]
+    const skus = [...new Set(items.map((item) => item.sku?.trim()).filter((v): v is string => Boolean(v)))]
+    if (eans.length === 0 && skus.length === 0) return {}
 
-    const rows = await this.prisma.photoIndex.findMany({
-      where: { ean: { in: eans } },
-      orderBy: { updatedAt: 'desc' },
-    })
-
-    const photosByEan = new Map<string, PhotoIndexRow[]>()
-    for (const row of rows) {
-      const photo: PhotoIndexRow = {
-        ean: row.ean,
-        fileId: row.fileId,
-        updatedAt: row.updatedAt,
-        createdAt: row.createdAt,
-        hash: row.hash,
-        url: row.url,
-        relativePath: row.relativePath,
-        fileSizeBytes: row.fileSizeBytes,
-        appProperties: asAppProperties(row.appProperties),
-      }
-      const list = photosByEan.get(photo.ean) ?? []
-      list.push(photo)
-      photosByEan.set(photo.ean, list)
-    }
-
-    const cachedIdsByEan = new Map<string, Set<string>>()
-    for (const item of items) {
-      const ean = item.ean.trim()
-      if (!ean) continue
-      if (!cachedIdsByEan.has(ean)) cachedIdsByEan.set(ean, new Set())
-      if (item.cached_google_id) cachedIdsByEan.get(ean)!.add(item.cached_google_id)
-    }
+    const [eanRows, skuRows] = await Promise.all([
+      eans.length
+        ? this.prisma.photoIndex.findMany({
+            where: { identifierType: PhotoIdentifierType.EAN, ean: { in: eans } },
+            orderBy: { updatedAt: 'desc' },
+          })
+        : Promise.resolve([]),
+      skus.length
+        ? this.prisma.photoIndex.findMany({
+            where: { identifierType: PhotoIdentifierType.SKU, ean: { in: skus } },
+            orderBy: { updatedAt: 'desc' },
+          })
+        : Promise.resolve([]),
+    ])
 
     const result: Record<
       string,
@@ -815,17 +1020,85 @@ export class PhotoIndexService {
       }>
     > = {}
 
-    for (const ean of eans) {
-      const indexPhotos = photosByEan.get(ean) ?? []
-      const cachedIds = cachedIdsByEan.get(ean) ?? new Set()
+    this.appendCacheResult(
+      result,
+      items,
+      eans,
+      eanRows,
+      (item) => item.ean?.trim() || '',
+    )
+    this.appendCacheResult(
+      result,
+      items,
+      skus,
+      skuRows,
+      (item) => item.sku?.trim() || '',
+    )
+
+    return result
+  }
+
+  private appendCacheResult(
+    result: Record<
+      string,
+      Array<{
+        cached_google_id: string
+        cache: boolean
+        appProperties: PhotoAppProperties
+      }>
+    >,
+    items: EanCacheItem[],
+    keys: string[],
+    rows: Array<{
+      identifierType: PhotoIdentifierType
+      ean: string
+      fileId: string
+      updatedAt: Date
+      createdAt: Date
+      hash: string
+      relativePath: string
+      fileSizeBytes: number
+      appProperties: Prisma.JsonValue
+    }>,
+    keyOf: (item: EanCacheItem) => string,
+  ) {
+    const photosByKey = new Map<string, PhotoIndexRow[]>()
+    for (const row of rows) {
+      const photo: PhotoIndexRow = {
+        identifierType: row.identifierType,
+        ean: row.ean,
+        fileId: row.fileId,
+        updatedAt: row.updatedAt,
+        createdAt: row.createdAt,
+        hash: row.hash,
+        relativePath: row.relativePath,
+        fileSizeBytes: row.fileSizeBytes,
+        appProperties: asAppProperties(row.appProperties),
+      }
+      const list = photosByKey.get(photo.ean) ?? []
+      list.push(photo)
+      photosByKey.set(photo.ean, list)
+    }
+
+    const cachedIdsByKey = new Map<string, Set<string>>()
+    for (const item of items) {
+      const key = keyOf(item)
+      if (!key) continue
+      if (!cachedIdsByKey.has(key)) cachedIdsByKey.set(key, new Set())
+      if (item.cached_google_id) cachedIdsByKey.get(key)!.add(item.cached_google_id)
+    }
+
+    for (const key of keys) {
+      const indexPhotos = photosByKey.get(key) ?? []
+      const cachedIds = cachedIdsByKey.get(key) ?? new Set()
       const resultPhotos: Array<{
         cached_google_id: string
         cache: boolean
         appProperties: PhotoAppProperties
-      }> = []
+      }> = result[key] ? [...result[key]] : []
 
-      const itemsForEan = items.filter((item) => item.ean.trim() === ean)
-      for (const item of itemsForEan) {
+      const itemsForKey = items.filter((item) => keyOf(item) === key)
+      for (const item of itemsForKey) {
         if (!item.cached_google_id) continue
         const cachedId = item.cached_google_id
         const photoInIndex = indexPhotos.find((p) => p.fileId === cachedId)
@@ -855,13 +1128,11 @@ export class PhotoIndexService {
         }
       }
 
-      result[ean] = resultPhotos
+      result[key] = resultPhotos
     }
 
-    for (const ean of eans) {
-      if (!result[ean]) result[ean] = []
+    for (const key of keys) {
+      if (!result[key]) result[key] = []
     }
-
-    return result
   }
 }

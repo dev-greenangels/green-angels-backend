@@ -12,6 +12,7 @@ import {
 } from './dto/variant-quantity-price.dto'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { pickLocalizedName, pickLocalizedText } from '../i18n/pick-localized-name'
 import { CommerceService } from '../commerce/commerce.service'
 import { RETAIL_PRICE_TYPE } from '../commerce/commerce.constants'
 import { CategoriesService } from '../categories/categories.service'
@@ -20,10 +21,13 @@ import { normalizeSearchQuery } from '../search/normalize-search-query'
 import { ProductSearchService } from '../search/product-search.service'
 import { CreateProductDto } from './dto/create-product.dto'
 import { BulkProductAction, BulkProductsDto } from './dto/bulk-products.dto'
+import { BulkUpdateProductFieldsDto } from './dto/bulk-update-product-fields.dto'
 import { CreateProductVariantDto } from './dto/create-product-variant.dto'
 import { ProductImageDto } from './dto/product-image.dto'
 import { ProductCharacteristicsDto, ProductDisplayCharacteristic } from './dto/product-characteristics.dto'
 import { UpdateProductDto } from './dto/update-product.dto'
+import { resolveUnpaginatedProductTake } from './unpaginated-product-take'
+import { orderRowsBySlugList, parseSlugQueryList } from './order-by-slug-list'
 import { ProductCharacteristicsService } from './product-characteristics.service'
 import { type CatalogAvailableFacets, groupSlugFilterPairs } from './product-filter.util'
 import { VARIANT_LABEL_ATTRIBUTE_SELECT } from './variant-label.util'
@@ -31,6 +35,7 @@ import { VariantLabelService } from './variant-label.service'
 
 export type CatalogStorefrontVariant = {
   id: string
+  sku: string | null
   ean: string | null
   label: string | null
   price: number
@@ -45,7 +50,12 @@ export type BackstageProductListItem = {
   id: string
   slug: string
   name: string
+  nameUk: string
+  nameEn: string
+  nameSk: string
   latinName: string | null
+  /** Intrastat / Combined Nomenclature (Flexi nomen), e.g. 060290 */
+  cnCode: string | null
   legacyId: string | null
   isPublished: boolean
   categoryId: string
@@ -59,6 +69,7 @@ export type BackstageProductListItem = {
   imageUrl: string | null
   characteristics: ProductCharacteristicsDto
   createdAt: string
+  updatedAt: string
   maxDiscountPercent: number | null
   pricingMode: 'simple' | 'variants'
   variants: CatalogStorefrontVariant[]
@@ -93,6 +104,11 @@ export type BackstageProductVariant = {
   availableFrom: string | null
   salesUnitId: string | null
   salesUnitSymbol: string | null
+  weight: number | null
+  lengthCm: number | null
+  widthCm: number | null
+  heightCm: number | null
+  volumetricWeightKg: number | null
   quantityPrices: BackstageVariantQuantityPrice[]
 }
 
@@ -158,6 +174,23 @@ export class ProductsService {
       return 'simple'
     }
     return 'variants'
+  }
+
+  private resolveVariantDims(dto: {
+    weight?: number
+    lengthCm?: number
+    widthCm?: number
+    heightCm?: number
+  }) {
+    const weight = dto.weight != null && dto.weight > 0 ? dto.weight : null
+    const lengthCm = dto.lengthCm != null && dto.lengthCm > 0 ? dto.lengthCm : null
+    const widthCm = dto.widthCm != null && dto.widthCm > 0 ? dto.widthCm : null
+    const heightCm = dto.heightCm != null && dto.heightCm > 0 ? dto.heightCm : null
+    const volumetricWeightKg =
+      lengthCm != null && widthCm != null && heightCm != null
+        ? (lengthCm * widthCm * heightCm) / 5000
+        : null
+    return { weight, lengthCm, widthCm, heightCm, volumetricWeightKg }
   }
 
   private parseDateInput(value?: string | null): Date | null {
@@ -261,6 +294,7 @@ export class ProductsService {
   private toListVariantSummary(
     variant: {
       id: string
+      sku?: string | null
       ean?: string | null
       stock: number
       availableFrom: Date | null
@@ -289,6 +323,7 @@ export class ProductsService {
 
     return {
       id: variant.id,
+      sku: variant.sku ?? null,
       ean: variant.ean ?? null,
       label: this.readVariantLabel(variant.attributeValues, typeOrder),
       price: priceRow ? Number(priceRow.value) : 0,
@@ -317,6 +352,11 @@ export class ProductsService {
       stock: number
       legacyId: string | null
       availableFrom: Date | null
+      weight?: number | null
+      lengthCm?: number | null
+      widthCm?: number | null
+      heightCm?: number | null
+      volumetricWeightKg?: number | null
       salesUnitId?: string | null
       salesUnit?: { symbol: string } | null
       prices: Array<{ value: Prisma.Decimal; compareAtValue: Prisma.Decimal | null }>
@@ -352,6 +392,11 @@ export class ProductsService {
       availableFrom: this.toIsoDate(variant.availableFrom),
       salesUnitId: variant.salesUnitId ?? null,
       salesUnitSymbol: variant.salesUnit?.symbol ?? null,
+      weight: variant.weight ?? null,
+      lengthCm: variant.lengthCm ?? null,
+      widthCm: variant.widthCm ?? null,
+      heightCm: variant.heightCm ?? null,
+      volumetricWeightKg: variant.volumetricWeightKg ?? null,
       quantityPrices: [...variant.quantityPrices]
         .sort((a, b) => a.minQuantity - b.minQuantity || a.sortOrder - b.sortOrder)
         .map((row) => ({
@@ -381,11 +426,13 @@ export class ProductsService {
       id: string
       slug: string
       latinName: string | null
+      cnCode?: string | null
       legacyId: string | null
       isPublished: boolean
       categoryId: string
       createdAt: Date
-      translations: Array<{ name: string }>
+      updatedAt?: Date
+      translations: Array<{ locale?: string; name: string }>
       category: { slug: string; translations: Array<{ name: string }> }
       images: Array<{ url: string; isMain: boolean; sortOrder: number }>
       characteristics: Array<{
@@ -422,15 +469,31 @@ export class ProductsService {
     },
     slugFallback?: string,
     typeOrder: VariantAttributeType[] = [],
+    locale = 'uk',
   ): BackstageProductListItem {
     const firstVariant = product.variants[0]
     const priceRow = firstVariant?.prices[0]
+    const nameUk =
+      product.translations.find((row) => row.locale === 'uk')?.name ??
+      (locale === 'uk' ? product.translations[0]?.name : undefined) ??
+      ''
+    const nameEn = product.translations.find((row) => row.locale === 'en')?.name ?? ''
+    const nameSk = product.translations.find((row) => row.locale === 'sk')?.name ?? ''
+    const localizedName = pickLocalizedName(
+      product.translations,
+      locale,
+      slugFallback || product.slug,
+    )
 
     return {
       id: product.id,
       slug: product.slug,
-      name: product.translations[0]?.name ?? slugFallback ?? product.slug,
+      name: localizedName,
+      nameUk,
+      nameEn,
+      nameSk,
       latinName: product.latinName,
+      cnCode: product.cnCode ?? null,
       legacyId: product.legacyId,
       isPublished: product.isPublished,
       categoryId: product.categoryId,
@@ -447,6 +510,7 @@ export class ProductsService {
       imageUrl: this.resolveMainImageUrl(product.images),
       characteristics: this.productCharacteristics.toCharacteristicsDto(product.characteristics),
       createdAt: product.createdAt.toISOString(),
+      updatedAt: (product.updatedAt ?? product.createdAt).toISOString(),
       maxDiscountPercent: this.computeMaxDiscountPercent(product.variants),
       pricingMode: this.inferPricingMode(product.variants),
       variants: product.variants.map((variant) => this.toListVariantSummary(variant, typeOrder)),
@@ -455,7 +519,7 @@ export class ProductsService {
 
   private listInclude(locale: string, currency: string) {
     return {
-      translations: { where: { locale } },
+      translations: true,
       category: { include: { translations: { where: { locale } } } },
       images: { orderBy: [{ isMain: 'desc' as const }, { sortOrder: 'asc' as const }] },
       characteristics: {
@@ -492,6 +556,10 @@ export class ProductsService {
   private detailInclude(locale: string, currency: string) {
     return {
       ...this.listInclude(locale, currency),
+      translations: {
+        where:
+          locale === 'uk' ? { locale: 'uk' } : { locale: { in: [locale, 'en'] } },
+      },
       additionalCategories: { select: { categoryId: true } },
       characteristics: {
         include: {
@@ -1007,7 +1075,7 @@ export class ProductsService {
       const order = new Map(ordered.map((row, index) => [row.id, index]))
       rows.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
       const labelTypeOrder = await this.variantLabels.getTypeOrder()
-      return rows.map((row) => this.toListItem(row, undefined, labelTypeOrder))
+      return rows.map((row) => this.toListItem(row, undefined, labelTypeOrder, params.locale))
     }
 
     const pageIds = ordered.slice((page - 1) * pageSize, page * pageSize).map((row) => row.id)
@@ -1031,7 +1099,7 @@ export class ProductsService {
     const labelTypeOrder = await this.variantLabels.getTypeOrder()
 
     return {
-      items: rows.map((row) => this.toListItem(row, undefined, labelTypeOrder)),
+      items: rows.map((row) => this.toListItem(row, undefined, labelTypeOrder, params.locale)),
       total,
       page,
       pageSize,
@@ -1180,7 +1248,7 @@ export class ProductsService {
     const labelTypeOrder = await this.variantLabels.getTypeOrder()
 
     return {
-      items: rows.map((row) => this.toListItem(row, undefined, labelTypeOrder)),
+      items: rows.map((row) => this.toListItem(row, undefined, labelTypeOrder, locale)),
       total,
       page,
       pageSize,
@@ -1361,6 +1429,7 @@ export class ProductsService {
 
       let variantId = variantDto.id
       const salesUnitId = variantDto.salesUnitId ?? defaultSalesUnitId
+      const dims = this.resolveVariantDims(variantDto)
 
       if (variantDto.id) {
         await tx.productVariant.update({
@@ -1372,6 +1441,7 @@ export class ProductsService {
             legacyId: variantDto.legacyId?.trim() || null,
             availableFrom,
             salesUnitId,
+            ...dims,
           },
         })
 
@@ -1387,6 +1457,12 @@ export class ProductsService {
           })
         }
 
+        await this.recordPriceHistoryIfChanged(tx, {
+          productVariantId: variantDto.id,
+          priceType: RETAIL_PRICE_TYPE,
+          currency,
+          nextValue: variantDto.price,
+        })
         await tx.productPrice.upsert({
           where: {
             productVariantId_priceType_currency: {
@@ -1417,6 +1493,7 @@ export class ProductsService {
             legacyId: variantDto.legacyId?.trim() || null,
             availableFrom,
             salesUnitId,
+            ...dims,
             attributeValues: attributeLinks.length
               ? { create: attributeLinks }
               : undefined,
@@ -1431,6 +1508,14 @@ export class ProductsService {
           },
         })
         variantId = created.id
+        await tx.priceHistory.create({
+          data: {
+            productVariantId: created.id,
+            priceType: RETAIL_PRICE_TYPE,
+            currency,
+            value: variantDto.price,
+          },
+        })
       }
 
       if (variantId) {
@@ -1553,6 +1638,7 @@ export class ProductsService {
     stock?: string
     excludeId?: string
     ids?: string
+    slugs?: string
     characteristics?: string
     variantAttributes?: string
     priceMin?: string
@@ -1565,6 +1651,7 @@ export class ProductsService {
     hasDiscount?: string
     discountMinQuantity?: number
     discountQuantityMode?: string
+    limit?: number
   }): Promise<BackstageProductListItem[] | PaginatedBackstageProducts> {
     const locale = this.defaultLocale(params.locale)
     const currency = await this.commerce.getDefaultCurrencyCode()
@@ -1609,14 +1696,20 @@ export class ProductsService {
       )
     }
 
+    const slugList = parseSlugQueryList(params.slugs)
+    const take = slugList.length
+      ? slugList.length
+      : resolveUnpaginatedProductTake(params.limit)
     const rows = await this.prisma.product.findMany({
       where,
       include: this.listInclude(locale, currency),
-      orderBy: [{ createdAt: 'desc' }],
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      ...(take != null ? { take } : {}),
     })
 
     const labelTypeOrder = await this.variantLabels.getTypeOrder()
-    return rows.map((row) => this.toListItem(row, undefined, labelTypeOrder))
+    const items = rows.map((row) => this.toListItem(row, undefined, labelTypeOrder, locale))
+    return slugList.length ? orderRowsBySlugList(items, slugList) : items
   }
 
   private async findAllWithSearch(
@@ -1720,7 +1813,7 @@ export class ProductsService {
       const labelTypeOrder = await this.variantLabels.getTypeOrder()
 
       return {
-        items: rows.map((row) => this.toListItem(row, undefined, labelTypeOrder)),
+        items: rows.map((row) => this.toListItem(row, undefined, labelTypeOrder, params.locale)),
         total,
         page,
         pageSize,
@@ -1765,7 +1858,7 @@ export class ProductsService {
     rows.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
 
     const labelTypeOrder = await this.variantLabels.getTypeOrder()
-    const items = rows.map((row) => this.toListItem(row, undefined, labelTypeOrder))
+    const items = rows.map((row) => this.toListItem(row, undefined, labelTypeOrder, params.locale))
 
     if (usePagination) {
       return {
@@ -1789,6 +1882,7 @@ export class ProductsService {
       stock?: string
       excludeId?: string
       ids?: string
+      slugs?: string
       search?: string
       locale?: string
       characteristics?: string
@@ -1851,6 +1945,11 @@ export class ProductsService {
       if (idList.length) {
         and.push({ id: { in: idList } })
       }
+    }
+
+    const slugList = parseSlugQueryList(params.slugs)
+    if (slugList.length) {
+      and.push({ slug: { in: slugList } })
     }
 
     if (params.published === 'true') {
@@ -1972,6 +2071,150 @@ export class ProductsService {
     }
   }
 
+  async bulkUpdateFields(dto: BulkUpdateProductFieldsDto) {
+    const updates = dto.updates ?? []
+    if (!updates.length) {
+      throw new BadRequestException('Немає змін для збереження.')
+    }
+
+    const defaultLocale = this.defaultLocale()
+    let affected = 0
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const row of updates) {
+        const product = await tx.product.findUnique({
+          where: { id: row.id },
+          select: { id: true, slug: true, categoryId: true },
+        })
+        if (!product) continue
+
+        if (row.slug && row.slug !== product.slug) {
+          const clash = await tx.product.findFirst({
+            where: { slug: row.slug, NOT: { id: row.id } },
+            select: { id: true },
+          })
+          if (clash) {
+            throw new BadRequestException(`Slug «${row.slug}» уже зайнятий.`)
+          }
+        }
+
+        if (row.primaryCategoryId) {
+          const category = await tx.category.findUnique({
+            where: { id: row.primaryCategoryId },
+            select: { id: true },
+          })
+          if (!category) {
+            throw new BadRequestException('Категорію не знайдено.')
+          }
+        }
+
+        await tx.product.update({
+          where: { id: row.id },
+          data: {
+            ...(row.slug != null ? { slug: row.slug.trim() } : {}),
+            ...(row.isPublished != null ? { isPublished: row.isPublished } : {}),
+            ...(row.latinName !== undefined
+              ? { latinName: row.latinName.trim() || null }
+              : {}),
+            ...(row.primaryCategoryId
+              ? { categoryId: row.primaryCategoryId }
+              : {}),
+          },
+        })
+
+        const localeNames: Array<{ locale: string; name: string | undefined }> = [
+          { locale: 'uk', name: row.nameUk },
+          { locale: 'en', name: row.nameEn },
+          { locale: 'sk', name: row.nameSk },
+        ]
+        if (
+          row.name != null &&
+          row.nameUk === undefined &&
+          row.nameEn === undefined &&
+          row.nameSk === undefined
+        ) {
+          localeNames.push({ locale: defaultLocale, name: row.name })
+        }
+
+        for (const entry of localeNames) {
+          if (entry.name === undefined) continue
+          const name = entry.name.trim()
+          if (!name) continue
+          await tx.productTranslation.upsert({
+            where: {
+              productId_locale: { productId: row.id, locale: entry.locale },
+            },
+            create: { productId: row.id, locale: entry.locale, name },
+            update: { name },
+          })
+        }
+
+        affected += 1
+      }
+    })
+
+    return { affected }
+  }
+
+  async getLowestPrice30d(productId: string, currencyInput?: string) {
+    const currency = (currencyInput?.trim() || (await this.commerce.getDefaultCurrencyCode())).toUpperCase()
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    const variants = await this.prisma.productVariant.findMany({
+      where: { productId },
+      select: { id: true },
+    })
+    if (!variants.length) {
+      throw new NotFoundException('Товар не знайдено.')
+    }
+    const variantIds = variants.map((v) => v.id)
+    const agg = await this.prisma.priceHistory.aggregate({
+      where: {
+        productVariantId: { in: variantIds },
+        priceType: RETAIL_PRICE_TYPE,
+        currency,
+        recordedAt: { gte: since },
+      },
+      _min: { value: true },
+    })
+    return {
+      productId,
+      currency,
+      days: 30,
+      lowestPrice: agg._min.value != null ? Number(agg._min.value) : null,
+    }
+  }
+
+  async recordPriceHistoryIfChanged(
+    tx: Prisma.TransactionClient,
+    params: {
+      productVariantId: string
+      priceType: string
+      currency: string
+      nextValue: number | Prisma.Decimal
+    },
+  ) {
+    const existing = await tx.productPrice.findUnique({
+      where: {
+        productVariantId_priceType_currency: {
+          productVariantId: params.productVariantId,
+          priceType: params.priceType,
+          currency: params.currency,
+        },
+      },
+      select: { value: true },
+    })
+    const next = Number(params.nextValue)
+    if (existing && Number(existing.value) === next) return
+    await tx.priceHistory.create({
+      data: {
+        productVariantId: params.productVariantId,
+        priceType: params.priceType,
+        currency: params.currency,
+        value: next,
+      },
+    })
+  }
+
   async findByIds(ids: string[], locale?: string): Promise<BackstageProductListItem[]> {
     if (!ids.length) return []
     const result = await this.findAll({
@@ -2011,7 +2254,7 @@ export class ProductsService {
 
     if (!product) throw new NotFoundException('Товар не знайдено')
 
-    return this.toDetail(product)
+    return this.toDetail(product, loc)
   }
 
   async findBySlug(slug: string, locale?: string): Promise<BackstageProductDetail> {
@@ -2027,18 +2270,21 @@ export class ProductsService {
 
     if (!product) throw new NotFoundException('Товар не знайдено')
 
-    return this.toDetail(product)
+    return this.toDetail(product, loc)
   }
 
-  private async toDetail(product: {
+  private async toDetail(
+    product: {
     id: string
     slug: string
     latinName: string | null
+    cnCode?: string | null
     legacyId: string | null
     isPublished: boolean
     categoryId: string
     createdAt: Date
     translations: Array<{
+      locale?: string
       name: string
       description?: string | null
       metaTitle?: string | null
@@ -2094,14 +2340,16 @@ export class ProductsService {
     }>
     additionalCategories: Array<{ categoryId: string }>
     _count: { variants: number }
-  }): Promise<BackstageProductDetail> {
+  },
+    locale: string,
+  ): Promise<BackstageProductDetail> {
     const labelTypeOrder = await this.variantLabels.getTypeOrder()
     const base = this.toListItem(
       product as unknown as Parameters<typeof this.toListItem>[0],
       undefined,
       labelTypeOrder,
+      locale,
     )
-    const translation = product.translations[0]
     const variants = product.variants.map((variant) => this.toVariantNode(variant, labelTypeOrder))
 
     const imageUrls = product.images
@@ -2130,9 +2378,18 @@ export class ProductsService {
         })),
       },
       displayCharacteristics,
-      description: translation?.description ?? null,
-      metaTitle: translation?.metaTitle ?? null,
-      metaDesc: translation?.metaDesc ?? null,
+      description: pickLocalizedText(
+        product.translations.map((row) => ({ locale: row.locale, value: row.description })),
+        locale,
+      ),
+      metaTitle: pickLocalizedText(
+        product.translations.map((row) => ({ locale: row.locale, value: row.metaTitle })),
+        locale,
+      ),
+      metaDesc: pickLocalizedText(
+        product.translations.map((row) => ({ locale: row.locale, value: row.metaDesc })),
+        locale,
+      ),
       additionalCategoryIds: product.additionalCategories.map((row) => row.categoryId),
       pricingMode: this.inferPricingMode(product.variants),
       variants,
@@ -2166,6 +2423,7 @@ export class ProductsService {
         data: {
           slug,
           latinName: dto.latinName?.trim() || null,
+          cnCode: dto.cnCode?.replace(/\s/g, '').trim() || null,
           legacyId: dto.legacyId?.trim() || null,
           isPublished: dto.isPublished ?? false,
           categoryId: dto.primaryCategoryId,
@@ -2228,6 +2486,7 @@ export class ProductsService {
         data: {
           slug,
           latinName: dto.latinName?.trim() || null,
+          cnCode: dto.cnCode?.replace(/\s/g, '').trim() || null,
           legacyId: dto.legacyId?.trim() || null,
           isPublished: dto.isPublished ?? false,
           categoryId: dto.primaryCategoryId,

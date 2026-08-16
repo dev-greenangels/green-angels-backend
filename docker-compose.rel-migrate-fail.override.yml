@@ -1,0 +1,7 @@
+# Failure overlay: migrate cannot reach Postgres (127.0.0.1:1).
+# Used only by scripts/rel-prisma-migrate-verify.sh — not production.
+
+services:
+  migrate:
+    environment:
+      DATABASE_URL: postgresql://ga_rel_migrate:ga_rel_migrate@127.0.0.1:1/ga_rel_migrate?schema=public

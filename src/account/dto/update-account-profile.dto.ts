@@ -45,10 +45,12 @@ export class UpdateAccountProfileDto {
   @IsString()
   patronymic?: string
 
+  /** Identity contacts are not mutable via profile PATCH (BATCH 4A). */
   @IsOptional()
   @IsEmail()
   email?: string
 
+  /** Identity contacts are not mutable via profile PATCH (BATCH 4A). */
   @IsOptional()
   @IsString()
   phone?: string

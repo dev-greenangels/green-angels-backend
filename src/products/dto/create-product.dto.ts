@@ -29,6 +29,12 @@ export class CreateProductDto {
   @MaxLength(200)
   latinName?: string
 
+  /** Intrastat Combined Nomenclature (e.g. 060290). Used for reduced VAT matching. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  cnCode?: string
+
   @IsString()
   @MinLength(1)
   @MaxLength(120)

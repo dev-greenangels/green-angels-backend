@@ -1,8 +1,16 @@
-import { IsIn } from 'class-validator'
-
-import { ORDER_STATUSES } from '../order-status.constants'
+import { IsOptional, IsString, IsUUID, MaxLength, ValidateIf } from 'class-validator'
 
 export class PatchOrderStatusDto {
-  @IsIn(ORDER_STATUSES)
-  status!: (typeof ORDER_STATUSES)[number]
+  @IsString()
+  @MaxLength(64)
+  status!: string
+
+  @ValidateIf((o: PatchOrderStatusDto) => o.status?.toUpperCase() === 'CANCELLED')
+  @IsUUID()
+  cancellationReasonId?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  cancellationNote?: string | null
 }

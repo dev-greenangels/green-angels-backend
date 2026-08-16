@@ -6,6 +6,7 @@ import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 
 import { BulkProductsDto } from './dto/bulk-products.dto'
+import { BulkUpdateProductFieldsDto } from './dto/bulk-update-product-fields.dto'
 import { CreateProductDto } from './dto/create-product.dto'
 import { PatchProductImagesDto } from './dto/patch-product-images.dto'
 import { PatchProductPublishedDto } from './dto/patch-product-published.dto'
@@ -26,12 +27,14 @@ export class ProductsController {
     @Query('stock') stock?: string,
     @Query('excludeId') excludeId?: string,
     @Query('ids') ids?: string,
+    @Query('slugs') slugs?: string,
     @Query('characteristics') characteristics?: string,
     @Query('variantAttributes') variantAttributes?: string,
     @Query('priceMin') priceMin?: string,
     @Query('priceMax') priceMax?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('limit') limit?: string,
     @Query('sort') sort?: string,
     @Query('namePrefix') namePrefix?: string,
     @Query('lowStockThreshold') lowStockThreshold?: string,
@@ -48,12 +51,14 @@ export class ProductsController {
       stock,
       excludeId,
       ids,
+      slugs,
       characteristics,
       variantAttributes,
       priceMin,
       priceMax,
       page: page != null && page !== '' ? Number(page) : undefined,
       pageSize: pageSize != null && pageSize !== '' ? Number(pageSize) : undefined,
+      limit: limit != null && limit !== '' ? Number(limit) : undefined,
       sort,
       namePrefix,
       lowStockThreshold:
@@ -76,6 +81,13 @@ export class ProductsController {
     return this.products.bulkAction(dto)
   }
 
+  @Patch('bulk-fields')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  bulkFields(@Body() dto: BulkUpdateProductFieldsDto) {
+    return this.products.bulkUpdateFields(dto)
+  }
+
   @Get('alphabet-letters')
   getAlphabetLetters(@Query('locale') locale?: string) {
     return this.products.getAvailableNameLetters(locale)
@@ -89,6 +101,11 @@ export class ProductsController {
   @Get('by-slug/:slug')
   findBySlug(@Param('slug') slug: string, @Query('locale') locale?: string) {
     return this.products.findBySlug(slug, locale)
+  }
+
+  @Get(':id/lowest-price-30d')
+  getLowestPrice30d(@Param('id') id: string, @Query('currency') currency?: string) {
+    return this.products.getLowestPrice30d(id, currency)
   }
 
   @Get(':id')

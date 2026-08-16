@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common'
+import { Controller, Get, NotFoundException, UseGuards } from '@nestjs/common'
 
 import { PhotoApiKeyGuard } from '../common/photo-api-key.guard'
 import { PhotoIndexService } from './photo-index.service'
@@ -14,6 +14,10 @@ export class PhotosDebugController {
 
   @Get('photos')
   async checkPhotosIndex() {
+    if (process.env.ENABLE_PHOTOS_DEBUG !== '1') {
+      throw new NotFoundException()
+    }
+
     let photos: Awaited<ReturnType<PhotoIndexService['getAllPhotos']>> | null = null
     let error: string | null = null
 
@@ -25,7 +29,6 @@ export class PhotosDebugController {
 
     return {
       timestamp: new Date().toISOString(),
-      storageRoot: this.photoStorageService.getRootDir(),
       publicBaseUrl: this.photoStorageService.getPublicBaseUrl(),
       photoCount: photos?.length ?? null,
       photos,

@@ -12,6 +12,8 @@ export enum ReviewTypeFilter {
 export enum ReviewSortOrder {
   NEWEST = 'newest',
   OLDEST = 'oldest',
+  RATING_DESC = 'rating_desc',
+  RATING_ASC = 'rating_asc',
 }
 
 export class ReviewQueryDto {

@@ -1,4 +1,4 @@
-/** Валідація шляхів завантажених зображень (зберігаються на диску магазину). */
+/** Валідація відносних шляхів зображень, які зберігаються в Postgres. */
 
 export const CATEGORY_IMAGE_PATH_REGEX =
   /^\/uploads\/categories\/(?:pending\/[a-f0-9-]+|[a-f0-9-]{36})(?:\/v\d+)?\/cover\.webp$/i
@@ -18,4 +18,14 @@ export function isValidCategoryImagePath(url: string): boolean {
 
 export function isValidProductImagePath(url: string): boolean {
   return PRODUCT_IMAGE_PATH_REGEX.test(url.trim())
+}
+
+export function isPendingCategoryPath(url: string): boolean {
+  return /^\/uploads\/categories\/pending\/[a-f0-9-]+\/cover\.webp$/i.test(url.trim())
+}
+
+export function isPendingProductPath(url: string): boolean {
+  return /^\/uploads\/products\/pending\/[a-f0-9-]+\/[a-f0-9-]+\/main\.webp$/i.test(
+    url.trim(),
+  )
 }

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import {
   DiscountApplicationScope,
   DiscountRule,
+  DiscountRuleCombinationMode,
   DiscountTarget,
   DiscountValueType,
   Prisma,
@@ -15,7 +16,9 @@ import { CommerceService } from '../commerce/commerce.service'
 import { RETAIL_PRICE_TYPE } from '../commerce/commerce.constants'
 import { VariantLabelService } from '../products/variant-label.service'
 import { VARIANT_LABEL_ATTRIBUTE_SELECT } from '../products/variant-label.util'
+import { SettingsService } from '../settings/settings.service'
 import { buildCategoryDescendantMap, type CategoryDescendantMap } from './category-scope.util'
+import { computeCartWeightKg, computeCartVolumeLiters } from './delivery-weight.util'
 import {
   isWithinDateRange,
   matchesAudience,
@@ -55,6 +58,11 @@ type LoadedVariant = {
   id: string
   stock: number
   availableFrom: Date | null
+  weight: number | null
+  lengthCm: number | null
+  widthCm: number | null
+  heightCm: number | null
+  volumetricWeightKg: number | null
   product: {
     id: string
     isPublished: boolean
@@ -69,6 +77,7 @@ type LoadedVariant = {
     validFrom: Date | null
     validTo: Date | null
   }>
+  attributeValues: Array<{ value: { tareWeightKg: Prisma.Decimal | null } }>
 }
 
 @Injectable()
@@ -77,6 +86,7 @@ export class PricingService {
     private readonly prisma: PrismaService,
     private readonly variantLabels: VariantLabelService,
     private readonly commerce: CommerceService,
+    private readonly settings: SettingsService,
   ) {}
 
   private isQuantityPriceActive(
@@ -142,40 +152,6 @@ export class PricingService {
     )
   }
 
-  private async loadAudienceByPhone(phone: string): Promise<PricingAudience> {
-    const user = await this.prisma.user.findUnique({
-      where: { phone },
-      include: {
-        contractorProfiles: true,
-        customerGroups: { select: { groupId: true } },
-      },
-    })
-
-    if (!user) {
-      return this.assignDefaultRetailGroup({
-        groupIds: [],
-        contractorDiscountPercent: 0,
-        priceType: 'роздріб',
-      })
-    }
-
-    const contractorDiscountPercent = user.contractorProfiles.length
-      ? Math.max(0, ...user.contractorProfiles.map((profile) => profile.discountRate))
-      : 0
-
-    const priceType =
-      user.contractorProfiles.find((profile) => profile.priceType.trim())?.priceType.trim() ??
-      'роздріб'
-
-    return this.enrichAudienceGroups({
-      userId: user.id,
-      role: user.role,
-      groupIds: user.customerGroups.map((row) => row.groupId),
-      contractorDiscountPercent,
-      priceType,
-    })
-  }
-
   private async enrichAudienceGroups(audience: PricingAudience): Promise<PricingAudience> {
     const slugs: string[] = []
     if (audience.role === Role.WHOLESALER) slugs.push('wholesale')
@@ -204,10 +180,31 @@ export class PricingService {
     return retail ? { ...audience, groupIds: [retail.id] } : audience
   }
 
-  async resolveAudience(input: {
-    customerPhone?: string
-    userId?: string
-  }): Promise<PricingAudience> {
+  async getCnCodesForVariantIds(
+    variantIds: string[],
+  ): Promise<Map<string, string | null>> {
+    const unique = [...new Set(variantIds.filter(Boolean))]
+    const map = new Map<string, string | null>()
+    if (!unique.length) return map
+    const rows = await this.prisma.productVariant.findMany({
+      where: { id: { in: unique } },
+      select: {
+        id: true,
+        product: { select: { cnCode: true } },
+      },
+    })
+    for (const row of rows) {
+      map.set(row.id, row.product.cnCode ?? null)
+    }
+    return map
+  }
+
+  /**
+   * Аудиторія цін/знижок/промо лише з авторизованого userId.
+   * Гість (без сесії) = retail: публічні промо без user/group/role обмежень лишаються.
+   * Lookup по телефону навмисно відсутній — інакше гість бачив би оптові ціни.
+   */
+  async resolveAudience(input: { userId?: string }): Promise<PricingAudience> {
     if (input.userId) {
       const user = await this.prisma.user.findUnique({
         where: { id: input.userId },
@@ -231,10 +228,6 @@ export class PricingService {
       }
     }
 
-    if (input.customerPhone?.trim()) {
-      return this.loadAudienceByPhone(input.customerPhone.trim())
-    }
-
     return this.assignDefaultRetailGroup({
       groupIds: [],
       contractorDiscountPercent: 0,
@@ -245,7 +238,10 @@ export class PricingService {
   private async loadActiveDiscountRules(now = new Date()) {
     const rules = await this.prisma.discountRule.findMany({
       where: { isActive: true },
-      include: { groups: { select: { groupId: true } } },
+      include: {
+        groups: { select: { groupId: true } },
+        allowedUsers: { select: { userId: true } },
+      },
       orderBy: { createdAt: 'desc' },
     })
     return rules.filter((rule) => isWithinDateRange(rule.startDate, rule.endDate, now))
@@ -364,22 +360,34 @@ export class PricingService {
     )
   }
 
+  private discountRuleMatchesAudience(
+    rule: DiscountRule & { groups: Array<{ groupId: string }>; allowedUsers: Array<{ userId: string }> },
+    audience: PricingAudience,
+  ): boolean {
+    const allowedUserIds = rule.allowedUsers.map((row) => row.userId)
+    if (allowedUserIds.length > 0) {
+      return Boolean(audience.userId && allowedUserIds.includes(audience.userId))
+    }
+
+    return matchesAudience(
+      rule.onlyForRoles,
+      rule.groups.map((row) => row.groupId),
+      audience.groupIds,
+      audience.role,
+    )
+  }
+
   private discountRuleApplies(
-    rule: DiscountRule & { groups: Array<{ groupId: string }> },
+    rule: DiscountRule & {
+      groups: Array<{ groupId: string }>
+      allowedUsers: Array<{ userId: string }>
+    },
     audience: PricingAudience,
     variant: LoadedVariant,
     cartSubtotal: number,
+    categoryExpansion?: CategoryDescendantMap,
   ): boolean {
-    if (
-      !matchesAudience(
-        rule.onlyForRoles,
-        rule.groups.map((row) => row.groupId),
-        audience.groupIds,
-        audience.role,
-      )
-    ) {
-      return false
-    }
+    if (!this.discountRuleMatchesAudience(rule, audience)) return false
 
     if (rule.minCartSubtotal != null && cartSubtotal < Number(rule.minCartSubtotal)) {
       return false
@@ -392,7 +400,69 @@ export class PricingService {
         targetIds: rule.targetIds,
       },
       variant,
+      {
+        productIds: rule.excludeProductIds,
+        variantIds: rule.excludeVariantIds,
+        categoryIds: rule.excludeCategoryIds,
+      },
+      categoryExpansion,
     )
+  }
+
+  /**
+   * Combines discount-rule candidates for a line according to each rule's
+   * `combinesWithOtherDiscounts` mode:
+   * - BEST_PRICE: rule competes freely against tier/contractor/base (лишається як окремий кандидат).
+   * - MAX_OF: among the applicable MAX_OF rules only the deepest discount survives as one candidate.
+   * - STACK: discount is applied on top of the best non-rule price (кількісна знижка / контрагент),
+   *   compounding across all applicable STACK rules.
+   */
+  private buildDiscountRuleCandidates(
+    applicableRules: Array<DiscountRule & { groups: Array<{ groupId: string }>; allowedUsers: Array<{ userId: string }> }>,
+    baseUnitPrice: number,
+    bestNonRuleUnitPrice: number,
+  ): Array<{ unitPrice: number; source: AppliedDiscountSource; label: string | null }> {
+    const candidates: Array<{ unitPrice: number; source: AppliedDiscountSource; label: string | null }> = []
+
+    const bestPriceRules = applicableRules.filter(
+      (rule) => rule.combinesWithOtherDiscounts === DiscountRuleCombinationMode.BEST_PRICE,
+    )
+    for (const rule of bestPriceRules) {
+      candidates.push({
+        unitPrice: unitPriceFromRule(baseUnitPrice, rule.type, Number(rule.value)),
+        source: 'discount_rule',
+        label: rule.name,
+      })
+    }
+
+    const maxOfRules = applicableRules.filter(
+      (rule) => rule.combinesWithOtherDiscounts === DiscountRuleCombinationMode.MAX_OF,
+    )
+    if (maxOfRules.length) {
+      const maxOfCandidates = maxOfRules.map((rule) => ({
+        unitPrice: unitPriceFromRule(baseUnitPrice, rule.type, Number(rule.value)),
+        source: 'discount_rule' as const,
+        label: rule.name,
+      }))
+      candidates.push(this.pickBestUnitPrice(maxOfCandidates))
+    }
+
+    const stackRules = applicableRules.filter(
+      (rule) => rule.combinesWithOtherDiscounts === DiscountRuleCombinationMode.STACK,
+    )
+    if (stackRules.length) {
+      let stackedUnitPrice = bestNonRuleUnitPrice
+      for (const rule of stackRules) {
+        stackedUnitPrice = unitPriceFromRule(stackedUnitPrice, rule.type, Number(rule.value))
+      }
+      candidates.push({
+        unitPrice: stackedUnitPrice,
+        source: 'discount_rule',
+        label: stackRules.map((rule) => rule.name).join(' + '),
+      })
+    }
+
+    return candidates
   }
 
   async quote(input: {
@@ -431,6 +501,7 @@ export class PricingService {
         },
         prices: { where: { currency, priceType: RETAIL_PRICE_TYPE } },
         quantityPrices: true,
+        attributeValues: { select: { value: { select: { tareWeightKg: true } } } },
       },
     })
 
@@ -438,6 +509,7 @@ export class PricingService {
       throw new NotFoundException('Один або кілька товарів не знайдено.')
     }
 
+    const cartWeightSettings = (await this.settings.getCartCheckoutSettings()).cartWeight
     const discountRules = await this.loadActiveDiscountRules()
     const requestedCodes = normalizePromoCodesInput(input.promoCode, input.promoCodes)
     const loadedPromos = await this.loadPromoCodes(requestedCodes)
@@ -490,10 +562,13 @@ export class PricingService {
       promoMessage = promoMessages[0]
     }
 
-    const needsCategoryExpansion = activePromos.some(
-      (promo) =>
-        promo.target === DiscountTarget.CATEGORY || promo.excludeCategoryIds.length > 0,
-    )
+    const needsCategoryExpansion =
+      activePromos.some(
+        (promo) => promo.target === DiscountTarget.CATEGORY || promo.excludeCategoryIds.length > 0,
+      ) ||
+      discountRules.some(
+        (rule) => rule.target === DiscountTarget.CATEGORY || rule.excludeCategoryIds.length > 0,
+      )
     const categoryExpansion = needsCategoryExpansion
       ? await buildCategoryDescendantMap(this.prisma)
       : undefined
@@ -558,14 +633,13 @@ export class PricingService {
         })
       }
 
-      for (const rule of discountRules) {
-        if (!this.discountRuleApplies(rule, input.audience, variant, cartSubtotal)) continue
-        candidates.push({
-          unitPrice: unitPriceFromRule(baseUnitPrice, rule.type, Number(rule.value)),
-          source: 'discount_rule',
-          label: rule.name,
-        })
-      }
+      const bestNonRuleUnitPrice = this.pickBestUnitPrice(candidates).unitPrice
+      const applicableRules = discountRules.filter((rule) =>
+        this.discountRuleApplies(rule, input.audience, variant, cartSubtotal, categoryExpansion),
+      )
+      candidates.push(
+        ...this.buildDiscountRuleCandidates(applicableRules, baseUnitPrice, bestNonRuleUnitPrice),
+      )
 
       const best = this.pickBestUnitPrice(candidates)
       lines.push({
@@ -804,11 +878,16 @@ export class PricingService {
       }
     })
 
+    const cartWeightKg = computeCartWeightKg(variants, uniqueItems, cartWeightSettings)
+    const cartVolumeL = computeCartVolumeLiters(variants, uniqueItems)
+
     return {
       lines,
       giftLines,
       subtotalBeforeDiscount: roundMoney(subtotalBeforeDiscount),
       totalAmount,
+      cartWeightKg,
+      cartVolumeL,
       promoCodeId: appliedPromoIdList[0] ?? null,
       promoCode: appliedPromoCodes[0] ?? null,
       promoCodeIds: appliedPromoIdList,

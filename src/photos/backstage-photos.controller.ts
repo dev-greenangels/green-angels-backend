@@ -16,7 +16,7 @@ import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { PhotosService } from './photos.service'
-import { DriveImportService } from './drive-import.service'
+import { LegacyPhotoSyncService } from './legacy-photo-sync.service'
 import { ViberRecipientsService } from '../viber-photos/viber-recipients.service'
 
 class AdminPhotosQueryDto {
@@ -55,14 +55,13 @@ class DeletePhotosDto {
   ids!: string[]
 }
 
-class DriveImportDto {
-  @IsOptional()
-  @IsString()
-  folderId?: string
+class LegacyPhotoSyncDto {
+  @IsUrl({ require_protocol: true })
+  manifestUrl!: string
 
   @IsOptional()
-  @IsUrl({ require_protocol: true })
-  folderUrl?: string
+  @IsString()
+  apiKey?: string
 }
 
 class ViberRecipientDto {
@@ -87,7 +86,7 @@ class UpdateViberRecipientsDto {
 export class BackstagePhotosController {
   constructor(
     private readonly photosService: PhotosService,
-    private readonly driveImport: DriveImportService,
+    private readonly legacyPhotoSync: LegacyPhotoSyncService,
     private readonly viberRecipients: ViberRecipientsService,
   ) {}
 
@@ -124,21 +123,21 @@ export class BackstagePhotosController {
     return this.viberRecipients.replace(body.recipients ?? [])
   }
 
-  @Post('import-drive')
-  startDriveImport(@Body() body: DriveImportDto) {
-    return this.driveImport.startImport({
-      folderId: body.folderId,
-      folderUrl: body.folderUrl,
+  @Post('sync-legacy')
+  startLegacyPhotoSync(@Body() body: LegacyPhotoSyncDto) {
+    return this.legacyPhotoSync.startSync({
+      manifestUrl: body.manifestUrl,
+      apiKey: body.apiKey,
     })
   }
 
-  @Get('import-drive/status')
-  getDriveImportStatus() {
-    return this.driveImport.getStatus()
+  @Get('sync-legacy/status')
+  getLegacyPhotoSyncStatus() {
+    return this.legacyPhotoSync.getStatus()
   }
 
-  @Post('import-drive/cancel')
-  cancelDriveImport() {
-    return this.driveImport.cancelImport()
+  @Post('sync-legacy/cancel')
+  cancelLegacyPhotoSync() {
+    return this.legacyPhotoSync.cancelSync()
   }
 }
