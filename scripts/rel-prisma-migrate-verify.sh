@@ -30,11 +30,16 @@ POSTGRES_PASSWORD=compose-config-check
 POSTGRES_DB=green_angels
 DATABASE_URL=postgresql://green_angels:compose-config-check@postgres:5432/green_angels?schema=public
 REDIS_HOST=redis-coolify-check
-REDIS_PORT=6379
 REDIS_PASSWORD=compose-config-check
 JWT_SECRET=compose-config-check-min-32-characters
 CORS_ORIGIN=https://shop.example.com
-MEDIA_DRIVER=r2
+API_PUBLIC_URL=https://api.example.com
+SHOP_PUBLIC_URL=https://shop.example.com
+R2_ENDPOINT=https://example.r2.cloudflarestorage.com
+R2_ACCESS_KEY_ID=config-check
+R2_SECRET_ACCESS_KEY=config-check
+R2_BUCKET=config-check
+R2_PUBLIC_BASE_URL=https://media.example.com
 EOF
 CONFIG_OUT="$(mktemp)"
 docker compose --env-file "$CONFIG_ENV" -f "$PROD_FILE" config >"$CONFIG_OUT"
@@ -94,6 +99,33 @@ if "- prisma - migrate - deploy" not in flat and "prisma migrate deploy" not in 
 if "restart: no" not in flat and 'restart: "no"' not in text and "restart: 'no'" not in text:
     raise SystemExit("coolify config migrate restart is not no")
 print("coolify config: migrate+api only, no caddy/80/443, migrate gate")
+if "published:" in text:
+    raise SystemExit("coolify config must not publish host ports")
+if re.search(r'(?m)^\s+REDIS_HOST:\s+redis\s*$', text) or re.search(
+    r'(?m)^\s+REDIS_HOST:\s+["\']redis["\']\s*$', text
+):
+    raise SystemExit("coolify api must not use HostPro hostname redis")
+if any(s in text for s in ("MONOPAY_TOKEN", "NOVA_POSHTA", "TURBOSMS_", "MAX_PHOTOS_PER_SIZE", "POSTGRES_USER")):
+    raise SystemExit("coolify config contains UA/HostPro or dead env interpolations")
+print("coolify config: SK contract (no UA-only / dead env)")
+PY
+python3 - "$COOLIFY_FILE" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+raw = Path(sys.argv[1]).read_text()
+m = re.search(r"(?ms)^  migrate:\n(.*?)^  api:", raw)
+if not m:
+    raise SystemExit("coolify yaml missing migrate/api split")
+migrate_block = m.group(1)
+env_m = re.search(r"(?ms)^\s{4}environment:\n((?:\s{6}.+\n)+)", migrate_block)
+if not env_m:
+    raise SystemExit("coolify migrate missing environment block")
+mig_keys = re.findall(r"^\s{6}([A-Z][A-Z0-9_]+):", env_m.group(1), re.M)
+if mig_keys != ["DATABASE_URL"]:
+    raise SystemExit(f"migrate environment must be DATABASE_URL only, got {mig_keys}")
+print(f"coolify yaml: migrate keys={mig_keys}")
 PY
 rm -f "$CONFIG_ENV" "$CONFIG_OUT"
 
