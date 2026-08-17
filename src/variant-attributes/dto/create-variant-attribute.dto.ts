@@ -122,6 +122,15 @@ export class CreateVariantAttributeDto {
   @IsBoolean()
   participatesInLabel?: boolean
 
+  @IsOptional()
+  @IsBoolean()
+  showOnProductPage?: boolean
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  icon?: string | null
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

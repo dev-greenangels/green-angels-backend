@@ -146,17 +146,7 @@ function normalizeFooter(raw: LegacyStoreContact): StoreFooterVisibility {
   const footer = raw.footer
 
   if (!footer) {
-    return {
-      showAddress: true,
-      showPhone: true,
-      showEmail: true,
-      showViber: true,
-      showTelegram: true,
-      showWhatsApp: true,
-      showLink: true,
-      showSchedules: true,
-      showCompanyDetails: false,
-    }
+    return { ...DEFAULT_FOOTER_VISIBILITY }
   }
 
   return normalizeFooterVisibility(footer, DEFAULT_FOOTER_VISIBILITY)

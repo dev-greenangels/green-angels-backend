@@ -117,6 +117,15 @@ export class UpdateVariantAttributeDto {
   participatesInLabel?: boolean
 
   @IsOptional()
+  @IsBoolean()
+  showOnProductPage?: boolean
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  icon?: string | null
+
+  @IsOptional()
   @IsEnum(VariantAttributeType)
   valueType?: VariantAttributeType
 

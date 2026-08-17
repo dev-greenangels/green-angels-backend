@@ -126,6 +126,8 @@ export class CatalogExcelService {
         sortOrder: true,
         isFilterable: true,
         participatesInLabel: true,
+        showOnProductPage: true,
+        icon: true,
         translations: { where: { locale: LOCALE }, select: { name: true } },
       },
       orderBy: [{ sortOrder: 'asc' }, { slug: 'asc' }],
@@ -139,6 +141,8 @@ export class CatalogExcelService {
       sortOrder: a.sortOrder,
       isFilterable: a.isFilterable ? 'TRUE' : 'FALSE',
       participatesInLabel: a.participatesInLabel ? 'TRUE' : 'FALSE',
+      showOnProductPage: a.showOnProductPage ? 'TRUE' : 'FALSE',
+      icon: a.icon ?? '',
     }))
   }
 
@@ -568,6 +572,8 @@ export class CatalogExcelService {
         const sortOrder = cellToOptionalNumber(v.sortOrder) ?? 0
         const isFilterable = cellToBool(v.isFilterable ?? '', true)
         const participatesInLabel = cellToBool(v.participatesInLabel ?? '', true)
+        const showOnProductPage = cellToBool(v.showOnProductPage ?? '', false)
+        const icon = showOnProductPage ? field(v, 'icon') || null : null
 
         const existingId = (legacyId ? byLegacy.get(legacyId) : undefined) ?? bySlug.get(slug)
 
@@ -581,6 +587,8 @@ export class CatalogExcelService {
               sortOrder,
               isFilterable,
               participatesInLabel,
+              showOnProductPage,
+              icon,
               translations: {
                 upsert: {
                   where: { attributeId_locale: { attributeId: existingId, locale: LOCALE } },
@@ -605,6 +613,8 @@ export class CatalogExcelService {
               sortOrder,
               isFilterable,
               participatesInLabel,
+              showOnProductPage,
+              icon,
               translations: { create: { locale: LOCALE, name } },
             },
           })

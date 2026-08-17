@@ -161,13 +161,13 @@ export type StoreFooterVisibility = {
 }
 
 export const DEFAULT_FOOTER_VISIBILITY: StoreFooterVisibility = {
-  showAddress: true,
-  showPhone: true,
+  showAddress: false,
+  showPhone: false,
   showEmail: false,
-  showViber: true,
-  showTelegram: true,
-  showWhatsApp: true,
-  showLink: true,
+  showViber: false,
+  showTelegram: false,
+  showWhatsApp: false,
+  showLink: false,
   showSchedules: false,
   showCompanyDetails: false,
 }
@@ -245,6 +245,7 @@ export type HomeReviewSort = 'newest' | 'oldest' | 'rating_desc'
 
 export type HomePageSettings = {
   sectionOrder: HomeSectionKey[]
+  sectionHidden: HomeSectionKey[]
   hero: {
     badge: string
     title: string
@@ -308,57 +309,18 @@ export type HomePageSettings = {
   }
 }
 
-export const DEFAULT_MAPS_URL = 'https://maps.app.goo.gl/EdhHzZDNvev2pV9H7'
+export const DEFAULT_MAPS_URL = ''
 
-export const DEFAULT_CONTACT_BLOCKS: StoreContactBlock[] = [
-  {
-    title: 'Підтримка',
-    lines: [
-      { type: 'phone', value: '+380 (67) 123-45-67' },
-      { type: 'email', value: 'info@zeleni-yanholy.ua' },
-    ],
-  },
-  {
-    title: 'Гурт',
-    lines: [
-      { type: 'phone', value: '+380 (67) 765-43-21' },
-      { type: 'email', value: 'opt@zeleni-yanholy.ua' },
-    ],
-  },
-]
+export const DEFAULT_CONTACT_BLOCKS: StoreContactBlock[] = []
 
 export const DEFAULT_STORE_SETTINGS: StoreContactSettings = {
-  addressLine1: 'Київська обл., м. Вишгород,',
-  addressLine2: 'вул. Садова, 15',
+  addressLine1: '',
+  addressLine2: '',
   mapsUrl: DEFAULT_MAPS_URL,
   contactBlocks: DEFAULT_CONTACT_BLOCKS,
-  phones: [
-    { label: 'Підтримка', phone: '+380 (67) 123-45-67' },
-    { label: 'Гурт', phone: '+380 (67) 765-43-21' },
-  ],
-  emails: [
-    { label: 'Підтримка', email: 'info@zeleni-yanholy.ua' },
-    { label: 'Гурт', email: 'opt@zeleni-yanholy.ua' },
-  ],
-  schedules: [
-    {
-      title: 'Садовий центр',
-      entries: [
-        { label: 'Пн-Пт', value: '9:00 – 18:00' },
-        { label: 'Субота', value: '9:00 – 15:00' },
-        { label: 'Неділя', value: 'вихідний' },
-      ],
-    },
-    {
-      title: 'Офіс / телефонія',
-      entries: [
-        { label: 'Пн-Пт', value: '9:00 – 17:00' },
-        { label: 'Субота', value: '10:00 – 14:00' },
-        { label: 'Неділя', value: 'вихідний' },
-      ],
-      note: 'У святкові та передсвяткові дні графік може відрізнятися',
-    },
-  ],
+  phones: [],
+  emails: [],
+  schedules: [],
   footer: { ...DEFAULT_FOOTER_VISIBILITY },
   social: { ...DEFAULT_SOCIAL_LINKS },
   companyDetails: { ...DEFAULT_CHECKOUT_BANK_DETAILS },
@@ -386,12 +348,13 @@ export const DEFAULT_HOME_SETTINGS: HomePageSettings = {
     'reviews',
     'recentlyViewed',
   ],
+  sectionHidden: [],
   hero: {
-    badge: 'Виробник рослин · відома торгова марка',
+    badge: 'Виробник рослин',
     title: 'Розсадник «Зелені Янголи»',
     titleAccent: 'для професіоналів і садівників',
     subtitle:
-      'Власне виробництво хвойних, листяних і декоративних рослин. Тисячі задоволених клієнтів по всій Україні — від приватних садів до великих ландшафтних проєктів.',
+      'Власне виробництво хвойних, листяних і декоративних рослин.',
     primaryCtaLabel: 'Перейти до каталогу',
     primaryCtaHref: '/catalog',
     secondaryCtaLabel: 'Хіти продажів',
@@ -399,19 +362,19 @@ export const DEFAULT_HOME_SETTINGS: HomePageSettings = {
     imageUrl: '/images/hero-plants.jpg',
     highlights: [
       { title: 'Власне виробництво', description: 'Вирощуємо на розсаднику, не перепродаємо' },
-      { title: '5000+ клієнтів', description: 'Працюємо з роздрібом і гуртом по Україні' },
-      { title: 'Доставка Нова Пошта', description: 'Надійне пакування та відправлення' },
+      { title: 'Якість і сортність', description: 'Стабільний посадковий матеріал' },
+      { title: 'Доставка', description: 'Надійне пакування та відправлення' },
     ],
   },
   categories: {
     title: 'Каталог',
-    subtitle: 'Понад 500 позицій у каталозі — оберіть напрямок і замовляйте напряму з розсадника',
+    subtitle: 'Оберіть напрямок і замовляйте напряму з розсадника',
     limit: 8,
     categorySlugs: [],
   },
   newArrivals: {
     title: 'Новинки',
-    subtitle: 'Свіжі надходження з розсадника — позиції, що знову зʼявились у наявності',
+    subtitle: 'Свіжі надходження з розсадника',
     limit: 6,
     productSlugs: [],
   },
@@ -437,7 +400,7 @@ export const DEFAULT_HOME_SETTINGS: HomePageSettings = {
       'Стабільна якість і сортність',
       'Великий асортимент у наявності',
       'Оптові та роздрібні ціни',
-      'Доставка по всій Україні',
+      'Доставка',
       'Відома торгова марка на ринку',
     ],
     stats: [
@@ -466,7 +429,7 @@ export const DEFAULT_HOME_SETTINGS: HomePageSettings = {
   reviews: {
     enabled: true,
     title: 'Відгуки клієнтів',
-    subtitle: 'Нам довіряють професіонали та садівники з усієї України',
+    subtitle: 'Нам довіряють професіонали та садівники',
     limit: 8,
     sort: 'newest',
   },

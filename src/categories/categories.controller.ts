@@ -27,8 +27,8 @@ export class CategoriesController {
   }
 
   @Get()
-  findAll(@Query('locale') locale?: string) {
-    return this.categories.findTree(locale)
+  findAll(@Query('locale') locale?: string, @Query('edit') edit?: string) {
+    return this.categories.findTree(locale, edit === '1' || edit === 'true')
   }
 
   @Post()

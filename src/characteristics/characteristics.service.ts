@@ -121,7 +121,7 @@ export class CharacteristicsService {
       sortOrder: number
       translations: Array<{ label: string }>
     },
-    fallback?: string,
+    fallback?: string | null,
   ): CharacteristicOptionNode {
     return {
       id: row.id,
@@ -149,12 +149,14 @@ export class CharacteristicsService {
         translations: Array<{ label: string }>
       }>
     },
-    slugFallback?: string,
+    slugFallback?: string | null,
+    emptyIfMissing = false,
   ): CharacteristicNode {
+    const missing = emptyIfMissing ? '' : (slugFallback ?? row.slug)
     return {
       id: row.id,
       slug: row.slug,
-      name: row.translations[0]?.name ?? slugFallback ?? row.slug,
+      name: row.translations[0]?.name ?? missing,
       valueType: row.valueType,
       unit: row.unit,
       isFilterable: row.isFilterable,
@@ -162,7 +164,7 @@ export class CharacteristicsService {
       icon: row.icon,
       sortOrder: row.sortOrder,
       options: row.options
-        .map((option) => this.toOptionNode(option))
+        .map((option) => this.toOptionNode(option, emptyIfMissing ? '' : undefined))
         .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, 'uk')),
     }
   }
@@ -177,7 +179,11 @@ export class CharacteristicsService {
     }
   }
 
-  async findAll(locale?: string, filterableOnly = false): Promise<CharacteristicNode[]> {
+  async findAll(
+    locale?: string,
+    filterableOnly = false,
+    emptyIfMissing = false,
+  ): Promise<CharacteristicNode[]> {
     const loc = this.defaultLocale(locale)
     const rows = await this.prisma.characteristic.findMany({
       where: filterableOnly ? { isFilterable: true } : undefined,
@@ -185,7 +191,11 @@ export class CharacteristicsService {
       orderBy: [{ sortOrder: 'asc' }, { slug: 'asc' }],
     })
     return rows.map((row) =>
-      this.toCharacteristicNode(row as unknown as Parameters<typeof this.toCharacteristicNode>[0]),
+      this.toCharacteristicNode(
+        row as unknown as Parameters<typeof this.toCharacteristicNode>[0],
+        undefined,
+        emptyIfMissing,
+      ),
     )
   }
 

@@ -30,6 +30,7 @@ import { resolveUnpaginatedProductTake } from './unpaginated-product-take'
 import { orderRowsBySlugList, parseSlugQueryList } from './order-by-slug-list'
 import { ProductCharacteristicsService } from './product-characteristics.service'
 import { type CatalogAvailableFacets, groupSlugFilterPairs } from './product-filter.util'
+import { toVariantDisplayAttributes } from './to-variant-display-attributes'
 import { VARIANT_LABEL_ATTRIBUTE_SELECT } from './variant-label.util'
 import { VariantLabelService } from './variant-label.service'
 
@@ -44,6 +45,7 @@ export type CatalogStorefrontVariant = {
   salesUnitId: string | null
   salesUnitSymbol: string | null
   quantityPrices: BackstageVariantQuantityPrice[]
+  displayAttributes: ProductDisplayCharacteristic[]
 }
 
 export type BackstageProductListItem = {
@@ -110,6 +112,7 @@ export type BackstageProductVariant = {
   heightCm: number | null
   volumetricWeightKg: number | null
   quantityPrices: BackstageVariantQuantityPrice[]
+  displayAttributes: ProductDisplayCharacteristic[]
 }
 
 export type BackstageProductDetail = BackstageProductListItem & {
@@ -313,7 +316,16 @@ export class ProductsService {
       attributeValues: Array<{
         value: {
           translations: Array<{ label: string }>
-          attribute?: { sortOrder: number; participatesInLabel: boolean; valueType?: VariantAttributeType }
+          attribute?: {
+            id?: string
+            slug?: string
+            sortOrder: number
+            participatesInLabel: boolean
+            valueType?: VariantAttributeType
+            showOnProductPage?: boolean
+            icon?: string | null
+            translations?: Array<{ name: string }>
+          }
         }
       }>
     },
@@ -341,6 +353,7 @@ export class ProductsService {
           validFrom: this.toIsoDate(row.validFrom),
           validTo: this.toIsoDate(row.validTo),
         })),
+      displayAttributes: toVariantDisplayAttributes(variant.attributeValues),
     }
   }
 
@@ -364,7 +377,17 @@ export class ProductsService {
         valueId: string
         value: {
           translations: Array<{ label: string }>
-          attribute?: { sortOrder: number; participatesInLabel: boolean; valueType?: VariantAttributeType }
+          attribute?: {
+            id?: string
+            slug?: string
+            sortOrder: number
+            participatesInLabel: boolean
+            showOnProductPage?: boolean
+            icon?: string | null
+            unit?: string | null
+            valueType?: VariantAttributeType
+            translations?: Array<{ name: string }>
+          }
         }
       }>
       quantityPrices: Array<{
@@ -407,6 +430,7 @@ export class ProductsService {
           validFrom: this.toIsoDate(row.validFrom),
           validTo: this.toIsoDate(row.validTo),
         })),
+      displayAttributes: toVariantDisplayAttributes(variant.attributeValues),
     }
   }
 
@@ -541,7 +565,17 @@ export class ProductsService {
               value: {
                 include: {
                   translations: { where: { locale } },
-                  attribute: { select: VARIANT_LABEL_ATTRIBUTE_SELECT },
+                  attribute: {
+                    select: {
+                      ...VARIANT_LABEL_ATTRIBUTE_SELECT,
+                      id: true,
+                      slug: true,
+                      showOnProductPage: true,
+                      icon: true,
+                      unit: true,
+                      translations: { where: { locale }, select: { name: true } },
+                    },
+                  },
                 },
               },
             },
@@ -2244,7 +2278,7 @@ export class ProductsService {
     return sortUkrainianAlphabetLetters([...new Set(letters)])
   }
 
-  async findOne(id: string, locale?: string): Promise<BackstageProductDetail> {
+  async findOne(id: string, locale?: string, strictLocale = false): Promise<BackstageProductDetail> {
     const loc = this.defaultLocale(locale)
     const currency = await this.commerce.getDefaultCurrencyCode()
     const product = await this.prisma.product.findUnique({
@@ -2254,7 +2288,7 @@ export class ProductsService {
 
     if (!product) throw new NotFoundException('Товар не знайдено')
 
-    return this.toDetail(product, loc)
+    return this.toDetail(product, loc, strictLocale)
   }
 
   async findBySlug(slug: string, locale?: string): Promise<BackstageProductDetail> {
@@ -2270,7 +2304,7 @@ export class ProductsService {
 
     if (!product) throw new NotFoundException('Товар не знайдено')
 
-    return this.toDetail(product, loc)
+    return this.toDetail(product, loc, false)
   }
 
   private async toDetail(
@@ -2325,7 +2359,17 @@ export class ProductsService {
         valueId: string
         value: {
           translations: Array<{ label: string }>
-          attribute?: { sortOrder: number; participatesInLabel: boolean }
+          attribute?: {
+            id?: string
+            slug?: string
+            sortOrder: number
+            participatesInLabel: boolean
+            showOnProductPage?: boolean
+            icon?: string | null
+            unit?: string | null
+            valueType?: VariantAttributeType
+            translations?: Array<{ name: string }>
+          }
         }
       }>
       quantityPrices: Array<{
@@ -2342,6 +2386,7 @@ export class ProductsService {
     _count: { variants: number }
   },
     locale: string,
+    strictLocale = false,
   ): Promise<BackstageProductDetail> {
     const labelTypeOrder = await this.variantLabels.getTypeOrder()
     const base = this.toListItem(
@@ -2366,8 +2411,15 @@ export class ProductsService {
       product.characteristics,
     )
 
+    const row = product.translations.find((item) => item.locale === locale)
+
     return {
       ...base,
+      ...(strictLocale
+        ? {
+            name: row?.name?.trim() ?? '',
+          }
+        : {}),
       characteristics: {
         ...base.characteristics,
         entries: entriesResponse.entries.map((entry) => ({
@@ -2378,18 +2430,24 @@ export class ProductsService {
         })),
       },
       displayCharacteristics,
-      description: pickLocalizedText(
-        product.translations.map((row) => ({ locale: row.locale, value: row.description })),
-        locale,
-      ),
-      metaTitle: pickLocalizedText(
-        product.translations.map((row) => ({ locale: row.locale, value: row.metaTitle })),
-        locale,
-      ),
-      metaDesc: pickLocalizedText(
-        product.translations.map((row) => ({ locale: row.locale, value: row.metaDesc })),
-        locale,
-      ),
+      description: strictLocale
+        ? row?.description?.trim() || null
+        : pickLocalizedText(
+            product.translations.map((item) => ({ locale: item.locale, value: item.description })),
+            locale,
+          ),
+      metaTitle: strictLocale
+        ? row?.metaTitle?.trim() || null
+        : pickLocalizedText(
+            product.translations.map((item) => ({ locale: item.locale, value: item.metaTitle })),
+            locale,
+          ),
+      metaDesc: strictLocale
+        ? row?.metaDesc?.trim() || null
+        : pickLocalizedText(
+            product.translations.map((item) => ({ locale: item.locale, value: item.metaDesc })),
+            locale,
+          ),
       additionalCategoryIds: product.additionalCategories.map((row) => row.categoryId),
       pricingMode: this.inferPricingMode(product.variants),
       variants,
@@ -2450,7 +2508,7 @@ export class ProductsService {
       return product.id
     })
 
-    return this.findOne(productId, locale)
+    return this.findOne(productId, locale, true)
   }
 
   async update(id: string, dto: UpdateProductDto): Promise<BackstageProductDetail> {
@@ -2534,6 +2592,6 @@ export class ProductsService {
       await this.syncImages(tx, id, dto.images)
     })
 
-    return this.findOne(id, locale)
+    return this.findOne(id, locale, true)
   }
 }

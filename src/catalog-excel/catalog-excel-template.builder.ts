@@ -165,6 +165,8 @@ const SAMPLE_ATTRIBUTES: CatalogExcelRow[] = [
     sortOrder: 1,
     isFilterable: true,
     participatesInLabel: true,
+    showOnProductPage: false,
+    icon: '',
   },
   {
     slug: 'visota',
@@ -175,6 +177,8 @@ const SAMPLE_ATTRIBUTES: CatalogExcelRow[] = [
     sortOrder: 2,
     isFilterable: true,
     participatesInLabel: true,
+    showOnProductPage: false,
+    icon: '',
   },
 ]
 
@@ -357,6 +361,7 @@ export async function buildCatalogExcelTemplate(options: {
   )
   addBoolValidation(attributes, columnLetter(ATTRIBUTES_COLUMNS.indexOf('isFilterable')))
   addBoolValidation(attributes, columnLetter(ATTRIBUTES_COLUMNS.indexOf('participatesInLabel')))
+  addBoolValidation(attributes, columnLetter(ATTRIBUTES_COLUMNS.indexOf('showOnProductPage')))
 
   const attributeValuesContent = sheetContent(
     SHEET_ATTRIBUTE_VALUES,

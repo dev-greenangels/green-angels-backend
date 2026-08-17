@@ -15,8 +15,12 @@ export class CharacteristicsController {
   constructor(private readonly service: CharacteristicsService) {}
 
   @Get()
-  findAll(@Query('locale') locale?: string, @Query('filterable') filterable?: string) {
-    return this.service.findAll(locale, filterable === 'true')
+  findAll(
+    @Query('locale') locale?: string,
+    @Query('filterable') filterable?: string,
+    @Query('edit') edit?: string,
+  ) {
+    return this.service.findAll(locale, filterable === 'true', edit === '1' || edit === 'true')
   }
 
   @Post()

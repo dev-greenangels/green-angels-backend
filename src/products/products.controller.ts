@@ -109,8 +109,12 @@ export class ProductsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string, @Query('locale') locale?: string) {
-    return this.products.findOne(id, locale)
+  findOne(
+    @Param('id') id: string,
+    @Query('locale') locale?: string,
+    @Query('edit') edit?: string,
+  ) {
+    return this.products.findOne(id, locale, edit === '1' || edit === 'true')
   }
 
   @Post()

@@ -14,8 +14,12 @@ export class VariantAttributesController {
   constructor(private readonly service: VariantAttributesService) {}
 
   @Get()
-  findAll(@Query('locale') locale?: string, @Query('filterable') filterable?: string) {
-    return this.service.findAll(locale, filterable === 'true')
+  findAll(
+    @Query('locale') locale?: string,
+    @Query('filterable') filterable?: string,
+    @Query('edit') edit?: string,
+  ) {
+    return this.service.findAll(locale, filterable === 'true', edit === '1' || edit === 'true')
   }
 
   @Post()

@@ -7,6 +7,7 @@ import {
 } from './flexi.constants'
 import { FlexiSettingsService } from './flexi.settings.service'
 import { parseStromLocaleFields } from './flexi-locale-json'
+import { applyWarehouseStock } from './flexi-warehouse-stock'
 import type {
   FlexiCenikItem,
   FlexiSettings,
@@ -22,7 +23,8 @@ type FlexiListResponse = {
  * Cenik detail for SK sync:
  * - price: prefer including VAT (cenaZakl / cenaZaklVcDph / prodejCena), then bez DPH
  * - nomen: Intrastat Combined Nomenclature (CN)
- * - Available=sumDostupMj, net weight=hmotMj
+ * - net weight=hmotMj. Do NOT copy sumDostupMj into ProductVariant.stock —
+ *   warehouse qty comes from skladova-karta.dostupMj for defaultStockCode.
  */
 const CENIK_DETAIL =
   'custom:id,kod,nazev,cenaZakl,cenaZaklVcDph,prodejCena,cenaZaklBezDph,sumDostupMj,sumStavMj,stavMJ,skladem,hmotMj,hmotObal,nomen'
@@ -289,20 +291,8 @@ export class FlexiClient {
     const kod = String(row.kod ?? row.code ?? '').trim()
     if (!kod) return null
     const nazev = String(row.nazev ?? row.name ?? kod).trim() || kod
-    // Available on cenik form = sumDostupMj; sumStavMj = on-hand; stavMJ often 0 on cenik
-    const stock = this.parseStockQty(
-      row.sumDostupMj,
-      row.sumDostupMJ,
-      row.dostupMj,
-      row.sumStavMj,
-      row.sumStavMJ,
-      row['sumStavMj@sum'],
-      row.stavMJ,
-      row.stavMj,
-      row.stavSkladu,
-      row['stavMJ@sum'],
-      row.pocetMJ,
-    )
+    // sumDostupMj is all-warehouse total — never write it as stock.
+    // Overlay skladova-karta.dostupMj for defaultStockCode via overlayWarehouseStock.
     // SK Flexi stores gross (inc_vat): prefer including-VAT fields first.
     // cenaZakl = Prodejní cena (s DPH when typCeny.sDph); cenaZaklVcDph = explicit s DPH.
     // Do not treat explicit 0 as "present" — fall through to other Flexi price fields.
@@ -333,7 +323,7 @@ export class FlexiClient {
       id: String(row.id ?? kod),
       kod,
       nazev,
-      stock,
+      stock: 0,
       price,
       cnCode,
       weight,
@@ -341,11 +331,45 @@ export class FlexiClient {
     }
   }
 
+  /**
+   * Single stock resolver: configured sklad dostupMj, else 0.
+   * Throws on skladova-karta transport / missing accounting period so callers
+   * never silently keep cenik totals.
+   */
+  private async overlayWarehouseStock(items: FlexiCenikItem[]): Promise<FlexiCenikItem[]> {
+    if (items.length === 0) return items
+    const settings = await this.settingsService.getSettings()
+    const qty = new Map<string, number>()
+    if (settings.defaultStockCode.trim()) {
+      const fetched = await this.fetchStockFromSkladoveKarty(
+        items.map((item) => item.kod),
+        true,
+      )
+      for (const [kod, n] of fetched) qty.set(kod, n)
+    }
+    return applyWarehouseStock(items, qty)
+  }
+
+  private async overlayWarehouseStockMap(
+    map: Map<string, FlexiCenikItem>,
+    key: 'kod' | 'id',
+  ): Promise<Map<string, FlexiCenikItem>> {
+    const overlayed = await this.overlayWarehouseStock([...map.values()])
+    const next = new Map<string, FlexiCenikItem>()
+    for (const item of overlayed) {
+      next.set(key === 'id' ? item.id : item.kod, item)
+    }
+    return next
+  }
+
   async fetchCenikPage(start: number, limit: number): Promise<FlexiCenikItem[]> {
     const path = `/cenik.json?start=${start}&limit=${limit}&detail=${encodeURIComponent(CENIK_DETAIL)}`
     const payload = await this.request<unknown>('GET', path)
     const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
-    return rows.map((row) => this.parseCenikRow(row)).filter((x): x is FlexiCenikItem => Boolean(x))
+    const items = rows
+      .map((row) => this.parseCenikRow(row))
+      .filter((x): x is FlexiCenikItem => Boolean(x))
+    return this.overlayWarehouseStock(items)
   }
 
   async fetchCenikById(id: string): Promise<FlexiCenikItem | null> {
@@ -353,7 +377,10 @@ export class FlexiClient {
     const payload = await this.request<unknown>('GET', path)
     const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
     if (!rows[0]) return null
-    return this.parseCenikRow(rows[0])
+    const item = this.parseCenikRow(rows[0])
+    if (!item) return null
+    const [overlayed] = await this.overlayWarehouseStock([item])
+    return overlayed ?? null
   }
 
   /**
@@ -377,7 +404,7 @@ export class FlexiClient {
         if (item) result.set(item.id, item)
       }
     }
-    return result
+    return this.overlayWarehouseStockMap(result, 'id')
   }
 
   /** Resolve skladova-karta id → cenik internal id via cenik@ref (LIVE-VERIFIED). */
@@ -438,9 +465,9 @@ export class FlexiClient {
   }
 
   /**
-   * Live stock for checkout / sync.
-   * Prefer cenik.sumDostupMj (Available on price list). When defaultStockCode is set,
-   * also try skladova-karta for that warehouse and prefer it when rows exist.
+   * Live stock: configured skladova-karta.dostupMj only.
+   * Empty defaultStockCode → 0 (never cenik.sumDostupMj).
+   * Throws when warehouse is set and Flexi karta / period lookup fails.
    */
   async fetchStockBySkus(skus: string[]): Promise<Map<string, number>> {
     const result = new Map<string, number>()
@@ -448,102 +475,26 @@ export class FlexiClient {
     for (const sku of unique) result.set(sku, 0)
     if (unique.length === 0) return result
 
-    const fromCenik = await this.fetchStockAndCenikBySkus(unique)
-    for (const sku of unique) {
-      result.set(sku, fromCenik.get(sku)?.stock ?? 0)
-    }
-
     const settings = await this.settingsService.getSettings()
     if (!settings.defaultStockCode.trim()) {
       return result
     }
 
     const fromCards = await this.fetchStockFromSkladoveKarty(unique, true)
-    if (fromCards.size > 0) {
-      for (const [sku, qty] of fromCards) {
-        result.set(sku, qty)
-      }
+    for (const [sku, qty] of fromCards) {
+      result.set(sku, qty)
     }
     return result
   }
 
   /**
-   * Checkout-only: propagate transport failure when Flexi is entirely unreachable.
-   * Avoids misclassifying outage as "0 available" business rejection.
+   * Checkout-only: same warehouse resolver as import/sync.
+   * Empty defaultStockCode → 0 (no Flexi call).
+   * Warehouse set + transport/period failure → throw so callers do not treat
+   * an outage as «0 available».
    */
   async fetchStockBySkusForCheckout(skus: string[]): Promise<Map<string, number>> {
-    const unique = [...new Set(skus.map((s) => s.trim()).filter(Boolean))]
-    const fromCenik = await this.fetchStockAndCenikBySkusForCheckout(unique)
-    const result = new Map<string, number>()
-    for (const sku of unique) {
-      result.set(sku, fromCenik.get(sku)?.stock ?? 0)
-    }
-
-    const settings = await this.settingsService.getSettings()
-    if (!settings.defaultStockCode.trim()) {
-      return result
-    }
-
-    const fromCards = await this.fetchStockFromSkladoveKarty(unique, true)
-    if (fromCards.size > 0) {
-      for (const [sku, qty] of fromCards) {
-        result.set(sku, qty)
-      }
-    }
-    return result
-  }
-
-  private async fetchStockAndCenikBySkusForCheckout(
-    skus: string[],
-  ): Promise<Map<string, FlexiCenikItem>> {
-    const result = new Map<string, FlexiCenikItem>()
-    const unique = [...new Set(skus.map((s) => s.trim()).filter(Boolean))]
-    if (unique.length === 0) return result
-
-    let lastTransportError: Error | null = null
-    let anySuccess = false
-
-    for (let i = 0; i < unique.length; i += FLEXI_STOCK_FILTER_CHUNK) {
-      const chunk = unique.slice(i, i + FLEXI_STOCK_FILTER_CHUNK)
-      const filter = chunk.map((kod) => `kod='${this.escapeFlexiLiteral(kod)}'`).join(' or ')
-      const path = `/cenik/(${encodeURIComponent(filter)}).json?limit=0&detail=${encodeURIComponent(CENIK_DETAIL)}`
-      try {
-        const payload = await this.request<unknown>('GET', path)
-        const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
-        for (const row of rows) {
-          const item = this.parseCenikRow(row)
-          if (item) result.set(item.kod, item)
-        }
-        anySuccess = true
-      } catch (error) {
-        lastTransportError =
-          error instanceof Error ? error : new Error(String(error))
-        let chunkSuccess = false
-        for (const kod of chunk) {
-          const filterEnc = encodeURIComponent(`kod='${this.escapeFlexiLiteral(kod)}'`)
-          const single = `/cenik.json?limit=1&detail=${encodeURIComponent(CENIK_DETAIL)}&filter=${filterEnc}`
-          try {
-            const payload = await this.request<unknown>('GET', single)
-            const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
-            const item = rows[0] ? this.parseCenikRow(rows[0]) : null
-            if (item) {
-              result.set(item.kod, item)
-              chunkSuccess = true
-            }
-          } catch (singleError) {
-            lastTransportError =
-              singleError instanceof Error ? singleError : new Error(String(singleError))
-          }
-        }
-        if (chunkSuccess) anySuccess = true
-      }
-    }
-
-    if (!anySuccess && lastTransportError) {
-      throw lastTransportError
-    }
-
-    return result
+    return this.fetchStockBySkus(skus)
   }
 
   private async fetchStockFromSkladoveKarty(
@@ -553,8 +504,7 @@ export class FlexiClient {
     const result = new Map<string, number>()
     const periodId = await this.getCurrentAccountingPeriodId()
     if (!periodId) {
-      this.logger.warn('Flexi stock: no accounting period — skip skladova-karta')
-      return result
+      throw new Error('Flexi stock: немає облікового періоду (ucetni-obdobi) для skladova-karta.')
     }
 
     const settings = await this.settingsService.getSettings()
@@ -577,21 +527,13 @@ export class FlexiClient {
         `/skladova-karta/(${encodeURIComponent(filter)}).json` +
         `?detail=${encodeURIComponent(SKLAD_KARTA_DETAIL)}&limit=0&no-ext-ids=true`
 
-      try {
-        const payload = await this.request<unknown>('GET', path)
-        const rows = this.extractEvidence<Record<string, unknown>>(payload, 'skladova-karta')
-        for (const row of rows) {
-          const kod = this.extractCenikKod(row.cenik ?? row['cenik@ref'])
-          if (!kod) continue
-          const qty = this.parseStockQty(row.dostupMj, row.dostupMJ, row.stavMJ, row.stavMj)
-          result.set(kod, (result.get(kod) ?? 0) + qty)
-        }
-      } catch (error) {
-        this.logger.warn(
-          `skladova-karta stock fetch failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        )
+      const payload = await this.request<unknown>('GET', path)
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'skladova-karta')
+      for (const row of rows) {
+        const kod = this.extractCenikKod(row.cenik ?? row['cenik@ref'])
+        if (!kod) continue
+        const qty = this.parseStockQty(row.dostupMj, row.dostupMJ, row.stavMJ, row.stavMj)
+        result.set(kod, (result.get(kod) ?? 0) + qty)
       }
     }
     return result
@@ -633,7 +575,7 @@ export class FlexiClient {
         }
       }
     }
-    return result
+    return this.overlayWarehouseStockMap(result, 'kod')
   }
 
   async putObjednavkaPrijata(document: Record<string, unknown>): Promise<{

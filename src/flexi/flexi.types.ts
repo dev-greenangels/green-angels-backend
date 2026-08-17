@@ -176,7 +176,7 @@ export type FlexiCenikItem = {
   id: string
   kod: string
   nazev: string
-  /** Available qty — prefer sumDostupMj / skladova-karta.dostupMj */
+  /** Available qty — skladova-karta.dostupMj for defaultStockCode; never cenik.sumDostupMj */
   stock: number
   /**
    * Selling price for SK Flexi deploy: prefer including VAT (cenaZakl / cenaZaklVcDph).

@@ -305,6 +305,8 @@ model VariantAttribute {
   unit                String?
   isFilterable        Boolean              @default(true)
   participatesInLabel Boolean              @default(true)
+  showOnProductPage   Boolean              @default(false)
+  icon                String?
 
   translations VariantAttributeTranslation[]
   values       VariantAttributeValue[]

@@ -76,6 +76,7 @@ export class CategoriesService {
       _count: { products: number }
     },
     slugFallback?: string,
+    emptyIfMissing = false,
   ) {
     const t = category.translations[0]
     return {
@@ -86,7 +87,7 @@ export class CategoriesService {
       isActive: category.isActive,
       isCatalogRoot: category.isCatalogRoot,
       position: category.position,
-      name: t?.name ?? slugFallback ?? category.slug,
+      name: t?.name ?? (emptyIfMissing ? '' : slugFallback ?? category.slug),
       latinName: category.latinName ?? null,
       description: t?.description ?? null,
       footerDescription: t?.footerDescription ?? null,
@@ -98,7 +99,7 @@ export class CategoriesService {
     }
   }
 
-  async findTree(locale?: string): Promise<CategoryTreeNode[]> {
+  async findTree(locale?: string, emptyIfMissing = false): Promise<CategoryTreeNode[]> {
     const loc = this.defaultLocale(locale)
     const rows = await this.prisma.category.findMany({
       include: {
@@ -110,7 +111,7 @@ export class CategoriesService {
 
     const nodes = new Map<string, CategoryTreeNode>()
     for (const row of rows) {
-      const flat = this.toFlatCategory(row)
+      const flat = this.toFlatCategory(row, undefined, emptyIfMissing)
       nodes.set(row.id, { ...flat, children: [] })
     }
 

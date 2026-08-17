@@ -39,6 +39,8 @@ export const ATTRIBUTES_COLUMNS = [
   'sortOrder',
   'isFilterable',
   'participatesInLabel',
+  'showOnProductPage',
+  'icon',
 ] as const
 
 export const ATTRIBUTE_VALUES_COLUMNS = [

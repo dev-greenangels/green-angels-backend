@@ -798,7 +798,7 @@ export class FlexiService {
         for (const link of uniqueLinks) linkedCenikKods.add(link.cenikKod)
       }
 
-      // One batched cenik pull for all SKUs (sumDostupMj + cenaZakl/inc VAT + nomen + hmotMj)
+      // One batched cenik pull for all SKUs (price / CN / weight). Stock overlay is warehouse-only.
       const allSkus = [...linkedCenikKods]
       const cenikBySku =
         allSkus.length > 0

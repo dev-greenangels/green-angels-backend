@@ -34,6 +34,8 @@ export type VariantAttributeNode = {
   unit: string | null
   isFilterable: boolean
   participatesInLabel: boolean
+  showOnProductPage: boolean
+  icon: string | null
   values: VariantAttributeValueNode[]
 }
 
@@ -178,7 +180,7 @@ export class VariantAttributesService {
       packagingKind: PackagingKind | null
       translations: Array<{ label: string }>
     },
-    fallback?: string,
+    fallback?: string | null,
   ): VariantAttributeValueNode {
     return {
       id: row.id,
@@ -207,6 +209,8 @@ export class VariantAttributesService {
       unit: string | null
       isFilterable: boolean
       participatesInLabel: boolean
+      showOnProductPage: boolean
+      icon: string | null
       translations: Array<{ name: string; description: string | null }>
       values: Array<{
         id: string
@@ -224,12 +228,14 @@ export class VariantAttributesService {
         translations: Array<{ label: string }>
       }>
     },
-    slugFallback?: string,
+    slugFallback?: string | null,
+    emptyIfMissing = false,
   ): VariantAttributeNode {
+    const missing = emptyIfMissing ? '' : (slugFallback ?? row.slug)
     return {
       id: row.id,
       slug: row.slug,
-      name: row.translations[0]?.name ?? slugFallback ?? row.slug,
+      name: row.translations[0]?.name ?? missing,
       description: row.translations[0]?.description ?? null,
       legacyId: row.legacyId,
       sortOrder: row.sortOrder,
@@ -237,13 +243,19 @@ export class VariantAttributesService {
       unit: row.unit,
       isFilterable: row.isFilterable,
       participatesInLabel: row.participatesInLabel,
+      showOnProductPage: row.showOnProductPage,
+      icon: row.icon,
       values: row.values
-        .map((v) => this.toValueNode(v))
+        .map((v) => this.toValueNode(v, emptyIfMissing ? '' : undefined))
         .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, 'uk')),
     }
   }
 
-  async findAll(locale?: string, filterableOnly = false): Promise<VariantAttributeNode[]> {
+  async findAll(
+    locale?: string,
+    filterableOnly = false,
+    emptyIfMissing = false,
+  ): Promise<VariantAttributeNode[]> {
     const loc = this.defaultLocale(locale)
     const rows = await this.prisma.variantAttribute.findMany({
       where: filterableOnly ? { isFilterable: true } : undefined,
@@ -257,7 +269,7 @@ export class VariantAttributesService {
       orderBy: [{ sortOrder: 'asc' }, { slug: 'asc' }],
     })
 
-    return rows.map((row) => this.toAttributeNode(row))
+    return rows.map((row) => this.toAttributeNode(row, undefined, emptyIfMissing))
   }
 
   async create(dto: CreateVariantAttributeDto) {
@@ -281,6 +293,8 @@ export class VariantAttributesService {
         unit: dto.unit?.trim() || null,
         isFilterable: dto.isFilterable ?? true,
         participatesInLabel: dto.participatesInLabel ?? true,
+        showOnProductPage: dto.showOnProductPage ?? false,
+        icon: dto.showOnProductPage ? dto.icon?.trim() || null : null,
         translations: {
           create: {
             locale,
@@ -401,6 +415,12 @@ export class VariantAttributesService {
         ...(dto.isFilterable !== undefined ? { isFilterable: dto.isFilterable } : {}),
         ...(dto.participatesInLabel !== undefined
           ? { participatesInLabel: dto.participatesInLabel }
+          : {}),
+        ...(dto.showOnProductPage !== undefined
+          ? { showOnProductPage: dto.showOnProductPage }
+          : {}),
+        ...(dto.icon !== undefined || dto.showOnProductPage === false
+          ? { icon: dto.showOnProductPage === false ? null : dto.icon?.trim() || null }
           : {}),
       }
 
