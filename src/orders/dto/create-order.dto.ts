@@ -8,6 +8,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   Min,
   MinLength,
@@ -168,6 +169,19 @@ export class CreateOrderDto {
   @IsString()
   @MaxLength(20)
   privacyConsentVersion?: string
+
+  @IsOptional()
+  @IsUUID()
+  termsRevisionId?: string
+
+  @IsOptional()
+  @IsUUID()
+  privacyRevisionId?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(8)
+  locale?: string
 
   /** Реферальний код друга з cookie `ga-ref`, який передає shop BFF. */
   @IsOptional()

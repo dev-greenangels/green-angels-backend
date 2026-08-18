@@ -18,8 +18,11 @@ import { UpdateMarketSettingsDto } from './dto/update-market-settings.dto'
 import { UpdateVariantLabelSettingsDto } from './dto/update-variant-label-settings.dto'
 import { UpdateStoreSettingsDto } from './dto/update-store-settings.dto'
 import { UpdatePrestaImportSettingsDto } from './dto/update-presta-import-settings.dto'
+import { UpdateMediaWatermarkSettingsDto } from './dto/update-media-watermark-settings.dto'
+import { UpdateWholesalePageSettingsDto } from './dto/update-wholesale-page-settings.dto'
 import { SettingsService } from './settings.service'
 import type { VariantLabelSettings } from './settings.constants'
+import type { WholesalePageSettings } from './wholesale-page.types'
 import type { NavigationSettings } from './navigation.types'
 import { DispatchCalendarService } from './dispatch-calendar.service'
 import type { DispatchCalendarSettings } from './dispatch-calendar.types'
@@ -90,6 +93,13 @@ export class SettingsController {
     return this.settings.updateHomePage(dto)
   }
 
+  @Patch('wholesale')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  updateWholesale(@Body() dto: UpdateWholesalePageSettingsDto) {
+    return this.settings.updateWholesalePage(dto as Partial<WholesalePageSettings>)
+  }
+
   @Patch('cart-checkout')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)
@@ -144,6 +154,13 @@ export class SettingsController {
   @Roles(Role.ADMIN, Role.MANAGER)
   updatePrestaImport(@Body() dto: UpdatePrestaImportSettingsDto) {
     return this.settings.updatePrestaImport(dto)
+  }
+
+  @Patch('media-watermark')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  updateMediaWatermark(@Body() dto: UpdateMediaWatermarkSettingsDto) {
+    return this.settings.updateMediaWatermark(dto)
   }
 
   @Patch('market')

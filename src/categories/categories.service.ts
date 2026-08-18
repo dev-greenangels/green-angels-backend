@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 
+import { pickLocalizedName, pickTranslationHint } from '../i18n/pick-localized-name'
 import { PrismaService } from '../prisma/prisma.service'
 import { isValidCategoryImagePath } from '../media/upload-paths'
 import { CATEGORY_DEFAULT_IMAGE } from './category.constants'
@@ -28,6 +29,12 @@ export type CategoryTreeNode = {
   metaTitle: string | null
   metaDesc: string | null
   productCount: number
+  fallbackName: string
+  nameHint: { locale: string; text: string } | null
+  descriptionHint: { locale: string; text: string } | null
+  footerDescriptionHint: { locale: string; text: string } | null
+  metaTitleHint: { locale: string; text: string } | null
+  metaDescHint: { locale: string; text: string } | null
   children: CategoryTreeNode[]
 }
 
@@ -67,6 +74,7 @@ export class CategoriesService {
       position: number
       image: string | null
       translations: Array<{
+        locale?: string
         name: string
         description: string | null
         footerDescription: string | null
@@ -75,10 +83,44 @@ export class CategoriesService {
       }>
       _count: { products: number }
     },
-    slugFallback?: string,
+    locale: string,
     emptyIfMissing = false,
   ) {
-    const t = category.translations[0]
+    const t = category.translations.find((row) => row.locale === locale)
+    const fallbackName = pickLocalizedName(category.translations, locale, category.slug)
+    const hints = emptyIfMissing
+      ? {
+          nameHint: pickTranslationHint(
+            category.translations.map((row) => ({ locale: row.locale, value: row.name })),
+            locale,
+          ),
+          descriptionHint: pickTranslationHint(
+            category.translations.map((row) => ({ locale: row.locale, value: row.description })),
+            locale,
+          ),
+          footerDescriptionHint: pickTranslationHint(
+            category.translations.map((row) => ({
+              locale: row.locale,
+              value: row.footerDescription,
+            })),
+            locale,
+          ),
+          metaTitleHint: pickTranslationHint(
+            category.translations.map((row) => ({ locale: row.locale, value: row.metaTitle })),
+            locale,
+          ),
+          metaDescHint: pickTranslationHint(
+            category.translations.map((row) => ({ locale: row.locale, value: row.metaDesc })),
+            locale,
+          ),
+        }
+      : {
+          nameHint: null,
+          descriptionHint: null,
+          footerDescriptionHint: null,
+          metaTitleHint: null,
+          metaDescHint: null,
+        }
     return {
       id: category.id,
       slug: category.slug,
@@ -87,7 +129,9 @@ export class CategoriesService {
       isActive: category.isActive,
       isCatalogRoot: category.isCatalogRoot,
       position: category.position,
-      name: t?.name ?? (emptyIfMissing ? '' : slugFallback ?? category.slug),
+      name: emptyIfMissing ? (t?.name ?? '') : fallbackName,
+      fallbackName,
+      ...hints,
       latinName: category.latinName ?? null,
       description: t?.description ?? null,
       footerDescription: t?.footerDescription ?? null,
@@ -103,7 +147,7 @@ export class CategoriesService {
     const loc = this.defaultLocale(locale)
     const rows = await this.prisma.category.findMany({
       include: {
-        translations: { where: { locale: loc } },
+        translations: true,
         _count: { select: { products: true, children: true } },
       },
       orderBy: [{ parentId: 'asc' }, { position: 'asc' }, { slug: 'asc' }],
@@ -111,7 +155,7 @@ export class CategoriesService {
 
     const nodes = new Map<string, CategoryTreeNode>()
     for (const row of rows) {
-      const flat = this.toFlatCategory(row, undefined, emptyIfMissing)
+      const flat = this.toFlatCategory(row, loc, emptyIfMissing)
       nodes.set(row.id, { ...flat, children: [] })
     }
 
@@ -125,7 +169,11 @@ export class CategoriesService {
     }
 
     const sortNodes = (list: CategoryTreeNode[]) => {
-      list.sort((a, b) => a.position - b.position || a.name.localeCompare(b.name, 'uk'))
+      list.sort(
+        (a, b) =>
+          a.position - b.position ||
+          (a.name || a.fallbackName).localeCompare(b.name || b.fallbackName, 'uk'),
+      )
       list.forEach((n) => sortNodes(n.children))
     }
     sortNodes(roots)
@@ -221,12 +269,12 @@ export class CategoriesService {
         },
       },
       include: {
-        translations: { where: { locale } },
+        translations: true,
         _count: { select: { products: true } },
       },
     })
 
-    return this.toFlatCategory(category, category.slug)
+    return this.toFlatCategory(category, locale)
   }
 
   async update(id: string, dto: UpdateCategoryDto) {
@@ -333,12 +381,12 @@ export class CategoriesService {
     const refreshed = await this.prisma.category.findUnique({
       where: { id: category.id },
       include: {
-        translations: { where: { locale } },
+        translations: true,
         _count: { select: { products: true } },
       },
     })
 
-    return this.toFlatCategory(refreshed!, refreshed!.slug)
+    return this.toFlatCategory(refreshed!, locale)
   }
 
   async remove(id: string) {

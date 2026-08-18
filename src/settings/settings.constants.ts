@@ -21,6 +21,8 @@ export const SETTINGS_KEYS = {
   PRESTA_IMPORT: 'feature.prestaImport',
   COMMERCE_MARKET: 'commerce.market',
   DISPATCH_CALENDAR: 'commerce.dispatchCalendar',
+  MEDIA_WATERMARK: 'media.watermark',
+  WHOLESALE_PAGE: 'page.wholesale',
 } as const
 
 export type {

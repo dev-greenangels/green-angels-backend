@@ -1,0 +1,19 @@
+-- Neutralize baseline fake UA seed only (Vyshhorod / Nova Poshta / «по всій Україні»).
+-- Does not touch operator-filled store/home JSON without those markers.
+-- Baseline SQL is not edited.
+
+UPDATE "Settings"
+SET value = $store${"addressLine1":"","addressLine2":"","mapsUrl":"","contactBlocks":[],"phones":[],"emails":[],"schedules":[],"footer":{"showAddress":false,"showPhone":false,"showEmail":false,"showViber":false,"showTelegram":false,"showWhatsApp":false,"showLink":false,"showSchedules":false,"showCompanyDetails":false},"social":{"instagram":{"show":false,"url":""},"facebook":{"show":false,"url":""},"youtube":{"show":false,"url":""},"viberCommunity":{"show":false,"url":""},"telegramCommunity":{"show":false,"url":""}},"companyDetails":{"organizationName":"","edrpou":"","iban":"","bankName":"","mfo":"","legalAddress":"","taxStatus":"","bic":"","dic":"","icDph":""},"showCompanyOnContacts":false}$store$
+WHERE key = 'store.contact'
+  AND value LIKE '%Вишгород%'
+  AND value LIKE '%Садова%'
+  AND value LIKE '%123-45-67%';
+
+UPDATE "Settings"
+SET value = $home${"sectionOrder":["categories","newArrivals","bestsellers","lowStock","whyUs","nurseryGallery","freshPlantPhotos","reviews","recentlyViewed"],"sectionHidden":[],"hero":{"badge":"Виробник рослин","title":"Розсадник «Зелені Янголи»","titleAccent":"для професіоналів і садівників","subtitle":"Власне виробництво хвойних, листяних і декоративних рослин.","primaryCtaLabel":"Перейти до каталогу","primaryCtaHref":"/catalog","secondaryCtaLabel":"Хіти продажів","secondaryCtaHref":"/#bestsellers","imageUrl":"/images/hero-plants.jpg","highlights":[{"title":"Власне виробництво","description":"Вирощуємо на розсаднику, не перепродаємо"},{"title":"Якість і сортність","description":"Стабільний посадковий матеріал"},{"title":"Доставка","description":"Надійне пакування та відправлення"}]},"categories":{"title":"Каталог","subtitle":"Оберіть напрямок і замовляйте напряму з розсадника","limit":8,"categorySlugs":[]},"newArrivals":{"title":"Новинки","subtitle":"Свіжі надходження з розсадника","limit":6,"productSlugs":[]},"bestsellers":{"title":"Популярний вибір","subtitle":"Найпопулярніші позиції, які обирають наші клієнти знову і знову","limit":6,"productSlugs":[]},"lowStock":{"title":"Закінчується","subtitle":"Позиції, які швидко розкуповують — встигніть замовити, поки є на складі","limit":6,"productSlugs":[],"stockThreshold":15},"whyUs":{"title":"Чому обирають Зелені Янголи","subtitle":"Ми — виробник посадкового матеріалу з багаторічною репутацією. Нам довіряють садівні центри, ландшафтні компанії та приватні клієнти.","features":["Власні поля, теплиці та склади","Стабільна якість і сортність","Великий асортимент у наявності","Оптові та роздрібні ціни","Доставка","Відома торгова марка на ринку"],"stats":[{"value":"15+","label":"років на ринку"},{"value":"500+","label":"позицій у каталозі"},{"value":"5000+","label":"клієнтів"},{"value":"100%","label":"власне виробництво"}]},"nurseryGallery":{"title":"Наш розсадник","subtitle":"Поля, теплиці, вирощування та пакування — усе під нашим контролем","images":[{"url":"/images/nursery/field.jpg","caption":"Поля розсадника"},{"url":"/images/nursery/greenhouse.jpg","caption":"Теплиці вирощування"},{"url":"/images/nursery/warehouse.jpg","caption":"Склад з горщиками"},{"url":"/images/nursery/packing.jpg","caption":"Пакування для відправлення"}]},"freshPlantPhotos":{"enabled":true,"title":"Актуальні фото рослин","subtitle":"Свіжі знімки з розсадника — подивіться, що зараз у наявності","limit":12},"reviews":{"enabled":true,"title":"Відгуки клієнтів","subtitle":"Нам довіряють професіонали та садівники","limit":8,"sort":"newest"}}$home$
+WHERE key = 'page.home'
+  AND (
+    value LIKE '%по всій Україні%'
+    OR value LIKE '%Доставка Нова Пошта%'
+    OR value LIKE '%гуртом по Україні%'
+  );

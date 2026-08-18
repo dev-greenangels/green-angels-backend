@@ -37,6 +37,7 @@ import { buildOrderConfirmationPdf } from '../mail/order-confirmation-pdf'
 import { FlexiQueueService } from '../flexi/flexi.queue.service'
 import { FlexiService } from '../flexi/flexi.service'
 import { FlexiSettingsService } from '../flexi/flexi.settings.service'
+import { LegalService } from '../legal/legal.service'
 import { OrderConfirmationTokenService } from './order-confirmation-token.service'
 import { OrderIdempotencyService } from './order-idempotency.service'
 import { classifyFlexiError, isFlexiTransportError } from './erp-sync.errors'
@@ -206,6 +207,7 @@ export class OrdersService {
     private readonly vies: ViesService,
     private readonly confirmationTokens: OrderConfirmationTokenService,
     private readonly orderIdempotency: OrderIdempotencyService,
+    private readonly legal: LegalService,
   ) {}
 
   private statusLabelCache: Map<string, string> | null = null
@@ -1625,6 +1627,23 @@ export class OrdersService {
 
       return created
     })
+
+    void this.legal
+      .recordCheckoutConsents({
+        orderId: order.id,
+        userId,
+        locale: dto.locale?.trim() || (marketSettings.region === 'sk' ? 'sk' : 'uk'),
+        privacyConsent: hasPrivacyConsent,
+        termsRevisionId: dto.termsRevisionId,
+        privacyRevisionId: dto.privacyRevisionId,
+      })
+      .catch((error) => {
+        this.logger.warn(
+          `Legal consent log failed for ${order.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+      })
 
     const formattedOrderNumber = this.formatOrderNumber(order.orderNumber)
     const confirmationToken = this.confirmationTokens.sign(formattedOrderNumber)

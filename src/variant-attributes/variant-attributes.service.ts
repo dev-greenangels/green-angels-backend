@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { PackagingKind, Prisma, VariantAttributeType } from '@prisma/client'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { pickTranslationHint } from '../i18n/pick-localized-name'
 import { resolvePackagingKind } from './packaging-kind.util'
 import { AddVariantAttributeValuesDto } from './dto/add-variant-attribute-values.dto'
 import { CreateVariantAttributeDto, CreateVariantAttributeValueDto } from './dto/create-variant-attribute.dto'
@@ -11,6 +12,7 @@ export type VariantAttributeValueNode = {
   id: string
   slug: string
   label: string
+  labelHint?: { locale: string; text: string } | null
   legacyId: string | null
   sortOrder: number
   numericMin: number | null
@@ -27,7 +29,9 @@ export type VariantAttributeNode = {
   id: string
   slug: string
   name: string
+  nameHint?: { locale: string; text: string } | null
   description: string | null
+  descriptionHint?: { locale: string; text: string } | null
   legacyId: string | null
   sortOrder: number
   valueType: VariantAttributeType
@@ -178,14 +182,22 @@ export class VariantAttributesService {
       tareWeightKg: Prisma.Decimal | null
       colorHex: string | null
       packagingKind: PackagingKind | null
-      translations: Array<{ label: string }>
+      translations: Array<{ locale?: string; label: string }>
     },
-    fallback?: string | null,
+    locale: string,
+    emptyIfMissing = false,
   ): VariantAttributeValueNode {
+    const t = row.translations.find((item) => item.locale === locale)
     return {
       id: row.id,
       slug: row.slug,
-      label: row.translations[0]?.label ?? fallback ?? row.slug,
+      label: t?.label ?? (emptyIfMissing ? '' : row.translations[0]?.label ?? row.slug),
+      labelHint: emptyIfMissing
+        ? pickTranslationHint(
+            row.translations.map((item) => ({ locale: item.locale, value: item.label })),
+            locale,
+          )
+        : null,
       legacyId: row.legacyId,
       sortOrder: row.sortOrder,
       numericMin: this.toNumber(row.numericMin),
@@ -211,7 +223,7 @@ export class VariantAttributesService {
       participatesInLabel: boolean
       showOnProductPage: boolean
       icon: string | null
-      translations: Array<{ name: string; description: string | null }>
+      translations: Array<{ locale?: string; name: string; description: string | null }>
       values: Array<{
         id: string
         slug: string
@@ -225,18 +237,32 @@ export class VariantAttributesService {
         tareWeightKg: Prisma.Decimal | null
         colorHex: string | null
         packagingKind: PackagingKind | null
-        translations: Array<{ label: string }>
+        translations: Array<{ locale?: string; label: string }>
       }>
     },
+    locale: string,
     slugFallback?: string | null,
     emptyIfMissing = false,
   ): VariantAttributeNode {
+    const t = row.translations.find((item) => item.locale === locale)
     const missing = emptyIfMissing ? '' : (slugFallback ?? row.slug)
     return {
       id: row.id,
       slug: row.slug,
-      name: row.translations[0]?.name ?? missing,
-      description: row.translations[0]?.description ?? null,
+      name: t?.name ?? missing,
+      nameHint: emptyIfMissing
+        ? pickTranslationHint(
+            row.translations.map((item) => ({ locale: item.locale, value: item.name })),
+            locale,
+          )
+        : null,
+      description: t?.description ?? null,
+      descriptionHint: emptyIfMissing
+        ? pickTranslationHint(
+            row.translations.map((item) => ({ locale: item.locale, value: item.description })),
+            locale,
+          )
+        : null,
       legacyId: row.legacyId,
       sortOrder: row.sortOrder,
       valueType: row.valueType,
@@ -246,7 +272,7 @@ export class VariantAttributesService {
       showOnProductPage: row.showOnProductPage,
       icon: row.icon,
       values: row.values
-        .map((v) => this.toValueNode(v, emptyIfMissing ? '' : undefined))
+        .map((v) => this.toValueNode(v, locale, emptyIfMissing))
         .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, 'uk')),
     }
   }
@@ -260,16 +286,16 @@ export class VariantAttributesService {
     const rows = await this.prisma.variantAttribute.findMany({
       where: filterableOnly ? { isFilterable: true } : undefined,
       include: {
-        translations: { where: { locale: loc } },
+        translations: emptyIfMissing ? true : { where: { locale: loc } },
         values: {
-          include: { translations: { where: { locale: loc } } },
+          include: { translations: emptyIfMissing ? true : { where: { locale: loc } } },
           orderBy: [{ sortOrder: 'asc' }, { slug: 'asc' }],
         },
       },
       orderBy: [{ sortOrder: 'asc' }, { slug: 'asc' }],
     })
 
-    return rows.map((row) => this.toAttributeNode(row, undefined, emptyIfMissing))
+    return rows.map((row) => this.toAttributeNode(row, loc, undefined, emptyIfMissing))
   }
 
   async create(dto: CreateVariantAttributeDto) {
@@ -325,7 +351,7 @@ export class VariantAttributesService {
       },
     })
 
-    return this.toAttributeNode(attribute, attribute.slug)
+    return this.toAttributeNode(attribute, locale, attribute.slug, true)
   }
 
   async addValues(attributeId: string, dto: AddVariantAttributeValuesDto) {
@@ -380,7 +406,7 @@ export class VariantAttributesService {
       },
     })
 
-    return this.toAttributeNode(refreshed!, refreshed!.slug)
+    return this.toAttributeNode(refreshed!, locale, refreshed!.slug, true)
   }
 
   async update(attributeId: string, dto: UpdateVariantAttributeDto) {
@@ -501,17 +527,22 @@ export class VariantAttributesService {
             })
 
             const valueTranslation = row.translations[0]
-            if (valueTranslation) {
-              await tx.variantAttributeValueTranslation.update({
-                where: { id: valueTranslation.id },
-                data: { label },
-              })
-            } else {
-              await tx.variantAttributeValueTranslation.create({
-                data: { valueId: entry.id, locale, label },
-              })
+            if (label) {
+              if (valueTranslation) {
+                await tx.variantAttributeValueTranslation.update({
+                  where: { id: valueTranslation.id },
+                  data: { label },
+                })
+              } else {
+                await tx.variantAttributeValueTranslation.create({
+                  data: { valueId: entry.id, locale, label },
+                })
+              }
             }
           } else {
+            if (!label) {
+              throw new BadRequestException('Назва значення не може бути порожньою.')
+            }
             const valueSlug = this.resolveValueSlugForCreate(label, usedSlugs)
             usedSlugs.add(valueSlug)
 
@@ -550,7 +581,7 @@ export class VariantAttributesService {
       },
     })
 
-    return this.toAttributeNode(refreshed!, refreshed!.slug)
+    return this.toAttributeNode(refreshed!, locale, refreshed!.slug, true)
   }
 
   async remove(attributeId: string) {

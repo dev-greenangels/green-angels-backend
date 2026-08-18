@@ -6,20 +6,26 @@ import { toVariantDisplayAttributes, type VariantDisplayAttributeLink } from './
 function link(overrides: Partial<{
   showOnProductPage: boolean
   label: string
+  locale: string
+  extraTranslations: Array<{ locale: string; label: string }>
   name: string
   icon: string | null
   id: string
 }> = {}): VariantDisplayAttributeLink {
   return {
     value: {
-      translations: [{ label: overrides.label ?? 'C5' }],
+      slug: 'c5',
+      translations: [
+        { locale: overrides.locale ?? 'uk', label: overrides.label ?? 'C5' },
+        ...(overrides.extraTranslations ?? []),
+      ],
       attribute: {
         id: overrides.id ?? 'attr-size',
         slug: 'size',
         sortOrder: 1,
         showOnProductPage: overrides.showOnProductPage ?? true,
-        icon: overrides.icon ?? 'Ruler',
-        translations: [{ name: overrides.name ?? 'Розмір' }],
+        icon: overrides.icon ?? 'Container',
+        translations: [{ locale: 'uk', name: overrides.name ?? 'Контейнер' }],
         valueType: 'CONTAINER',
       },
     },
@@ -28,34 +34,21 @@ function link(overrides: Partial<{
 
 describe('toVariantDisplayAttributes', () => {
   it('omits rows when showOnProductPage is false', () => {
-    const items = toVariantDisplayAttributes([link({ showOnProductPage: false })])
+    const items = toVariantDisplayAttributes([link({ showOnProductPage: false })], 'uk')
     assert.deepEqual(items, [])
   })
 
   it('maps value + icon for the selected variant attribute', () => {
-    const items = toVariantDisplayAttributes([link({ label: 'C7', icon: 'Leaf' })])
+    const items = toVariantDisplayAttributes([link({ label: 'C7', icon: 'Container' })], 'uk')
     assert.equal(items.length, 1)
     assert.equal(items[0]?.displayValue, 'C7')
-    assert.equal(items[0]?.icon, 'Leaf')
-    assert.equal(items[0]?.name, 'Розмір')
+    assert.equal(items[0]?.icon, 'Container')
+    assert.equal(items[0]?.name, 'Контейнер')
   })
 
-  it('skips SKUs with no label translation rather than falling back', () => {
-    const items = toVariantDisplayAttributes([
-      {
-        value: {
-          translations: [],
-          attribute: {
-            id: 'attr-size',
-            slug: 'size',
-            sortOrder: 1,
-            showOnProductPage: true,
-            icon: 'Ruler',
-            translations: [{ name: 'Розмір' }],
-          },
-        },
-      },
-    ])
-    assert.deepEqual(items, [])
+  it('on SK storefront falls back to the existing UK size code, not hide the row', () => {
+    const items = toVariantDisplayAttributes([link({ locale: 'uk', label: 'C2' })], 'sk')
+    assert.equal(items.length, 1)
+    assert.equal(items[0]?.displayValue, 'C2')
   })
 })

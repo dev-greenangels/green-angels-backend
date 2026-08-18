@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { CharacteristicValueType, Prisma } from '@prisma/client'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { pickTranslationHint } from '../i18n/pick-localized-name'
 import { VARIANT_LABEL_ATTRIBUTE_SELECT } from '../products/variant-label.util'
 import { VariantLabelService } from '../products/variant-label.service'
 import { BulkUpdateBulkMatrixDto } from './dto/bulk-update-bulk-matrix.dto'
@@ -13,6 +14,7 @@ export type CharacteristicOptionNode = {
   id: string
   slug: string
   label: string
+  labelHint?: { locale: string; text: string } | null
   sortOrder: number
 }
 
@@ -20,6 +22,7 @@ export type CharacteristicNode = {
   id: string
   slug: string
   name: string
+  nameHint?: { locale: string; text: string } | null
   valueType: CharacteristicValueType
   unit: string | null
   isFilterable: boolean
@@ -119,14 +122,22 @@ export class CharacteristicsService {
       id: string
       slug: string
       sortOrder: number
-      translations: Array<{ label: string }>
+      translations: Array<{ locale?: string; label: string }>
     },
-    fallback?: string | null,
+    locale: string,
+    emptyIfMissing = false,
   ): CharacteristicOptionNode {
+    const t = row.translations.find((item) => item.locale === locale)
     return {
       id: row.id,
       slug: row.slug,
-      label: row.translations[0]?.label ?? fallback ?? row.slug,
+      label: t?.label ?? (emptyIfMissing ? '' : row.translations[0]?.label ?? row.slug),
+      labelHint: emptyIfMissing
+        ? pickTranslationHint(
+            row.translations.map((item) => ({ locale: item.locale, value: item.label })),
+            locale,
+          )
+        : null,
       sortOrder: row.sortOrder,
     }
   }
@@ -141,22 +152,30 @@ export class CharacteristicsService {
       showOnProductPage: boolean
       icon: string | null
       sortOrder: number
-      translations: Array<{ name: string }>
+      translations: Array<{ locale?: string; name: string }>
       options: Array<{
         id: string
         slug: string
         sortOrder: number
-        translations: Array<{ label: string }>
+        translations: Array<{ locale?: string; label: string }>
       }>
     },
+    locale: string,
     slugFallback?: string | null,
     emptyIfMissing = false,
   ): CharacteristicNode {
+    const t = row.translations.find((item) => item.locale === locale)
     const missing = emptyIfMissing ? '' : (slugFallback ?? row.slug)
     return {
       id: row.id,
       slug: row.slug,
-      name: row.translations[0]?.name ?? missing,
+      name: t?.name ?? missing,
+      nameHint: emptyIfMissing
+        ? pickTranslationHint(
+            row.translations.map((item) => ({ locale: item.locale, value: item.name })),
+            locale,
+          )
+        : null,
       valueType: row.valueType,
       unit: row.unit,
       isFilterable: row.isFilterable,
@@ -164,7 +183,7 @@ export class CharacteristicsService {
       icon: row.icon,
       sortOrder: row.sortOrder,
       options: row.options
-        .map((option) => this.toOptionNode(option, emptyIfMissing ? '' : undefined))
+        .map((option) => this.toOptionNode(option, locale, emptyIfMissing))
         .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, 'uk')),
     }
   }
@@ -187,12 +206,21 @@ export class CharacteristicsService {
     const loc = this.defaultLocale(locale)
     const rows = await this.prisma.characteristic.findMany({
       where: filterableOnly ? { isFilterable: true } : undefined,
-      include: this.includeForLocale(loc),
+      include: emptyIfMissing
+        ? {
+            translations: true,
+            options: {
+              include: { translations: true },
+              orderBy: [{ sortOrder: 'asc' }, { slug: 'asc' }],
+            },
+          }
+        : this.includeForLocale(loc),
       orderBy: [{ sortOrder: 'asc' }, { slug: 'asc' }],
     })
     return rows.map((row) =>
       this.toCharacteristicNode(
         row as unknown as Parameters<typeof this.toCharacteristicNode>[0],
+        loc,
         undefined,
         emptyIfMissing,
       ),
@@ -708,6 +736,7 @@ export class CharacteristicsService {
     return {
       characteristic: this.toCharacteristicNode(
         characteristic as unknown as Parameters<typeof this.toCharacteristicNode>[0],
+        loc,
       ),
       rows,
     }
@@ -783,6 +812,7 @@ export class CharacteristicsService {
 
     return this.toCharacteristicNode(
       characteristic as unknown as Parameters<typeof this.toCharacteristicNode>[0],
+      locale,
       characteristic.slug,
     )
   }
@@ -913,6 +943,7 @@ export class CharacteristicsService {
 
     return this.toCharacteristicNode(
       refreshed! as unknown as Parameters<typeof this.toCharacteristicNode>[0],
+      locale,
       refreshed!.slug,
     )
   }

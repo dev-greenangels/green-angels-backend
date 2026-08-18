@@ -41,6 +41,13 @@ import {
   normalizePrestaImportSettings,
   type PrestaImportSettings,
 } from './presta-import.types'
+import {
+  DEFAULT_MEDIA_WATERMARK_SETTINGS,
+  normalizeMediaWatermarkSettings,
+  type MediaWatermarkSettings,
+} from './media-watermark.types'
+import { normalizeWholesalePageSettings } from './wholesale-page.normalize'
+import type { WholesalePageSettings } from './wholesale-page.types'
 
 export type PublicSiteSettings = {
   store: StoreContactSettings
@@ -51,11 +58,13 @@ export type PublicSiteSettings = {
   localization: LocalizationSettings
   navigation: NavigationSettings
   market: MarketSettings
+  wholesale: WholesalePageSettings
   dispatchCalendar: { enabled: boolean }
 }
 
 export type BackstageSiteSettings = PublicSiteSettings & {
   prestaImport: PrestaImportSettings
+  mediaWatermark: MediaWatermarkSettings
 }
 @Injectable()
 export class SettingsService {
@@ -185,6 +194,15 @@ export class SettingsService {
     return (await this.getInventoryAuthorityMode()) === 'external'
   }
 
+  async getWholesalePageSettings(): Promise<WholesalePageSettings> {
+    const market = await this.getMarketSettings()
+    const raw = await this.readSetting(
+      SETTINGS_KEYS.WHOLESALE_PAGE,
+      {} as WholesalePageSettings,
+    )
+    return normalizeWholesalePageSettings(raw, market.region)
+  }
+
   async getPublicSettings(): Promise<PublicSiteSettings> {
     const [store, home, cart, catalog, recentlyViewed, localization, navigation, market, dispatch] =
       await Promise.all([
@@ -198,6 +216,10 @@ export class SettingsService {
         this.getMarketSettings(),
         this.dispatchCalendar.getSettings(),
       ])
+    const wholesaleRaw = await this.readSetting(
+      SETTINGS_KEYS.WHOLESALE_PAGE,
+      {} as WholesalePageSettings,
+    )
     return {
       store,
       home,
@@ -207,16 +229,34 @@ export class SettingsService {
       localization,
       navigation,
       market,
+      wholesale: normalizeWholesalePageSettings(wholesaleRaw, market.region),
       dispatchCalendar: { enabled: dispatch.enabled },
     }
   }
 
   async getBackstageSettings(): Promise<BackstageSiteSettings> {
-    const [publicSettings, prestaImport] = await Promise.all([
+    const [publicSettings, prestaImport, mediaWatermark] = await Promise.all([
       this.getPublicSettings(),
       this.getPrestaImportSettings(),
+      this.getMediaWatermarkSettings(),
     ])
-    return { ...publicSettings, prestaImport }
+    return { ...publicSettings, prestaImport, mediaWatermark }
+  }
+
+  async getMediaWatermarkSettings(): Promise<MediaWatermarkSettings> {
+    const raw = await this.readSetting(
+      SETTINGS_KEYS.MEDIA_WATERMARK,
+      DEFAULT_MEDIA_WATERMARK_SETTINGS,
+    )
+    return normalizeMediaWatermarkSettings(raw)
+  }
+
+  async updateMediaWatermark(
+    patch: Partial<MediaWatermarkSettings>,
+  ): Promise<MediaWatermarkSettings> {
+    const current = await this.getMediaWatermarkSettings()
+    const next = normalizeMediaWatermarkSettings({ ...current, ...patch })
+    return this.writeSetting(SETTINGS_KEYS.MEDIA_WATERMARK, next)
   }
 
   async getPrestaImportSettings(): Promise<PrestaImportSettings> {
@@ -282,6 +322,13 @@ export class SettingsService {
       patch as unknown as Record<string, unknown>,
     ) as HomePageSettings
     return this.writeSetting(SETTINGS_KEYS.HOME_PAGE, next)
+  }
+
+  async updateWholesalePage(patch: Partial<WholesalePageSettings>): Promise<WholesalePageSettings> {
+    const market = await this.getMarketSettings()
+    const current = await this.getWholesalePageSettings()
+    const next = normalizeWholesalePageSettings({ ...current, ...patch }, market.region)
+    return this.writeSetting(SETTINGS_KEYS.WHOLESALE_PAGE, next)
   }
 
   async updateCartCheckout(patch: Partial<CartCheckoutSettings>): Promise<CartCheckoutSettings> {

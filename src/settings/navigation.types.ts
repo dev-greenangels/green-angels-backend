@@ -101,6 +101,14 @@ export const DEFAULT_NAVIGATION_ITEMS: NavigationMenuItem[] = [
     sortOrder: 60,
   },
   {
+    id: 'wholesale',
+    labelKey: 'wholesale',
+    href: '/wholesale',
+    icon: 'Warehouse',
+    visible: true,
+    sortOrder: 65,
+  },
+  {
     id: 'about',
     labelKey: 'about',
     href: '/about',

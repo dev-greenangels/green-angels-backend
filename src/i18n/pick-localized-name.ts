@@ -1,4 +1,14 @@
-/** Catalog copy picker: never silently substitute Ukrainian on SK/EU locales. */
+/** Storefront display: requested → en → first filled translation → slug. Never pretend SK has its own row. */
+
+function firstFilledName(
+  translations: Array<{ locale?: string; name?: string | null }>,
+): string | undefined {
+  for (const row of translations) {
+    const name = row.name?.trim()
+    if (name) return name
+  }
+  return undefined
+}
 
 export function pickLocalizedName(
   translations: Array<{ locale?: string; name?: string | null }>,
@@ -11,7 +21,7 @@ export function pickLocalizedName(
   if (locale === 'uk') {
     return (
       translations.find((row) => row.locale === 'uk')?.name?.trim() ||
-      translations[0]?.name?.trim() ||
+      firstFilledName(translations) ||
       slugFallback
     )
   }
@@ -19,7 +29,7 @@ export function pickLocalizedName(
   const english = translations.find((row) => row.locale === 'en')?.name?.trim()
   if (english) return english
 
-  return slugFallback
+  return firstFilledName(translations) || slugFallback
 }
 
 export function pickLocalizedText(
@@ -37,4 +47,28 @@ export function pickLocalizedText(
   }
   const english = translations.find((row) => row.locale === 'en')?.value?.trim()
   return english || null
+}
+
+export type TranslationHint = {
+  locale: string
+  text: string
+}
+
+/** Editor hint: prefer Ukrainian, else the first filled locale that is not the one being edited. */
+export function pickTranslationHint(
+  translations: Array<{ locale?: string; value?: string | null }>,
+  currentLocale: string,
+): TranslationHint | null {
+  const current = currentLocale.trim().toLowerCase()
+  const filled = translations
+    .map((row) => ({
+      locale: (row.locale ?? '').trim().toLowerCase(),
+      text: row.value?.trim() ?? '',
+    }))
+    .filter((row) => row.locale && row.text)
+
+  const uk = filled.find((row) => row.locale === 'uk')
+  if (uk && uk.locale !== current) return uk
+
+  return filled.find((row) => row.locale !== current) ?? null
 }

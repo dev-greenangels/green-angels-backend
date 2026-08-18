@@ -48,6 +48,7 @@ RUN npm ci --omit=dev --ignore-scripts \
     && apk del python3 make g++
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/assets ./assets
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
 

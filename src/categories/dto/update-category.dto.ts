@@ -14,7 +14,6 @@ import {
 export class UpdateCategoryDto {
   @IsOptional()
   @IsString()
-  @MinLength(1)
   @MaxLength(120)
   name?: string
 

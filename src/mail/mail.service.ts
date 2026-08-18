@@ -115,4 +115,54 @@ export class MailService {
       ],
     })
   }
+
+  async sendWholesaleInquiryEmail(input: {
+    to: string | null
+    region: 'ua' | 'sk'
+    inquiry: {
+      fullName: string
+      companyName: string
+      phone: string
+      email: string
+      city: string
+      website: string | null
+      message: string | null
+      companyIco: string | null
+      companyVatId: string | null
+      locale: string
+    }
+  }): Promise<void> {
+    const to = input.to?.trim() || this.getFromAddress()
+    if (!this.isConfigured()) {
+      this.logger.warn(`SMTP не налаштовано — гуртова заявка від ${input.inquiry.email} не надіслана`)
+      return
+    }
+
+    const isSk = input.region === 'sk'
+    const subject = isSk
+      ? `Veľkoobchodný dopyt: ${input.inquiry.companyName}`
+      : `Гуртова заявка: ${input.inquiry.companyName}`
+    const lines = [
+      `${isSk ? 'Meno' : 'ПІБ'}: ${input.inquiry.fullName}`,
+      `${isSk ? 'Firma' : 'Компанія / магазин'}: ${input.inquiry.companyName}`,
+      `Email: ${input.inquiry.email}`,
+      `${isSk ? 'Telefón' : 'Телефон'}: ${input.inquiry.phone}`,
+      `${isSk ? 'Mesto' : 'Місто'}: ${input.inquiry.city}`,
+      input.inquiry.website ? `URL: ${input.inquiry.website}` : null,
+      input.inquiry.companyIco ? `IČO: ${input.inquiry.companyIco}` : null,
+      input.inquiry.companyVatId ? `IČ DPH: ${input.inquiry.companyVatId}` : null,
+      `Locale: ${input.inquiry.locale}`,
+      input.inquiry.message
+        ? `${isSk ? 'Správa' : 'Повідомлення'}:\n${input.inquiry.message}`
+        : null,
+    ].filter(Boolean)
+
+    await this.getTransporter().sendMail({
+      from: this.getFromAddress(),
+      to,
+      replyTo: input.inquiry.email,
+      subject,
+      text: lines.join('\n'),
+    })
+  }
 }

@@ -2,14 +2,11 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import { PhotoIdentifierType } from '@prisma/client'
 import { randomUUID } from 'crypto'
 
-import {
-  encodeFreshPhotoMain,
-  encodeFreshPhotoThumb,
-} from '../media/media-image.process'
+import { processProductImage } from '../media/media-image.process'
+import { MediaWatermarkService } from '../media/media-watermark.service'
 import { SettingsService } from '../settings/settings.service'
 import { PhotoIndexService } from './photo-index.service'
 import { PhotoStorageService } from './photo-storage.service'
-import { WatermarkService } from './watermark.service'
 import { ViberPhotosService } from '../viber-photos/viber-photos.service'
 import type { PhotoUploadBodyDto } from './dto/photo-upload-body.dto'
 import type { EanCacheItem } from './dto/list-photos-by-barcode-body.dto'
@@ -44,7 +41,7 @@ export class PhotosService {
   constructor(
     private readonly storage: PhotoStorageService,
     private readonly photoIndex: PhotoIndexService,
-    private readonly watermark: WatermarkService,
+    private readonly watermark: MediaWatermarkService,
     private readonly viber: ViberPhotosService,
     private readonly settings: SettingsService,
   ) {}
@@ -77,9 +74,8 @@ export class PhotosService {
     let saved: { fileId: string; relativePath: string; fileSizeBytes: number } | null = null
     try {
       if (params.watermark) {
-        const mainResized = await encodeFreshPhotoMain(params.buffer)
-        const main = await this.watermark.addWatermark(mainResized, 'image/webp')
-        const thumb = await encodeFreshPhotoThumb(main)
+        const source = await this.watermark.applyToNewUpload(params.buffer, 'freshPhoto')
+        const { main, thumb } = await processProductImage(source)
         saved = await this.storage.saveVariantPair({ fileId, main, thumb })
       } else {
         saved = await this.storage.processAndSaveVariants({

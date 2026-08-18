@@ -1,0 +1,68 @@
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common'
+import { Role } from '@prisma/client'
+import type { Request } from 'express'
+
+import type { SessionJwtPayload } from '../auth/auth.constants'
+import { Roles } from '../auth/decorators/roles.decorator'
+import { RolesGuard } from '../auth/guards/roles.guard'
+import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
+import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard'
+import { CreateLegalRevisionDto, UpdateLegalRevisionDto } from './dto/create-revision.dto'
+import { LegalLocaleQueryDto } from './dto/legal-query.dto'
+import { RecordConsentDto } from './dto/record-consent.dto'
+import { LegalService } from './legal.service'
+
+@Controller('legal')
+export class LegalController {
+  constructor(private readonly legal: LegalService) {}
+
+  @Get('current')
+  getCurrent(@Query() query: LegalLocaleQueryDto) {
+    return this.legal.getCurrent(query.locale)
+  }
+
+  @Get('admin')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  listAdmin(@Query() query: LegalLocaleQueryDto) {
+    return this.legal.listAdmin(query.locale)
+  }
+
+  @Post('admin/revisions')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  createDraft(
+    @Body() dto: CreateLegalRevisionDto,
+    @Req() req: Request & { user?: SessionJwtPayload },
+  ) {
+    return this.legal.createDraft(dto, req.user)
+  }
+
+  @Patch('admin/revisions/:id')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  updateDraft(@Param('id') id: string, @Body() dto: UpdateLegalRevisionDto) {
+    return this.legal.updateDraft(id, dto)
+  }
+
+  @Post('admin/revisions/:id/publish')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  publish(@Param('id') id: string) {
+    return this.legal.publish(id)
+  }
+
+  @Post('consents')
+  @UseGuards(OptionalJwtAuthGuard)
+  recordConsent(
+    @Body() dto: RecordConsentDto,
+    @Req() req: Request & { user?: SessionJwtPayload },
+  ) {
+    return this.legal.recordConsent(dto, req.user?.userId)
+  }
+
+  @Get(':type')
+  getByType(@Param('type') type: string, @Query() query: LegalLocaleQueryDto) {
+    return this.legal.getByType(type, query.locale)
+  }
+}

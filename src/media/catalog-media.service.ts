@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 
 import { processBlogImage, processCategoryImage, processProductImage } from './media-image.process'
 import { MediaStorageService } from './media-storage.service'
+import { MediaWatermarkService } from './media-watermark.service'
 import { isPendingCategoryPath, isPendingProductPath } from './upload-paths'
 
 const CATEGORY_COVER = 'cover.webp'
@@ -22,13 +23,17 @@ export type StoredProductImage = StoredImagePair & { imageId: string }
 
 @Injectable()
 export class CatalogMediaService {
-  constructor(private readonly storage: MediaStorageService) {}
+  constructor(
+    private readonly storage: MediaStorageService,
+    private readonly watermark: MediaWatermarkService,
+  ) {}
 
   async storeProductImage(
     buffer: Buffer,
     options?: { productId?: string },
   ): Promise<StoredProductImage> {
-    const { main, thumb } = await processProductImage(buffer)
+    const source = await this.watermark.applyToNewUpload(buffer, 'productPhoto')
+    const { main, thumb } = await processProductImage(source)
     const imageId = randomUUID()
     const pendingId = randomUUID()
     const isPending = !options?.productId?.trim()

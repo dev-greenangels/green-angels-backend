@@ -13,7 +13,6 @@ import { PhotoIndexService } from './photo-index.service'
 import { PhotoStorageService } from './photo-storage.service'
 import { PhotosService } from './photos.service'
 import { SettingsModule } from '../settings/settings.module'
-import { WatermarkService } from './watermark.service'
 
 @Module({
   imports: [ViberPhotosModule, CategoriesModule, MediaModule, SettingsModule],
@@ -27,7 +26,6 @@ import { WatermarkService } from './watermark.service'
     PhotosService,
     PhotoIndexService,
     PhotoStorageService,
-    WatermarkService,
     LegacyPhotoSyncService,
     PhotoApiKeyGuard,
   ],

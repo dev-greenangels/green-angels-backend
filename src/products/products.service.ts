@@ -12,7 +12,7 @@ import {
 } from './dto/variant-quantity-price.dto'
 
 import { PrismaService } from '../prisma/prisma.service'
-import { pickLocalizedName, pickLocalizedText } from '../i18n/pick-localized-name'
+import { pickLocalizedName, pickLocalizedText, pickTranslationHint } from '../i18n/pick-localized-name'
 import { CommerceService } from '../commerce/commerce.service'
 import { RETAIL_PRICE_TYPE } from '../commerce/commerce.constants'
 import { CategoriesService } from '../categories/categories.service'
@@ -119,6 +119,10 @@ export type BackstageProductDetail = BackstageProductListItem & {
   description: string | null
   metaTitle: string | null
   metaDesc: string | null
+  nameHint?: { locale: string; text: string } | null
+  descriptionHint?: { locale: string; text: string } | null
+  metaTitleHint?: { locale: string; text: string } | null
+  metaDescHint?: { locale: string; text: string } | null
   additionalCategoryIds: string[]
   displayCharacteristics: ProductDisplayCharacteristic[]
   pricingMode: 'simple' | 'variants'
@@ -315,7 +319,8 @@ export class ProductsService {
       }>
       attributeValues: Array<{
         value: {
-          translations: Array<{ label: string }>
+          slug?: string
+          translations: Array<{ locale?: string; label: string }>
           attribute?: {
             id?: string
             slug?: string
@@ -324,12 +329,13 @@ export class ProductsService {
             valueType?: VariantAttributeType
             showOnProductPage?: boolean
             icon?: string | null
-            translations?: Array<{ name: string }>
+            translations?: Array<{ locale?: string; name: string }>
           }
         }
       }>
     },
     typeOrder: VariantAttributeType[],
+    locale = 'uk',
   ): CatalogStorefrontVariant {
     const priceRow = variant.prices[0]
 
@@ -353,7 +359,7 @@ export class ProductsService {
           validFrom: this.toIsoDate(row.validFrom),
           validTo: this.toIsoDate(row.validTo),
         })),
-      displayAttributes: toVariantDisplayAttributes(variant.attributeValues),
+      displayAttributes: toVariantDisplayAttributes(variant.attributeValues, locale),
     }
   }
 
@@ -401,6 +407,7 @@ export class ProductsService {
       }>
     },
     typeOrder: VariantAttributeType[],
+    locale = 'uk',
   ): BackstageProductVariant {
     const priceRow = variant.prices[0]
     return {
@@ -430,7 +437,7 @@ export class ProductsService {
           validFrom: this.toIsoDate(row.validFrom),
           validTo: this.toIsoDate(row.validTo),
         })),
-      displayAttributes: toVariantDisplayAttributes(variant.attributeValues),
+      displayAttributes: toVariantDisplayAttributes(variant.attributeValues, locale),
     }
   }
 
@@ -457,7 +464,7 @@ export class ProductsService {
       createdAt: Date
       updatedAt?: Date
       translations: Array<{ locale?: string; name: string }>
-      category: { slug: string; translations: Array<{ name: string }> }
+      category: { slug: string; translations: Array<{ locale?: string; name: string }> }
       images: Array<{ url: string; isMain: boolean; sortOrder: number }>
       characteristics: Array<{
         textValue: string | null
@@ -522,8 +529,11 @@ export class ProductsService {
       isPublished: product.isPublished,
       categoryId: product.categoryId,
       categorySlug: product.category.slug,
-      categoryName:
-        product.category.translations[0]?.name ?? slugFallback ?? product.categoryId,
+      categoryName: pickLocalizedName(
+        product.category.translations,
+        locale,
+        product.category.slug,
+      ),
       variantCount: product._count.variants,
       sku: firstVariant?.sku ?? null,
       price: priceRow ? Number(priceRow.value) : null,
@@ -537,14 +547,14 @@ export class ProductsService {
       updatedAt: (product.updatedAt ?? product.createdAt).toISOString(),
       maxDiscountPercent: this.computeMaxDiscountPercent(product.variants),
       pricingMode: this.inferPricingMode(product.variants),
-      variants: product.variants.map((variant) => this.toListVariantSummary(variant, typeOrder)),
+      variants: product.variants.map((variant) => this.toListVariantSummary(variant, typeOrder, locale)),
     }
   }
 
   private listInclude(locale: string, currency: string) {
     return {
       translations: true,
-      category: { include: { translations: { where: { locale } } } },
+      category: { include: { translations: true } },
       images: { orderBy: [{ isMain: 'desc' as const }, { sortOrder: 'asc' as const }] },
       characteristics: {
         include: {
@@ -564,7 +574,7 @@ export class ProductsService {
             include: {
               value: {
                 include: {
-                  translations: { where: { locale } },
+                  translations: { select: { locale: true, label: true } },
                   attribute: {
                     select: {
                       ...VARIANT_LABEL_ATTRIBUTE_SELECT,
@@ -573,7 +583,7 @@ export class ProductsService {
                       showOnProductPage: true,
                       icon: true,
                       unit: true,
-                      translations: { where: { locale }, select: { name: true } },
+                      translations: { select: { locale: true, name: true } },
                     },
                   },
                 },
@@ -590,10 +600,6 @@ export class ProductsService {
   private detailInclude(locale: string, currency: string) {
     return {
       ...this.listInclude(locale, currency),
-      translations: {
-        where:
-          locale === 'uk' ? { locale: 'uk' } : { locale: { in: [locale, 'en'] } },
-      },
       additionalCategories: { select: { categoryId: true } },
       characteristics: {
         include: {
@@ -2324,7 +2330,7 @@ export class ProductsService {
       metaTitle?: string | null
       metaDesc?: string | null
     }>
-    category: { slug: string; translations: Array<{ name: string }> }
+    category: { slug: string; translations: Array<{ locale?: string; name: string }> }
     images: Array<{ url: string; isMain: boolean; sortOrder: number }>
     characteristics: Array<{
       numberValue: number | null
@@ -2395,7 +2401,7 @@ export class ProductsService {
       labelTypeOrder,
       locale,
     )
-    const variants = product.variants.map((variant) => this.toVariantNode(variant, labelTypeOrder))
+    const variants = product.variants.map((variant) => this.toVariantNode(variant, labelTypeOrder, locale))
 
     const imageUrls = product.images
       .sort((a, b) => {
@@ -2418,6 +2424,25 @@ export class ProductsService {
       ...(strictLocale
         ? {
             name: row?.name?.trim() ?? '',
+            nameHint: pickTranslationHint(
+              product.translations.map((item) => ({ locale: item.locale, value: item.name })),
+              locale,
+            ),
+            descriptionHint: pickTranslationHint(
+              product.translations.map((item) => ({
+                locale: item.locale,
+                value: item.description,
+              })),
+              locale,
+            ),
+            metaTitleHint: pickTranslationHint(
+              product.translations.map((item) => ({ locale: item.locale, value: item.metaTitle })),
+              locale,
+            ),
+            metaDescHint: pickTranslationHint(
+              product.translations.map((item) => ({ locale: item.locale, value: item.metaDesc })),
+              locale,
+            ),
           }
         : {}),
       characteristics: {

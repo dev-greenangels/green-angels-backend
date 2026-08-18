@@ -44,6 +44,8 @@ import { PacketaModule } from './packeta/packeta.module'
 import { GlsModule } from './gls/gls.module'
 import { ViesModule } from './vies/vies.module'
 import { TedbModule } from './tedb/tedb.module'
+import { LegalModule } from './legal/legal.module'
+import { WholesaleInquiriesModule } from './wholesale-inquiries/wholesale-inquiries.module'
 
 @Module({
   imports: [
@@ -103,6 +105,8 @@ import { TedbModule } from './tedb/tedb.module'
     GlsModule,
     ViesModule,
     TedbModule,
+    LegalModule,
+    WholesaleInquiriesModule,
     MediaModule,
   ],
 })

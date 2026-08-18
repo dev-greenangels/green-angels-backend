@@ -15,6 +15,7 @@ import { PrismaModule } from '../prisma/prisma.module'
 import { VariantLabelModule } from '../products/variant-label.module'
 import { MailModule } from '../mail/mail.module'
 import { ViesModule } from '../vies/vies.module'
+import { LegalModule } from '../legal/legal.module'
 import { OrderConfirmationTokenService } from './order-confirmation-token.service'
 import { OrderIdempotencyService } from './order-idempotency.service'
 import { OrdersController } from './orders.controller'
@@ -37,6 +38,7 @@ import { OrdersService } from './orders.service'
     ReferralsModule,
     MailModule,
     ViesModule,
+    LegalModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService, OrderConfirmationTokenService, OrderIdempotencyService],
