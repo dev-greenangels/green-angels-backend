@@ -27,6 +27,13 @@ export class WholesaleInquiriesController {
     return this.inquiries.create(dto, clientIp)
   }
 
+  @Get('backstage/new-count')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  newCount() {
+    return this.inquiries.countNewBackstage()
+  }
+
   @Get('backstage')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)

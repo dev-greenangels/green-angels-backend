@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
 
 import { RedisService } from '../redis/redis.service'
-import type { ViesValidationResult } from './vies.types'
+import type { ViesRequester, ViesValidationResult } from './vies.types'
+import { parseEuVatId } from './vies.types'
 
 const VIES_REST_URL = 'https://ec.europa.eu/taxation_customs/vies/rest-api/check-vat-number'
 const VIES_REQUEST_TIMEOUT_MS = 8000
@@ -20,9 +21,8 @@ function normalizeVatNumber(countryCode: string, input: string): string {
 
 /**
  * Перевірка IČ DPH (EU VAT number) через VIES для B2B checkout SK/EU.
- * Стаб фази C: коротке Redis-кешування результату + best-effort запит до
- * офіційного REST API Європейської комісії. При будь-якій помилці мережі /
- * недоступності сервісу — soft-degrade із `valid: null`, checkout не блокується.
+ * Коротке Redis-кешування + офіційний REST API ЄК. При помилці — soft-degrade
+ * (`valid: null`), checkout не блокується.
  */
 @Injectable()
 export class ViesService {
@@ -30,11 +30,37 @@ export class ViesService {
 
   constructor(private readonly redis: RedisService) {}
 
-  private cacheKey(countryCode: string, vatNumber: string): string {
-    return `${CACHE_PREFIX}${countryCode}:${vatNumber}`
+  private cacheKey(countryCode: string, vatNumber: string, audit: boolean): string {
+    return `${CACHE_PREFIX}${audit ? 'audit:' : ''}${countryCode}:${vatNumber}`
   }
 
+  /** Lightweight check for checkout UI / quote (no requester). */
   async validateVat(countryCodeInput: string, vatNumberInput: string): Promise<ViesValidationResult> {
+    return this.validateVatInternal(countryCodeInput, vatNumberInput, null, false)
+  }
+
+  /**
+   * Audit check at order placement — includes seller requester VAT when configured
+   * to obtain EU consultation number (`requestIdentifier`).
+   */
+  async validateVatForAudit(
+    countryCodeInput: string,
+    vatNumberInput: string,
+    requesterInput?: string | ViesRequester | null,
+  ): Promise<ViesValidationResult> {
+    const requester =
+      typeof requesterInput === 'string'
+        ? parseEuVatId(requesterInput)
+        : requesterInput ?? null
+    return this.validateVatInternal(countryCodeInput, vatNumberInput, requester, true)
+  }
+
+  private async validateVatInternal(
+    countryCodeInput: string,
+    vatNumberInput: string,
+    requester: ViesRequester | null,
+    audit: boolean,
+  ): Promise<ViesValidationResult> {
     const countryCode = normalizeCountryCode(countryCodeInput)
     const vatNumber = normalizeVatNumber(countryCode, vatNumberInput)
 
@@ -44,10 +70,11 @@ export class ViesService {
         countryCode,
         vatNumber,
         message: 'Невірний формат IČ DPH. Вкажіть код країни (2 букви) та номер.',
+        source: 'unavailable',
       }
     }
 
-    const key = this.cacheKey(countryCode, vatNumber)
+    const key = this.cacheKey(countryCode, vatNumber, audit)
     const cached = await this.redis.client.get(key).catch(() => null)
     if (cached) {
       try {
@@ -57,7 +84,7 @@ export class ViesService {
       }
     }
 
-    const result = await this.callViesRestApi(countryCode, vatNumber)
+    const result = await this.callViesRestApi(countryCode, vatNumber, requester, audit)
 
     await this.redis.client
       .set(key, JSON.stringify(result), 'EX', VIES_CACHE_TTL_SECONDS)
@@ -69,15 +96,23 @@ export class ViesService {
   private async callViesRestApi(
     countryCode: string,
     vatNumber: string,
+    requester: ViesRequester | null,
+    audit: boolean,
   ): Promise<ViesValidationResult> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), VIES_REQUEST_TIMEOUT_MS)
+
+    const body: Record<string, string> = { countryCode, vatNumber }
+    if (audit && requester?.countryCode && requester.vatNumber) {
+      body.requesterMemberStateCode = requester.countryCode
+      body.requesterNumber = requester.vatNumber
+    }
 
     try {
       const response = await fetch(VIES_REST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ countryCode, vatNumber }),
+        body: JSON.stringify(body),
         signal: controller.signal,
       })
 
@@ -88,6 +123,9 @@ export class ViesService {
           countryCode,
           vatNumber,
           message: 'Сервіс VIES тимчасово недоступний. Перевірку не виконано.',
+          source: 'unavailable',
+          requesterCountryCode: requester?.countryCode ?? null,
+          requesterVatNumber: requester?.vatNumber ?? null,
         }
       }
 
@@ -97,9 +135,11 @@ export class ViesService {
         name?: string
         address?: string
         requestDate?: string
+        requestIdentifier?: string
       }
 
       const valid = data.isValid ?? data.valid ?? null
+      const usedAudit = audit && Boolean(requester?.countryCode && requester?.vatNumber)
       return {
         valid: typeof valid === 'boolean' ? valid : null,
         countryCode,
@@ -107,6 +147,11 @@ export class ViesService {
         name: data.name?.trim() || null,
         address: data.address?.trim() || null,
         checkedAt: data.requestDate,
+        requestIdentifier: data.requestIdentifier?.trim() || null,
+        requesterCountryCode: requester?.countryCode ?? null,
+        requesterVatNumber: requester?.vatNumber ?? null,
+        source: usedAudit ? 'vies_rest_audit' : 'vies_rest',
+        rawResponse: data as Record<string, unknown>,
         message:
           valid === true
             ? 'IČ DPH дійсний.'
@@ -121,6 +166,9 @@ export class ViesService {
         countryCode,
         vatNumber,
         message: 'Сервіс VIES тимчасово недоступний. Перевірку не виконано.',
+        source: 'unavailable',
+        requesterCountryCode: requester?.countryCode ?? null,
+        requesterVatNumber: requester?.vatNumber ?? null,
       }
     } finally {
       clearTimeout(timeout)

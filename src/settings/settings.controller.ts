@@ -22,7 +22,6 @@ import { UpdateMediaWatermarkSettingsDto } from './dto/update-media-watermark-se
 import { UpdateWholesalePageSettingsDto } from './dto/update-wholesale-page-settings.dto'
 import { SettingsService } from './settings.service'
 import type { VariantLabelSettings } from './settings.constants'
-import type { WholesalePageSettings } from './wholesale-page.types'
 import type { NavigationSettings } from './navigation.types'
 import { DispatchCalendarService } from './dispatch-calendar.service'
 import type { DispatchCalendarSettings } from './dispatch-calendar.types'
@@ -97,7 +96,7 @@ export class SettingsController {
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)
   updateWholesale(@Body() dto: UpdateWholesalePageSettingsDto) {
-    return this.settings.updateWholesalePage(dto as Partial<WholesalePageSettings>)
+    return this.settings.updateWholesalePage(dto)
   }
 
   @Patch('cart-checkout')

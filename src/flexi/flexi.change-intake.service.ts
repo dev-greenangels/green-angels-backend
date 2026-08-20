@@ -32,6 +32,11 @@ export class FlexiChangeIntakeService {
     return (raw ?? '').trim().toLowerCase()
   }
 
+  private isStromTreeEvidence(evidence: string): boolean {
+    const ev = this.normalizeEvidence(evidence)
+    return ev.includes('strom') && !ev.includes('strom-cenik')
+  }
+
   normalizeObjectId(evidence: string, id: string | number | undefined): string | null {
     const ev = this.normalizeEvidence(evidence)
     if (ev.includes('strom') && !ev.includes('strom-cenik')) {
@@ -149,6 +154,58 @@ export class FlexiChangeIntakeService {
     return result.count
   }
 
+  async retryFailedEvents(): Promise<number> {
+    const result = await this.prisma.flexiChangeEvent.updateMany({
+      where: { status: 'FAILED' },
+      data: { status: 'PENDING', lastError: null, processedAt: null },
+    })
+    return result.count
+  }
+
+  async skipFailedEvents(): Promise<number> {
+    const now = new Date()
+    const result = await this.prisma.flexiChangeEvent.updateMany({
+      where: { status: 'FAILED' },
+      data: { status: 'PROCESSED', processedAt: now },
+    })
+    return result.count
+  }
+
+  async getQueueEventCounts(): Promise<Record<string, number>> {
+    const rows = await this.prisma.flexiChangeEvent.groupBy({
+      by: ['status'],
+      _count: { _all: true },
+    })
+    const counts: Record<string, number> = {
+      PENDING: 0,
+      PROCESSING: 0,
+      FAILED: 0,
+      PROCESSED: 0,
+      SUPERSEDED: 0,
+    }
+    for (const row of rows) {
+      counts[row.status] = row._count._all
+    }
+    return counts
+  }
+
+  async listFailedEvents(limit = 25) {
+    return this.prisma.flexiChangeEvent.findMany({
+      where: { status: 'FAILED' },
+      orderBy: [{ changeVersion: 'asc' }, { createdAt: 'asc' }],
+      take: Math.min(50, Math.max(1, limit)),
+      select: {
+        id: true,
+        evidence: true,
+        objectId: true,
+        changeVersion: true,
+        attempts: true,
+        lastError: true,
+        updatedAt: true,
+      },
+    })
+  }
+
   async countOpenEvents(): Promise<number> {
     return this.prisma.flexiChangeEvent.count({
       where: { status: { in: ['PENDING', 'FAILED', 'PROCESSING'] } },
@@ -176,14 +233,32 @@ export class FlexiChangeIntakeService {
       },
     })
 
-    const groups: FlexiIntakeCollapseGroup[] = failed.map((row) => ({
-      evidence: row.evidence,
-      objectId: row.objectId,
-      primaryId: row.id,
-      changeVersion: row.changeVersion,
-      operation: row.operation,
-      supersededIds: [],
-    }))
+    const groups: FlexiIntakeCollapseGroup[] = []
+    const stromFailed = failed.filter((row) => this.isStromTreeEvidence(row.evidence))
+    const otherFailed = failed.filter((row) => !this.isStromTreeEvidence(row.evidence))
+
+    if (stromFailed.length > 0) {
+      const primary = stromFailed[stromFailed.length - 1]!
+      groups.push({
+        evidence: primary.evidence,
+        objectId: primary.objectId,
+        primaryId: primary.id,
+        changeVersion: primary.changeVersion,
+        operation: primary.operation,
+        supersededIds: stromFailed.slice(0, -1).map((row) => row.id),
+      })
+    }
+
+    for (const row of otherFailed) {
+      groups.push({
+        evidence: row.evidence,
+        objectId: row.objectId,
+        primaryId: row.id,
+        changeVersion: row.changeVersion,
+        operation: row.operation,
+        supersededIds: [],
+      })
+    }
 
     if (groups.length >= limit) {
       return groups.slice(0, limit)
@@ -257,7 +332,7 @@ export class FlexiChangeIntakeService {
         await tx.flexiChangeEvent.updateMany({
           where: {
             id: { in: group.supersededIds },
-            status: { in: ['PENDING', 'PROCESSING'] },
+            status: { in: ['PENDING', 'PROCESSING', 'FAILED'] },
           },
           data: { status: 'SUPERSEDED', processedAt: now, lastError: null },
         })

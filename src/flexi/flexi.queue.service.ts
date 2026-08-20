@@ -290,4 +290,22 @@ export class FlexiQueueService implements OnModuleInit {
       { jobId: `flexi-import-${Date.now()}`, removeOnComplete: 10, removeOnFail: 20 },
     )
   }
+
+  async getJobCounts() {
+    return this.queue.getJobCounts('waiting', 'active', 'delayed', 'failed', 'completed')
+  }
+
+  async drainWaitingJobs(): Promise<number> {
+    const jobs = await this.queue.getJobs(['waiting', 'delayed', 'paused'])
+    let removed = 0
+    for (const job of jobs) {
+      try {
+        await job.remove()
+        removed += 1
+      } catch {
+        // active/locked jobs cannot be removed
+      }
+    }
+    return removed
+  }
 }

@@ -177,6 +177,11 @@ export class WholesaleInquiriesService {
       }
     }
 
+    const wholesalePage = await this.settings.getWholesalePageSettings()
+    if (!wholesalePage.pageEnabled) {
+      throw new NotFoundException('Сторінку гурту вимкнено.')
+    }
+
     const market = await this.settings.getMarketSettings()
     const region: MarketRegion = market.region === 'sk' ? 'sk' : 'ua'
     const phonePolicy: PhonePolicy = market.authPhonePolicy
@@ -232,34 +237,45 @@ export class WholesaleInquiriesService {
       },
     })
 
-    const store = await this.settings.getStoreContactSettings()
-    const notifyTo = this.pickNotifyEmail(store)
-    try {
-      await this.mail.sendWholesaleInquiryEmail({
-        to: notifyTo,
-        region,
-        inquiry: {
-          fullName,
-          companyName,
-          phone,
-          email,
-          city,
-          website,
-          message,
-          companyIco,
-          companyVatId,
-          locale,
-        },
-      })
-    } catch (err) {
-      this.logger.warn(
-        `Не вдалося надіслати лист про заявку ${created.id}: ${
-          err instanceof Error ? err.message : 'unknown'
-        }`,
-      )
+    if (wholesalePage.notifyEmailEnabled) {
+      const store = await this.settings.getStoreContactSettings()
+      const notifyTo = wholesalePage.notifyEmail?.trim() || this.pickNotifyEmail(store)
+      try {
+        await this.mail.sendWholesaleInquiryEmail({
+          to: notifyTo,
+          region,
+          inquiry: {
+            fullName,
+            companyName,
+            phone,
+            email,
+            city,
+            website,
+            message,
+            companyIco,
+            companyVatId,
+            locale,
+          },
+        })
+      } catch (err) {
+        this.logger.warn(
+          `Не вдалося надіслати лист про заявку ${created.id}: ${
+            err instanceof Error ? err.message : 'unknown'
+          }`,
+        )
+      }
+    } else {
+      this.logger.debug(`Email-сповіщення про заявку ${created.id} вимкнено в налаштуваннях.`)
     }
 
     return { ok: true }
+  }
+
+  async countNewBackstage(): Promise<{ count: number }> {
+    const count = await this.prisma.wholesaleInquiry.count({
+      where: { status: WholesaleInquiryStatus.NEW },
+    })
+    return { count }
   }
 
   private toListItem(row: {

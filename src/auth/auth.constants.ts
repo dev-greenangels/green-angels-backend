@@ -21,4 +21,6 @@ export type SessionUser = {
   firstName: string | null
   lastName: string | null
   role: ApiUserRole
+  /** Роздріб vs гурт (Prisma USER vs WHOLESALER) */
+  accountType: 'retail' | 'wholesale'
 }

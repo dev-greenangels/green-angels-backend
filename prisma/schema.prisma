@@ -819,6 +819,8 @@ model Order {
   companyIco             String?
   companyDic             String?
   companyVatId           String?
+  /// ISO VAT country prefix at checkout (SK, HU, AT, …)
+  vatCountryCode         String?
   /// B2B billing address (optional; delivery used as fallback in ERP export)
   companyStreet          String?
   companyCity            String?
@@ -874,6 +876,7 @@ model Order {
   referralAttribution    ReferralAttribution?
   pointsLedger           PointsLedgerEntry[]
   legalConsentEvents     LegalConsentEvent[]
+  viesCheck              OrderViesCheck?
   createdAt              DateTime             @default(now())
 
   @@unique([legacySource, legacyId])
@@ -912,6 +915,27 @@ model OrderItem {
   order            Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productVariantId String?
   productVariant   ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+}
+
+/// Immutable VIES audit snapshot at order placement (EU B2B reverse charge evidence).
+model OrderViesCheck {
+  id                   String   @id @default(uuid())
+  orderId              String   @unique
+  order                Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  vatCountryCode       String
+  vatNumber            String
+  /// true | false | null (service unavailable)
+  valid                Boolean?
+  checkedAt            DateTime
+  viesRequestDate      String?
+  requestIdentifier    String?
+  registeredName       String?
+  registeredAddress    String?  @db.Text
+  requesterCountryCode String?
+  requesterVatNumber   String?
+  source               String
+  rawResponse          Json?
+  createdAt            DateTime @default(now())
 }
 
 // ==========================================

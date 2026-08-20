@@ -44,8 +44,10 @@ export type FlexiSettings = {
    * Not a Flexi id.
    */
   defaultCategoryId: string
-  /** Flexi strom root code (default STR_CEN) */
+  /** Flexi strom tree code (default STR_CEN = Tree in price list) */
   stromRootCode: string
+  /** Folder inside the tree to import as shop catalog root (e.g. Products). Empty = whole tree. */
+  stromShopRootCode: string
   /** Sync branch nodes → Category, leaf → Product */
   syncCategoriesFromStrom: boolean
   /** Optional VariantAttribute UUID for size (P9, C2, …) */
@@ -98,6 +100,7 @@ export const DEFAULT_FLEXI_SETTINGS: FlexiSettings = {
   deliveryMethodCodes: { ...DEFAULT_FLEXI_DELIVERY_METHOD_CODES },
   defaultCategoryId: '',
   stromRootCode: 'STR_CEN',
+  stromShopRootCode: '',
   syncCategoriesFromStrom: true,
   sizeAttributeId: '',
   webhookSecKey: '',
@@ -132,6 +135,7 @@ export type FlexiPublicSettings = {
   deliveryMethodCodes: Record<string, string>
   defaultCategoryId: string
   stromRootCode: string
+  stromShopRootCode: string
   syncCategoriesFromStrom: boolean
   sizeAttributeId: string
   webhookUrl: string

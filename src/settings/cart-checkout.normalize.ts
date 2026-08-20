@@ -1,18 +1,22 @@
 import type {
   CarrierRateTier,
   CartCheckoutSettings,
+  CartSizeSettings,
   CartWeightSettings,
   CheckoutBankDetails,
   CheckoutNextStepItem,
   CodFeeMode,
   DeliveryMode,
+  DeliverySizeLimit,
   DeliveryWeightRule,
 } from './cart-checkout.types'
 import {
   DEFAULT_CART_CHECKOUT_SETTINGS,
+  DEFAULT_CART_SIZE_SETTINGS,
   DEFAULT_CART_WEIGHT_SETTINGS,
   DEFAULT_CHECKOUT_BANK_DETAILS,
   DEFAULT_CHECKOUT_NEXT_STEPS,
+  DEFAULT_DELIVERY_SIZE_LIMITS,
 } from './cart-checkout.types'
 import {
   CHECKOUT_DELIVERY_METHODS,
@@ -76,6 +80,38 @@ function normalizeCartWeight(raw: unknown): CartWeightSettings {
       Number.isFinite(divisor) && divisor > 0
         ? divisor
         : DEFAULT_CART_WEIGHT_SETTINGS.volumetricDivisor,
+  }
+}
+
+function normalizeDeliverySizeLimits(raw: unknown): DeliverySizeLimit[] {
+  const allowedSet = new Set(CHECKOUT_DELIVERY_METHODS)
+  const source = Array.isArray(raw) ? raw : DEFAULT_DELIVERY_SIZE_LIMITS
+  const out: DeliverySizeLimit[] = []
+  for (const item of source) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as Partial<DeliverySizeLimit>
+    if (typeof row.method !== 'string' || !allowedSet.has(row.method as CheckoutDeliveryMethodSlug)) {
+      continue
+    }
+    const maxLongestSideCm = Math.max(0, Number(row.maxLongestSideCm) || 0)
+    const maxSideSumCm = Math.max(0, Number(row.maxSideSumCm) || 0)
+    const maxGirthCm = Math.max(0, Number(row.maxGirthCm) || 0)
+    if (maxLongestSideCm <= 0 && maxSideSumCm <= 0 && maxGirthCm <= 0) continue
+    out.push({
+      method: row.method as CheckoutDeliveryMethodSlug,
+      maxLongestSideCm,
+      maxSideSumCm,
+      maxGirthCm,
+    })
+  }
+  return out.length ? out : DEFAULT_DELIVERY_SIZE_LIMITS.map((row) => ({ ...row }))
+}
+
+function normalizeCartSize(raw: unknown): CartSizeSettings {
+  const source = raw && typeof raw === 'object' ? (raw as Partial<CartSizeSettings>) : {}
+  return {
+    enabled: source.enabled === true,
+    limits: normalizeDeliverySizeLimits(source.limits),
   }
 }
 
@@ -213,6 +249,20 @@ export function normalizeCartCheckoutSettings(
     belowMinPackagingFee: Math.max(0, Number(base.belowMinPackagingFee) || 0),
     minOrderAmount:
       base.minOrderAmount != null && base.minOrderAmount > 0 ? base.minOrderAmount : null,
+    belowMinOrderBehavior:
+      base.belowMinOrderBehavior === 'add_packaging_fee' ? 'add_packaging_fee' : 'reject',
+    wholesalerBelowMinPackagingFee: Math.max(
+      0,
+      Number(base.wholesalerBelowMinPackagingFee) || 0,
+    ),
+    wholesalerMinOrderAmount:
+      base.wholesalerMinOrderAmount != null && base.wholesalerMinOrderAmount > 0
+        ? base.wholesalerMinOrderAmount
+        : null,
+    wholesalerBelowMinOrderBehavior:
+      base.wholesalerBelowMinOrderBehavior === 'add_packaging_fee'
+        ? 'add_packaging_fee'
+        : 'reject',
     enabledDeliveryMethods: normalizeMethodList<CheckoutDeliveryMethodSlug>(
       rawMethods,
       CHECKOUT_DELIVERY_METHODS,
@@ -227,6 +277,7 @@ export function normalizeCartCheckoutSettings(
     deliveryWeightRules: normalizeDeliveryWeightRules(base.deliveryWeightRules),
     carrierRateTables: normalizeCarrierRateTables(base.carrierRateTables),
     cartWeight: normalizeCartWeight(base.cartWeight),
+    cartSize: normalizeCartSize(base.cartSize ?? DEFAULT_CART_SIZE_SETTINGS),
     codFeeAmount: Math.max(0, Number(base.codFeeAmount) || 0),
     codFeeMode: isCodFeeMode(base.codFeeMode)
       ? base.codFeeMode

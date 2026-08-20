@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 
+import { AuthModule } from '../auth/auth.module'
 import { FlexiModule } from '../flexi/flexi.module'
 import { MonopayModule } from '../monopay/monopay.module'
 import { PrismaModule } from '../prisma/prisma.module'
@@ -10,7 +11,7 @@ import { PaymentsService } from './payments.service'
 import { StripePaymentProvider } from './stripe.payment-provider'
 
 @Module({
-  imports: [PrismaModule, SettingsModule, MonopayModule, FlexiModule],
+  imports: [PrismaModule, SettingsModule, MonopayModule, FlexiModule, AuthModule],
   controllers: [PaymentsController],
   providers: [PaymentsService, MonopayPaymentProvider, StripePaymentProvider],
   exports: [PaymentsService],

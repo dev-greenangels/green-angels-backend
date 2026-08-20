@@ -9,6 +9,7 @@ import {
   Post,
   Query,
   Req,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common'
 import { Role } from '@prisma/client'
@@ -52,6 +53,23 @@ export class OrdersController {
   @Roles(Role.ADMIN, Role.MANAGER)
   findSummary() {
     return this.orders.findSummary()
+  }
+
+  @Get('confirmation/:orderNumber/pdf')
+  @UseGuards(OptionalJwtAuthGuard)
+  async findConfirmationPdf(
+    @Param('orderNumber') orderNumber: string,
+    @Req() req: Request & { user?: SessionJwtPayload },
+    @Headers(ORDER_CONFIRMATION_TOKEN_HEADER) confirmationToken?: string,
+  ) {
+    const pdf = await this.orders.buildConfirmationPdf(orderNumber, {
+      userId: req.user?.userId,
+      confirmationToken,
+    })
+    return new StreamableFile(pdf, {
+      type: 'application/pdf',
+      disposition: `attachment; filename="order-${orderNumber.replace(/[^\w-]+/g, '-')}.pdf"`,
+    })
   }
 
   @Get('confirmation/:orderNumber')

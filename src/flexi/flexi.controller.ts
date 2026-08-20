@@ -112,6 +112,7 @@ export class FlexiAdminController {
     private readonly settings: FlexiSettingsService,
     private readonly flexi: FlexiService,
     private readonly queue: FlexiQueueService,
+    private readonly intake: FlexiChangeIntakeService,
   ) {}
 
   @Get('settings')
@@ -199,5 +200,52 @@ export class FlexiAdminController {
   @Post('import-new-products/run')
   importNewProductsRun() {
     return this.flexi.importNewProducts()
+  }
+
+  @Get('queue')
+  async getQueue() {
+    const [events, failed, jobs] = await Promise.all([
+      this.intake.getQueueEventCounts(),
+      this.intake.listFailedEvents(),
+      this.queue.getJobCounts(),
+    ])
+    const settings = await this.settings.getSettings()
+    return {
+      events,
+      failed: failed.map((row) => ({
+        ...row,
+        updatedAt: row.updatedAt.toISOString(),
+      })),
+      jobs,
+      cursor: settings.globalVersion,
+    }
+  }
+
+  @Post('queue/retry-failed')
+  async retryFailed() {
+    const count = await this.intake.retryFailedEvents()
+    if (count > 0) {
+      await this.queue.enqueueProcessIntake()
+    }
+    return { ok: true, count, message: `Повернено в чергу: ${count}.` }
+  }
+
+  @Post('queue/skip-failed')
+  async skipFailed() {
+    const count = await this.intake.skipFailedEvents()
+    const cursor = await this.intake.recomputeAndPersistLastSafeCursor()
+    return {
+      ok: true,
+      count,
+      pollStart: cursor.pollStart,
+      lastSafeCursor: cursor.lastSafeCursor,
+      message: `Пропущено FAILED: ${count}. Курсор pollStart=${cursor.pollStart}.`,
+    }
+  }
+
+  @Post('queue/drain')
+  async drainQueue() {
+    const removed = await this.queue.drainWaitingJobs()
+    return { ok: true, removed, message: `Знято очікуючих jobs: ${removed}.` }
   }
 }

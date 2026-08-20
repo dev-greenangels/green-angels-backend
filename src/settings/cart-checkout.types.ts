@@ -51,6 +51,27 @@ export type DeliveryWeightRule = {
   allowedMethods: CheckoutDeliveryMethodSlug[]
 }
 
+/**
+ * Ліміт габаритів для одного способу доставки (см).
+ * 0 у полі = не перевіряти це поле.
+ * Джерела дефолтів: Packeta.sk (výdejní / Z-BOX) і GLS Slovakia FAQ/VOP.
+ */
+export type DeliverySizeLimit = {
+  method: CheckoutDeliveryMethodSlug
+  /** Макс. довжина найдовшої сторони */
+  maxLongestSideCm: number
+  /** Макс. сума трьох сторін L+W+H (Packeta) */
+  maxSideSumCm: number
+  /** Макс. girth = longest + 2×mid + 2×shortest (GLS) */
+  maxGirthCm: number
+}
+
+/** Перемикач і правила макс. довжини / суми сторін / girth по перевізнику. */
+export type CartSizeSettings = {
+  enabled: boolean
+  limits: DeliverySizeLimit[]
+}
+
 /** Розрахунок ваги кошика для фільтрації доставки (однаково UA/SK на рівні деплою). */
 export type CartWeightSettings = {
   /** Master switch — вимкнути повністю (напр. на старті UA) */
@@ -102,9 +123,14 @@ export type CartCheckoutSettings = {
   taxAppliesToFees: boolean
   /** Безкоштовна доставка при самовивозі */
   deliveryFreeForPickup: boolean
+  /** Роздріб (USER / гість): мін. сума товарів */
   minOrderAmount: number | null
   belowMinOrderBehavior: BelowMinOrderBehavior
   belowMinPackagingFee: number
+  /** Гурт (WHOLESALER): окремі умови мін. суми */
+  wholesalerMinOrderAmount: number | null
+  wholesalerBelowMinOrderBehavior: BelowMinOrderBehavior
+  wholesalerBelowMinPackagingFee: number
   enabledDeliveryMethods: CheckoutDeliveryMethodSlug[]
   enabledPaymentMethods: CheckoutPaymentMethodSlug[]
   /** Правила фільтрації способів доставки за вагою кошика */
@@ -116,6 +142,8 @@ export type CartCheckoutSettings = {
   carrierRateTables: Partial<Record<CheckoutDeliveryMethodSlug, CarrierRateTier[]>>
   /** Керування розрахунком ваги кошика */
   cartWeight: CartWeightSettings
+  /** Макс. довжина / сума сторін / girth по способу доставки */
+  cartSize: CartSizeSettings
   /** Комісія за післяплату (dobierka / COD) */
   codFeeAmount: number
   codFeeMode: CodFeeMode
@@ -189,6 +217,18 @@ export const DEFAULT_CART_WEIGHT_SETTINGS: CartWeightSettings = {
   volumetricDivisor: 5000,
 }
 
+/** Packeta.sk + GLS SK courier limits (см). 0 = не застосовується. */
+export const DEFAULT_DELIVERY_SIZE_LIMITS: DeliverySizeLimit[] = [
+  { method: 'packeta-box', maxLongestSideCm: 120, maxSideSumCm: 150, maxGirthCm: 0 },
+  { method: 'packeta-courier', maxLongestSideCm: 120, maxSideSumCm: 150, maxGirthCm: 0 },
+  { method: 'gls-courier', maxLongestSideCm: 200, maxSideSumCm: 0, maxGirthCm: 300 },
+]
+
+export const DEFAULT_CART_SIZE_SETTINGS: CartSizeSettings = {
+  enabled: false,
+  limits: DEFAULT_DELIVERY_SIZE_LIMITS.map((row) => ({ ...row })),
+}
+
 export const DEFAULT_CART_CHECKOUT_SETTINGS: CartCheckoutSettings = {
   showDelivery: true,
   showPackaging: true,
@@ -210,6 +250,9 @@ export const DEFAULT_CART_CHECKOUT_SETTINGS: CartCheckoutSettings = {
   minOrderAmount: null,
   belowMinOrderBehavior: 'reject',
   belowMinPackagingFee: 0,
+  wholesalerMinOrderAmount: null,
+  wholesalerBelowMinOrderBehavior: 'reject',
+  wholesalerBelowMinPackagingFee: 0,
   enabledDeliveryMethods: [...DEFAULT_ENABLED_DELIVERY_METHODS],
   enabledPaymentMethods: [...DEFAULT_ENABLED_PAYMENT_METHODS],
   deliveryWeightRules: [],
@@ -231,6 +274,10 @@ export const DEFAULT_CART_CHECKOUT_SETTINGS: CartCheckoutSettings = {
     ],
   },
   cartWeight: { ...DEFAULT_CART_WEIGHT_SETTINGS },
+  cartSize: {
+    enabled: false,
+    limits: DEFAULT_DELIVERY_SIZE_LIMITS.map((row) => ({ ...row })),
+  },
   codFeeAmount: 0,
   codFeeMode: 'fixed',
   onlineCardProvider: 'monopay',

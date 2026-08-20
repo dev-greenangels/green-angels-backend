@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 
 import { PrismaService } from '../prisma/prisma.service'
-import { FLEXI_API_WARN_THRESHOLD, FLEXI_SETTINGS_KEY } from './flexi.constants'
+import { FLEXI_API_WARN_THRESHOLD, FLEXI_SETTINGS_KEY, flexiApiCallsForUtcDay, flexiUtcDateStamp } from './flexi.constants'
 import {
   decryptSecret,
   encryptSecret,
@@ -101,6 +101,7 @@ export class FlexiSettingsService {
       ),
       defaultCategoryId: (base.defaultCategoryId ?? '').trim(),
       stromRootCode: (base.stromRootCode ?? 'STR_CEN').trim() || 'STR_CEN',
+      stromShopRootCode: (base.stromShopRootCode ?? '').trim(),
       syncCategoriesFromStrom: base.syncCategoriesFromStrom !== false,
       sizeAttributeId: (base.sizeAttributeId ?? '').trim(),
       webhookSecKey: base.webhookSecKey ?? '',
@@ -167,6 +168,7 @@ export class FlexiSettingsService {
       deliveryMethodCodes: settings.deliveryMethodCodes,
       defaultCategoryId: settings.defaultCategoryId,
       stromRootCode: settings.stromRootCode,
+      stromShopRootCode: settings.stromShopRootCode,
       syncCategoriesFromStrom: settings.syncCategoriesFromStrom,
       sizeAttributeId: settings.sizeAttributeId,
       webhookUrl: settings.webhookUrl,
@@ -182,7 +184,7 @@ export class FlexiSettingsService {
       backupPollEveryHours: settings.backupPollEveryHours,
       fullSyncSchedule: settings.fullSyncSchedule,
       fullSyncScheduleLabel: formatFullSyncSchedule(settings.fullSyncSchedule),
-      apiCallsToday: settings.apiCallsToday,
+      apiCallsToday: flexiApiCallsForUtcDay(settings.apiCallsToday, settings.apiCallsDate),
       apiCallsWarnThreshold: FLEXI_API_WARN_THRESHOLD,
       lastExportAt: settings.lastExportAt,
       lastSyncAt: settings.lastSyncAt,
@@ -263,7 +265,7 @@ export class FlexiSettingsService {
 
   async incrementApiCalls(by = 1): Promise<number> {
     const settings = await this.getSettings()
-    const today = new Date().toISOString().slice(0, 10)
+    const today = flexiUtcDateStamp()
     const apiCallsToday =
       settings.apiCallsDate === today ? settings.apiCallsToday + by : by
     await this.updateSettings({ apiCallsToday, apiCallsDate: today })

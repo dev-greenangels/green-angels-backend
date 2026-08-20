@@ -30,3 +30,18 @@ export const FLEXI_BULL_LOCK_RENEW_MS = 30_000
 
 export const FLEXI_API_WARN_THRESHOLD = 8000
 export const FLEXI_STOCK_FILTER_CHUNK = 40
+
+export function flexiUtcDateStamp(now = new Date()): string {
+  return now.toISOString().slice(0, 10)
+}
+
+/** Shown counter: stored value only if it belongs to the current UTC day. */
+export function flexiApiCallsForUtcDay(
+  count: number,
+  storedDate: string,
+  today = flexiUtcDateStamp(),
+): number {
+  if (!storedDate || storedDate !== today) return 0
+  return Number.isFinite(count) ? Math.max(0, count) : 0
+}
+

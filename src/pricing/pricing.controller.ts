@@ -78,7 +78,9 @@ export class PricingController {
       deliveryMethod: dto.deliveryMethod,
       paymentMethod: dto.paymentMethod,
       cartWeightKg: quote.cartWeightKg,
+      cartSizeEnvelope: quote.cartSizeEnvelope,
       cartVolumeL: quote.cartVolumeL,
+      audienceRole: audience.role,
       taxOverride: tax,
     })
 
@@ -106,6 +108,7 @@ export class PricingController {
         codFeeAmount: mapHuf(checkout.codFeeAmount, rate),
         minOrderAmount:
           checkout.minOrderAmount != null ? mapHuf(checkout.minOrderAmount, rate) : null,
+        belowMinPackagingFee: mapHuf(checkout.belowMinPackagingFee, rate),
         grandTotal: 0,
       }
       checkout.grandTotal = roundMoney(

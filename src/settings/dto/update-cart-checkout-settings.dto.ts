@@ -89,6 +89,39 @@ export class CartWeightSettingsDto {
   volumetricDivisor?: number
 }
 
+export class DeliverySizeLimitDto {
+  @IsString()
+  @IsIn([...CHECKOUT_DELIVERY_METHODS])
+  method!: string
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  maxLongestSideCm!: number
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  maxSideSumCm!: number
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  maxGirthCm!: number
+}
+
+export class CartSizeSettingsDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DeliverySizeLimitDto)
+  limits?: DeliverySizeLimitDto[]
+}
+
 export class UpdateCartCheckoutSettingsDto {
   @IsOptional()
   @IsBoolean()
@@ -191,6 +224,22 @@ export class UpdateCartCheckoutSettingsDto {
   belowMinPackagingFee?: number
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  wholesalerMinOrderAmount?: number | null
+
+  @IsOptional()
+  @IsIn(['reject', 'add_packaging_fee'])
+  wholesalerBelowMinOrderBehavior?: BelowMinOrderBehavior
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  wholesalerBelowMinPackagingFee?: number
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   @IsIn([...CHECKOUT_DELIVERY_METHODS], { each: true })
@@ -219,6 +268,11 @@ export class UpdateCartCheckoutSettingsDto {
   @ValidateNested()
   @Type(() => CartWeightSettingsDto)
   cartWeight?: CartWeightSettingsDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CartSizeSettingsDto)
+  cartSize?: CartSizeSettingsDto
 
   @IsOptional()
   @Type(() => Number)

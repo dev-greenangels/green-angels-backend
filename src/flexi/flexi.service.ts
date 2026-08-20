@@ -16,14 +16,20 @@ import {
   FlexiExportRetryError,
 } from '../orders/erp-sync.errors'
 import { resolveErpSyncStatus } from '../orders/erp-sync.constants'
+import { formatEuVatId } from '../vies/vies.types'
 import { FLEXI_ORDER_CONFLICT_USER_STATUS, FLEXI_STOCK_FILTER_CHUNK } from './flexi.constants'
 import { applyFlexiOrderHeaderMapping } from './flexi-order-export-mapping'
+import { parseSizeLabel } from './flexi-size-label'
 import {
   categoryTranslationCreates,
   mapStromCategoryContent,
   mapStromProductContent,
   productTranslationCreates,
 } from './flexi-strom-content-mapping'
+import {
+  filterStromSubtree,
+  resolveStromTreeAndShopRoot,
+} from './flexi-strom-subtree'
 import { FlexiChangeIntakeService, type FlexiIntakeCollapseGroup } from './flexi.change-intake.service'
 import { FlexiClient } from './flexi.client'
 import { FlexiSettingsService } from './flexi.settings.service'
@@ -51,15 +57,6 @@ function slugify(input: string): string {
       .replace(/^-+|-+$/g, '')
       .slice(0, 80) || 'item'
   )
-}
-
-/** Last segment of SKU: PENN-ALO-LADYU-C2 → C2; …-P9 → P9 */
-function parseSizeLabel(kod: string, nazev: string): string | null {
-  const fromKod = kod.match(/(?:^|[-_\s])((?:P|C|p|c)?\d+(?:\.\d+)?(?:L|l)?)$/)
-  if (fromKod?.[1]) return fromKod[1].toUpperCase()
-  const fromName = nazev.match(/\b((?:P|C)\d+(?:\.\d+)?(?:L)?)\b/i)
-  if (fromName?.[1]) return fromName[1].toUpperCase()
-  return null
 }
 
 /** Flexi product external id on site: flexi:{stromLeafId}. Never bare digits (collides with 1C). */
@@ -605,7 +602,12 @@ export class FlexiService {
       const settings = await this.settings.getSettings()
       if (!settings.syncCategoriesFromStrom) return
       const result = await this.syncStromCatalog()
-      if (!result.ok) {
+      if (result.errors.length > 0) {
+        this.logger.warn(
+          `Strom sync item errors (${result.errors.length}): ${result.errors.slice(0, 8).join(' | ')}`,
+        )
+      }
+      if (!result.ok && result.categoriesUpserted === 0 && result.productsUpserted === 0) {
         throw new Error(result.message || 'Strom sync failed')
       }
       return
@@ -661,7 +663,28 @@ export class FlexiService {
     let orphansCreated = 0
 
     try {
-      const nodes = await this.client.fetchStromNodes(settings.stromRootCode)
+      const planned = resolveStromTreeAndShopRoot(
+        settings.stromRootCode,
+        settings.stromShopRootCode,
+      )
+      let shopRootCode = planned.shopRootCode
+      let nodes = await this.client.fetchStromNodes(planned.treeCode)
+      if (nodes.length === 0 && planned.treeCode.toUpperCase() !== 'STR_CEN') {
+        nodes = await this.client.fetchStromNodes('STR_CEN')
+        if (nodes.length > 0 && !shopRootCode) {
+          shopRootCode = settings.stromRootCode.trim()
+        }
+      }
+      if (shopRootCode) {
+        const subtree = filterStromSubtree(nodes, shopRootCode)
+        if (subtree.length === 0) {
+          errors.push(
+            `Папка каталогу «${shopRootCode}» не знайдена в дереві ${planned.treeCode}.`,
+          )
+        } else {
+          nodes = subtree
+        }
+      }
       const links = await this.client.fetchStromCenikLinks()
       const currency = await this.commerce.getDefaultCurrencyCode()
 
@@ -972,8 +995,9 @@ export class FlexiService {
         }
       }
 
-      // Orphans: cenik with stock not under any leaf
-      if (settings.defaultCategoryId) {
+      // Orphans: cenik with stock not under any leaf. Skip when a shop folder
+      // is set — otherwise Materials / Non-added SKUs leak into the catalog.
+      if (settings.defaultCategoryId && !shopRootCode) {
         let start = 0
         const limit = 100
         for (;;) {
@@ -1016,7 +1040,11 @@ export class FlexiService {
 
       void currency
 
-      const message = `Strom: категорій ${categoriesUpserted}, товарів ${productsUpserted}, варіантів ${variantsUpserted}, orphan ${orphansCreated}, помилок ${errors.length}.`
+      const errorPreview = errors.length
+        ? ` Перші помилки: ${errors.slice(0, 5).join(' | ')}`
+        : ''
+      const message =
+        `Strom: категорій ${categoriesUpserted}, товарів ${productsUpserted}, варіантів ${variantsUpserted}, orphan ${orphansCreated}, помилок ${errors.length}.${errorPreview}`
       await this.settings.updateSettings({
         lastStromSyncAt: new Date().toISOString(),
         lastStromSyncMessage: message,
@@ -1227,7 +1255,7 @@ export class FlexiService {
     const settings = await this.settings.getSettings()
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { items: true },
+      include: { items: true, viesCheck: true },
     })
     if (!order) return { ok: false, message: 'Замовлення не знайдено.' }
 
@@ -1459,6 +1487,17 @@ export class FlexiService {
       )
     }
 
+    const fullBuyerVatId = formatEuVatId(order.vatCountryCode, order.companyVatId)
+    const vies = order.viesCheck
+    if (vies) {
+      notes.push(
+        `VIES ${vies.valid === true ? 'valid' : vies.valid === false ? 'invalid' : 'unavailable'} @ ${vies.checkedAt.toISOString()}`,
+      )
+      if (fullBuyerVatId) notes.push(`Buyer VAT: ${fullBuyerVatId}`)
+      if (vies.requestIdentifier) notes.push(`VIES consultation: ${vies.requestIdentifier}`)
+      if (vies.registeredName) notes.push(`VIES name: ${vies.registeredName}`)
+    }
+
     const document: Record<string, unknown> = {
       id: extId,
       typDokl: `code:${settings.orderDocTypeCode}`,
@@ -1497,7 +1536,8 @@ export class FlexiService {
     if (isB2b) {
       if (order.companyIco) document.ic = order.companyIco
       if (order.companyDic) document.dic = order.companyDic
-      if (order.companyVatId) document.vatId = order.companyVatId
+      const vatId = fullBuyerVatId ?? order.companyVatId?.trim()
+      if (vatId) document.vatId = vatId
     }
     if (street) document.ulice = street
     if (city) document.mesto = city
@@ -1893,6 +1933,7 @@ export class FlexiService {
       companyIco: string | null
       companyDic: string | null
       companyVatId: string | null
+      vatCountryCode: string | null
       currency: string
     },
     isB2b: boolean,
@@ -1941,7 +1982,8 @@ export class FlexiService {
     if (isB2b) {
       if (order.companyIco) adresar.ic = order.companyIco
       if (order.companyDic) adresar.dic = order.companyDic
-      if (order.companyVatId) adresar.vatId = order.companyVatId
+      const vatId = formatEuVatId(order.vatCountryCode, order.companyVatId) ?? order.companyVatId?.trim()
+      if (vatId) adresar.vatId = vatId
     }
     if (street) adresar.ulice = street
     if (city) adresar.mesto = city

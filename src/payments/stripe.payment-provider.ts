@@ -1,15 +1,33 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common'
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { JwtService } from '@nestjs/jwt'
 import { Prisma } from '@prisma/client'
 import Stripe from 'stripe'
 
 import { PrismaService } from '../prisma/prisma.service'
 import { FlexiQueueService } from '../flexi/flexi.queue.service'
+import {
+  ORDER_CONFIRMATION_TOKEN_PURPOSE,
+} from '../orders/order-confirmation.constants'
+import { ONLINE_CARD_PAYMENT_METHOD } from './payments.constants'
 import type {
   CreatePaymentInput,
   CreatePaymentResult,
   PaymentProvider,
 } from './payment-provider.interface'
+
+export type StripePaymentSyncResult = {
+  orderId: string
+  orderNumber: string
+  status: string
+  paymentStatus: string | null
+  synced: boolean
+}
+
+type OrderConfirmationTokenClaims = {
+  purpose?: unknown
+  orderNumber?: unknown
+}
 
 /** Stripe zero-decimal currencies (amount is already in major units). */
 const STRIPE_ZERO_DECIMAL = new Set([
@@ -49,10 +67,15 @@ export class StripePaymentProvider implements PaymentProvider {
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly flexiQueue: FlexiQueueService,
+    private readonly jwt: JwtService,
   ) {}
 
   private getSecretKey(): string {
     return this.config.get<string>('STRIPE_SECRET_KEY')?.trim() ?? ''
+  }
+
+  private getPublishableKey(): string {
+    return this.config.get<string>('STRIPE_PUBLISHABLE_KEY')?.trim() ?? ''
   }
 
   private getWebhookSecret(): string {
@@ -60,7 +83,7 @@ export class StripePaymentProvider implements PaymentProvider {
   }
 
   isConfigured(): boolean {
-    return Boolean(this.getSecretKey())
+    return Boolean(this.getSecretKey() && this.getPublishableKey())
   }
 
   private getClient(): Stripe {
@@ -78,9 +101,18 @@ export class StripePaymentProvider implements PaymentProvider {
 
   async createPayment(input: CreatePaymentInput): Promise<CreatePaymentResult> {
     const stripe = this.getClient()
+    const publishableKey = this.getPublishableKey()
+    if (!publishableKey) {
+      throw new BadRequestException(
+        'Оплата картою через Stripe тимчасово недоступна. Спробуйте інший спосіб оплати.',
+      )
+    }
+
     const currency = input.currency.toLowerCase()
+    const returnUrl = this.buildElementsReturnUrl(input)
 
     const session = await stripe.checkout.sessions.create({
+      ui_mode: 'elements',
       mode: 'payment',
       line_items: [
         {
@@ -94,9 +126,8 @@ export class StripePaymentProvider implements PaymentProvider {
           },
         },
       ],
-      customer_email: input.customerEmail ?? undefined,
-      success_url: input.successUrl,
-      cancel_url: input.failUrl,
+      customer_email: input.customerEmail?.trim() || undefined,
+      return_url: returnUrl,
       metadata: {
         orderId: input.orderId,
         orderNumber: String(input.orderNumber),
@@ -104,8 +135,8 @@ export class StripePaymentProvider implements PaymentProvider {
       },
     })
 
-    if (!session.url) {
-      throw new BadRequestException('Stripe не повернув посилання для оплати.')
+    if (!session.client_secret) {
+      throw new BadRequestException('Stripe не повернув ключ сесії для оплати.')
     }
 
     await this.prisma.order.update({
@@ -120,7 +151,127 @@ export class StripePaymentProvider implements PaymentProvider {
     return {
       provider: this.id,
       paymentId: session.id,
-      paymentPageUrl: session.url,
+      clientSecret: session.client_secret,
+      publishableKey,
+    }
+  }
+
+  /**
+   * Server-side reconciliation: retrieve Checkout Session and update the order.
+   * Used on /checkout/success or after 3DS return when the webhook may lag.
+   */
+  async syncByOrderNumber(
+    rawOrderNumber: string,
+    auth: { userId?: string; confirmationToken?: string },
+  ): Promise<StripePaymentSyncResult> {
+    const order = await this.findOrderByOrderNumber(rawOrderNumber)
+    if (!order) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+
+    const orderNumber = this.formatOrderNumber(order.orderNumber)
+    this.assertOrderPaymentAccess(order, orderNumber, auth)
+
+    if (order.paymentMethod !== ONLINE_CARD_PAYMENT_METHOD || order.paymentProvider !== this.id) {
+      return {
+        orderId: order.id,
+        orderNumber,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        synced: false,
+      }
+    }
+    if (!order.stripePaymentId) {
+      throw new BadRequestException('Для замовлення ще не створено сесію Stripe.')
+    }
+
+    const stripe = this.getClient()
+    const session = await stripe.checkout.sessions.retrieve(order.stripePaymentId)
+
+    if (session.status === 'complete' || session.payment_status === 'paid') {
+      await this.markOrderPaid(session)
+    } else if (session.status === 'expired') {
+      await this.markOrderFailed(session, 'expired')
+    }
+
+    const updated = await this.prisma.order.findUnique({
+      where: { id: order.id },
+      select: { status: true, paymentStatus: true },
+    })
+
+    return {
+      orderId: order.id,
+      orderNumber,
+      status: updated?.status ?? order.status,
+      paymentStatus: updated?.paymentStatus ?? order.paymentStatus,
+      synced: true,
+    }
+  }
+
+  private buildElementsReturnUrl(input: CreatePaymentInput): string {
+    const base = (input.returnUrl ?? input.successUrl).trim()
+    const joiner = base.includes('?') ? '&' : '?'
+    return `${base}${joiner}session_id={CHECKOUT_SESSION_ID}`
+  }
+
+  private formatOrderNumber(orderNumber: number): string {
+    return `ZY-${String(orderNumber).padStart(8, '0')}`
+  }
+
+  private async findOrderByOrderNumber(rawOrderNumber: string): Promise<{
+    id: string
+    userId: string | null
+    status: string
+    paymentMethod: string
+    paymentProvider: string | null
+    paymentStatus: string | null
+    orderNumber: number
+    stripePaymentId: string | null
+  } | null> {
+    const match = rawOrderNumber.trim().match(/(\d+)$/)
+    const numeric = match ? Number(match[1]) : Number.NaN
+    if (!Number.isFinite(numeric) || numeric <= 0) return null
+
+    return this.prisma.order.findUnique({
+      where: { orderNumber: numeric },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        paymentMethod: true,
+        paymentProvider: true,
+        paymentStatus: true,
+        orderNumber: true,
+        stripePaymentId: true,
+      },
+    })
+  }
+
+  private assertOrderPaymentAccess(
+    order: { userId: string | null },
+    formattedOrderNumber: string,
+    auth: { userId?: string; confirmationToken?: string },
+  ): void {
+    const isOwner = Boolean(auth.userId && order.userId && order.userId === auth.userId)
+    if (isOwner) return
+
+    const raw = auth.confirmationToken?.trim()
+    if (!raw) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+
+    let claims: OrderConfirmationTokenClaims
+    try {
+      claims = this.jwt.verify<OrderConfirmationTokenClaims>(raw)
+    } catch {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+
+    if (claims.purpose !== ORDER_CONFIRMATION_TOKEN_PURPOSE) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+    if (typeof claims.orderNumber !== 'string' || claims.orderNumber !== formattedOrderNumber) {
+      throw new NotFoundException('Замовлення не знайдено.')
     }
   }
 

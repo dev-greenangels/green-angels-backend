@@ -47,7 +47,13 @@ import {
   type MediaWatermarkSettings,
 } from './media-watermark.types'
 import { normalizeWholesalePageSettings } from './wholesale-page.normalize'
-import type { WholesalePageSettings } from './wholesale-page.types'
+import {
+  toPublicWholesalePageSettings,
+  type PublicWholesalePageSettings,
+  type WholesalePageCmsCopy,
+  type WholesalePageSettings,
+} from './wholesale-page.types'
+import type { AppLocale } from './localization.types'
 
 export type PublicSiteSettings = {
   store: StoreContactSettings
@@ -58,11 +64,12 @@ export type PublicSiteSettings = {
   localization: LocalizationSettings
   navigation: NavigationSettings
   market: MarketSettings
-  wholesale: WholesalePageSettings
+  wholesale: PublicWholesalePageSettings
   dispatchCalendar: { enabled: boolean }
 }
 
-export type BackstageSiteSettings = PublicSiteSettings & {
+export type BackstageSiteSettings = Omit<PublicSiteSettings, 'wholesale'> & {
+  wholesale: WholesalePageSettings
   prestaImport: PrestaImportSettings
   mediaWatermark: MediaWatermarkSettings
 }
@@ -229,18 +236,21 @@ export class SettingsService {
       localization,
       navigation,
       market,
-      wholesale: normalizeWholesalePageSettings(wholesaleRaw, market.region),
+      wholesale: toPublicWholesalePageSettings(
+        normalizeWholesalePageSettings(wholesaleRaw, market.region),
+      ),
       dispatchCalendar: { enabled: dispatch.enabled },
     }
   }
 
   async getBackstageSettings(): Promise<BackstageSiteSettings> {
-    const [publicSettings, prestaImport, mediaWatermark] = await Promise.all([
+    const [publicSettings, prestaImport, mediaWatermark, wholesale] = await Promise.all([
       this.getPublicSettings(),
       this.getPrestaImportSettings(),
       this.getMediaWatermarkSettings(),
+      this.getWholesalePageSettings(),
     ])
-    return { ...publicSettings, prestaImport, mediaWatermark }
+    return { ...publicSettings, wholesale, prestaImport, mediaWatermark }
   }
 
   async getMediaWatermarkSettings(): Promise<MediaWatermarkSettings> {
@@ -324,10 +334,68 @@ export class SettingsService {
     return this.writeSetting(SETTINGS_KEYS.HOME_PAGE, next)
   }
 
-  async updateWholesalePage(patch: Partial<WholesalePageSettings>): Promise<WholesalePageSettings> {
+  async updateWholesalePage(
+    patch: import('./dto/update-wholesale-page-settings.dto').UpdateWholesalePageSettingsDto,
+  ): Promise<WholesalePageSettings> {
     const market = await this.getMarketSettings()
     const current = await this.getWholesalePageSettings()
-    const next = normalizeWholesalePageSettings({ ...current, ...patch }, market.region)
+    const {
+      byLocale: patchByLocale,
+      locale: patchLocale,
+      title,
+      intro,
+      paragraphs,
+      seoTitle,
+      seoDescription,
+      formTitle,
+      formIntro,
+      pageEnabled,
+      notifyEmailEnabled,
+      notifyEmail,
+    } = patch
+
+    const mergedByLocale: WholesalePageSettings['byLocale'] = {
+      ...current.byLocale,
+    }
+
+    if (patchByLocale && typeof patchByLocale === 'object') {
+      for (const [loc, copy] of Object.entries(patchByLocale)) {
+        if (!copy || typeof copy !== 'object') continue
+        mergedByLocale[loc as AppLocale] = copy as WholesalePageCmsCopy
+      }
+    }
+
+    if (
+      patchLocale &&
+      (title !== undefined ||
+        intro !== undefined ||
+        paragraphs !== undefined ||
+        seoTitle !== undefined ||
+        seoDescription !== undefined ||
+        formTitle !== undefined ||
+        formIntro !== undefined)
+    ) {
+      const existing = mergedByLocale[patchLocale]
+      mergedByLocale[patchLocale] = {
+        title: title ?? existing?.title ?? '',
+        intro: intro ?? existing?.intro ?? '',
+        paragraphs: paragraphs ?? existing?.paragraphs ?? [],
+        seoTitle: seoTitle ?? existing?.seoTitle ?? '',
+        seoDescription: seoDescription ?? existing?.seoDescription ?? '',
+        formTitle: formTitle ?? existing?.formTitle ?? '',
+        formIntro: formIntro ?? existing?.formIntro ?? '',
+      }
+    }
+
+    const next = normalizeWholesalePageSettings(
+      {
+        pageEnabled: pageEnabled ?? current.pageEnabled,
+        notifyEmailEnabled: notifyEmailEnabled ?? current.notifyEmailEnabled,
+        notifyEmail: notifyEmail === undefined ? current.notifyEmail : notifyEmail,
+        byLocale: mergedByLocale,
+      },
+      market.region,
+    )
     return this.writeSetting(SETTINGS_KEYS.WHOLESALE_PAGE, next)
   }
 

@@ -67,6 +67,8 @@ export type CheckoutTotalsBreakdown = {
   codFeeAmount: number
   grandTotal: number
   minOrderAmount: number | null
+  belowMinOrderBehavior?: 'reject' | 'add_packaging_fee'
+  belowMinPackagingFee?: number
   belowMinOrder: boolean
   canPlaceOrder: boolean
   belowMinOrderMessage: string | null
@@ -80,7 +82,7 @@ export type CheckoutTotalsBreakdown = {
   /** Reverse charge + inc_vat: % to strip from gross line prices for display/payable */
   stripVatRatePercent?: number | null
   taxAppliesToFees?: boolean
-  /** Способи доставки, дозволені після фільтрації за deliveryWeightRules та вагою кошика */
+  /** Способи доставки після фільтрів ваги (deliveryWeightRules) і габаритів (cartSize) */
   allowedDeliveryMethods: string[]
 }
 
@@ -101,6 +103,13 @@ export type PricingQuoteResult = {
   checkout?: CheckoutTotalsBreakdown
   /** Загальна вага кошика (кг), для фільтрації способів доставки */
   cartWeightKg?: number
+  /** Габаритний конверт кошика для cartSize limits */
+  cartSizeEnvelope?: {
+    maxLongestSideCm: number
+    maxSideSumCm: number
+    maxGirthCm: number
+    hasMeasuredItem: boolean
+  }
   /** Об’єм кошика (л) для packagingMode=boxes */
   cartVolumeL?: number
 }

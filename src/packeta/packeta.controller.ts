@@ -6,13 +6,23 @@ import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { PacketaService } from './packeta.service'
 import { PacketaSettingsService } from './packeta.settings.service'
-import type { PacketaListPickupPointsQuery, PacketaSettings } from './packeta.types'
+import type {
+  PacketaListCitiesQuery,
+  PacketaListPickupPointsQuery,
+  PacketaSettings,
+} from './packeta.types'
 
 @Controller('packeta')
 export class PacketaController {
   constructor(private readonly packeta: PacketaService) {}
 
-  /** Публічний ендпойнт — вибір výdejní místo на checkout. */
+  /** City / PSC search for checkout step 1. */
+  @Get('cities')
+  listCities(@Query() query: PacketaListCitiesQuery) {
+    return this.packeta.listCities(query)
+  }
+
+  /** Pickup points — pass `city` for full city list (step 2). */
   @Get('pickup-points')
   listPickupPoints(@Query() query: PacketaListPickupPointsQuery) {
     return this.packeta.listPickupPoints(query)
@@ -27,7 +37,7 @@ export class PacketaAdminController {
 
   @Get('settings')
   getSettings() {
-    return this.settings.getPublicSettings()
+    return this.settings.getAdminSettings()
   }
 
   @Patch('settings')

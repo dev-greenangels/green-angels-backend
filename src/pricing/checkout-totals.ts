@@ -1,6 +1,18 @@
-import type { CartCheckoutSettings, CarrierRateTier, DeliveryMode } from '../settings/cart-checkout.types'
+import type { Role } from '@prisma/client'
+
+import type {
+  BelowMinOrderBehavior,
+  CartCheckoutSettings,
+  CarrierRateTier,
+  DeliveryMode,
+} from '../settings/cart-checkout.types'
 import type { CheckoutDeliveryMethodSlug } from '../settings/checkout-methods.constants'
+import {
+  filterDeliveryMethodsBySize,
+  type CartSizeEnvelope,
+} from './delivery-size.util'
 import { filterDeliveryMethodsByWeight } from './delivery-weight.util'
+import { resolveMinOrderPolicy } from './min-order-policy'
 import { roundMoney } from './pricing.helpers'
 import { netToGross, grossToNet } from './vat-price'
 
@@ -19,8 +31,15 @@ export type CheckoutTotalsBreakdown = {
   codFeeAmount: number
   grandTotal: number
   minOrderAmount: number | null
+  /** Resolved policy for this audience (retail vs wholesaler) */
+  belowMinOrderBehavior: BelowMinOrderBehavior
+  belowMinPackagingFee: number
   belowMinOrder: boolean
   canPlaceOrder: boolean
+  /**
+   * @deprecated Prefer shop i18n from minOrderAmount + belowMinOrderBehavior.
+   * Kept null so clients do not show hardcoded UA strings.
+   */
   belowMinOrderMessage: string | null
   showDelivery: boolean
   showPackaging: boolean
@@ -145,8 +164,12 @@ export function computeCheckoutTotals(input: {
   paymentMethod?: string
   /** Вага кошика (кг) — для фільтрації способів доставки за deliveryWeightRules */
   cartWeightKg?: number
+  /** Габаритний конверт кошика — для cartSize limits */
+  cartSizeEnvelope?: CartSizeEnvelope | null
   /** Об’єм кошика (л) — для packagingMode=boxes */
   cartVolumeL?: number
+  /** Prisma Role — WHOLESALER uses wholesaler* min-order fields */
+  audienceRole?: Role | string | null
   /** Override VAT from SK country / OSS / reverse charge resolution */
   taxOverride?: {
     taxRatePercent: number
@@ -164,7 +187,9 @@ export function computeCheckoutTotals(input: {
     deliveryMethod,
     paymentMethod,
     cartWeightKg,
+    cartSizeEnvelope,
     cartVolumeL,
+    audienceRole,
     taxOverride,
   } = input
   const discountAmount = Math.max(0, roundMoney(subtotalBeforeDiscount - productsSubtotal))
@@ -173,25 +198,21 @@ export function computeCheckoutTotals(input: {
   const taxIncluded = taxOverride?.taxIncluded ?? settings.taxIncluded
   const isReverseCharge = taxOverride?.taxRegime === 'reverse_charge'
 
-  const minOrderAmount =
-    settings.minOrderAmount != null && settings.minOrderAmount > 0
-      ? settings.minOrderAmount
-      : null
+  const minPolicy = resolveMinOrderPolicy(settings, audienceRole)
+  const minOrderAmount = minPolicy.minOrderAmount
   const belowMinOrder =
     minOrderAmount != null && productsSubtotal + 0.001 < minOrderAmount
 
   let canPlaceOrder = true
-  let belowMinOrderMessage: string | null = null
   let packagingAmount = 0
   let packagingBoxCount = 0
   let packagingPalletCount = 0
 
   if (belowMinOrder) {
-    if (settings.belowMinOrderBehavior === 'reject') {
+    if (minPolicy.belowMinOrderBehavior === 'reject') {
       canPlaceOrder = false
-      belowMinOrderMessage = `Мінімальна сума замовлення — ${minOrderAmount!.toLocaleString('uk-UA')} ₴.`
     } else {
-      packagingAmount += Math.max(0, settings.belowMinPackagingFee)
+      packagingAmount += Math.max(0, minPolicy.belowMinPackagingFee)
     }
   }
 
@@ -269,11 +290,16 @@ export function computeCheckoutTotals(input: {
     }
   }
 
-  const allowedDeliveryMethods = filterDeliveryMethodsByWeight(
+  const byWeight = filterDeliveryMethodsByWeight(
     settings.enabledDeliveryMethods,
     cartWeightKg ?? 0,
     settings.deliveryWeightRules,
     settings.cartWeight.enabled,
+  )
+  const allowedDeliveryMethods = filterDeliveryMethodsBySize(
+    byWeight,
+    cartSizeEnvelope,
+    settings.cartSize,
   )
 
   return {
@@ -289,9 +315,11 @@ export function computeCheckoutTotals(input: {
     codFeeAmount,
     grandTotal,
     minOrderAmount,
+    belowMinOrderBehavior: minPolicy.belowMinOrderBehavior,
+    belowMinPackagingFee: minPolicy.belowMinPackagingFee,
     belowMinOrder,
     canPlaceOrder,
-    belowMinOrderMessage,
+    belowMinOrderMessage: null,
     showDelivery: settings.showDelivery,
     showPackaging: settings.showPackaging,
     showTax: settings.showTax,

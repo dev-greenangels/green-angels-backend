@@ -33,7 +33,9 @@ import { ReferralsService } from '../referrals/referrals.service'
 import { NovaPoshtaSettingsService } from '../nova-poshta/nova-poshta.settings.service'
 import { normalizeNpListData } from '../nova-poshta/nova-poshta.client'
 import { MailService } from '../mail/mail.service'
-import { buildOrderConfirmationPdf } from '../mail/order-confirmation-pdf'
+import { buildOrderDocumentPdf } from '../mail/order-document-pdf'
+import { buildOrderDocumentPdfInput } from './order-pdf.builder'
+import type { ViesValidationResult } from '../vies/vies.types'
 import { FlexiQueueService } from '../flexi/flexi.queue.service'
 import { FlexiService } from '../flexi/flexi.service'
 import { FlexiSettingsService } from '../flexi/flexi.settings.service'
@@ -126,6 +128,29 @@ export type BackstageOrderDetail = BackstageOrderListItem & {
   erpLastErrorMessage: string | null
   erpLastSyncAt: string | null
   erpSyncedAt: string | null
+  buyerType: string | null
+  taxRegime: string | null
+  taxRatePercent: number | null
+  taxCountryCode: string | null
+  vatCountryCode: string | null
+  companyLegalName: string | null
+  companyIco: string | null
+  companyDic: string | null
+  companyVatId: string | null
+  companyStreet: string | null
+  companyCity: string | null
+  companyPostalCode: string | null
+  viesCheck: {
+    valid: boolean | null
+    vatCountryCode: string
+    vatNumber: string
+    checkedAt: string
+    viesRequestDate: string | null
+    requestIdentifier: string | null
+    registeredName: string | null
+    registeredAddress: string | null
+    source: string
+  } | null
   items: BackstageOrderItem[]
 }
 
@@ -139,6 +164,10 @@ export type CreatedOrderResponse = {
   /** Guest capability JWT for GET /orders/confirmation (DEC-002 / SEC-008). */
   confirmationToken: string
   paymentPageUrl?: string
+  /** Stripe Checkout Session client_secret — only when onlineCardProvider=stripe. */
+  clientSecret?: string
+  /** Stripe publishable key — only when clientSecret is present. */
+  publishableKey?: string
 }
 
 export type PublicOrderConfirmationItem = {
@@ -180,6 +209,19 @@ export type PublicOrderConfirmation = {
   paymentMethod: string
   paymentStatus: string | null
   comment: string | null
+  buyerType: string | null
+  taxRegime: string | null
+  taxRatePercent: number | null
+  vatCountryCode: string | null
+  companyLegalName: string | null
+  companyIco: string | null
+  companyDic: string | null
+  companyVatId: string | null
+  companyStreet: string | null
+  companyCity: string | null
+  companyPostalCode: string | null
+  deliveryPostalCode: string | null
+  deliveryCountryCode: string | null
   items: PublicOrderConfirmationItem[]
 }
 
@@ -225,6 +267,135 @@ export class OrdersService {
 
   formatOrderNumber(orderNumber: number): string {
     return `ZY-${String(orderNumber).padStart(8, '0')}`
+  }
+
+  private mapViesCheck(
+    row: {
+      valid: boolean | null
+      vatCountryCode: string
+      vatNumber: string
+      checkedAt: Date
+      viesRequestDate: string | null
+      requestIdentifier: string | null
+      registeredName: string | null
+      registeredAddress: string | null
+      source: string
+    } | null | undefined,
+  ): BackstageOrderDetail['viesCheck'] {
+    if (!row) return null
+    return {
+      valid: row.valid,
+      vatCountryCode: row.vatCountryCode,
+      vatNumber: row.vatNumber,
+      checkedAt: row.checkedAt.toISOString(),
+      viesRequestDate: row.viesRequestDate,
+      requestIdentifier: row.requestIdentifier,
+      registeredName: row.registeredName,
+      registeredAddress: row.registeredAddress,
+      source: row.source,
+    }
+  }
+
+  private mapPublicOrderFields(order: {
+    buyerType: string | null
+    taxRegime: string | null
+    taxRatePercent: number | null
+    vatCountryCode: string | null
+    companyLegalName: string | null
+    companyIco: string | null
+    companyDic: string | null
+    companyVatId: string | null
+    companyStreet: string | null
+    companyCity: string | null
+    companyPostalCode: string | null
+    deliveryPostalCode: string | null
+    deliveryCountryCode: string | null
+  }) {
+    return {
+      buyerType: order.buyerType,
+      taxRegime: order.taxRegime,
+      taxRatePercent: order.taxRatePercent,
+      vatCountryCode: order.vatCountryCode,
+      companyLegalName: order.companyLegalName,
+      companyIco: order.companyIco,
+      companyDic: order.companyDic,
+      companyVatId: order.companyVatId,
+      companyStreet: order.companyStreet,
+      companyCity: order.companyCity,
+      companyPostalCode: order.companyPostalCode,
+      deliveryPostalCode: order.deliveryPostalCode,
+      deliveryCountryCode: order.deliveryCountryCode,
+    }
+  }
+
+  private async resolveOrderPdfBankDetails() {
+    const [cart, store] = await Promise.all([
+      this.settings.getCartCheckoutSettings(),
+      this.settings.getStoreContactSettings(),
+    ])
+    const bank = cart.bankDetailsSource === 'store' ? store.companyDetails : cart.bankDetails
+    return { cart, bank }
+  }
+
+  private async buildOrderPdfByOrderNumber(
+    rawOrderNumber: string,
+    auth?: { userId?: string; confirmationToken?: string },
+    options?: { internal?: boolean },
+  ): Promise<Buffer> {
+    const match = rawOrderNumber.trim().match(/(\d+)$/)
+    const numeric = match ? Number(match[1]) : Number.NaN
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { orderNumber: numeric },
+      include: {
+        items: { orderBy: { id: 'asc' } },
+        viesCheck: true,
+      },
+    })
+    if (!order) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+
+    const orderNumber = this.formatOrderNumber(order.orderNumber)
+    if (!options?.internal) {
+      const isOwner = Boolean(auth?.userId && order.userId && order.userId === auth.userId)
+      if (!isOwner) {
+        try {
+          this.confirmationTokens.assertValid(auth?.confirmationToken, orderNumber)
+        } catch {
+          throw new NotFoundException('Замовлення не знайдено.')
+        }
+      }
+    }
+
+    const [market, { cart, bank }] = await Promise.all([
+      this.settings.getMarketSettings(),
+      this.resolveOrderPdfBankDetails(),
+    ])
+
+    const input = buildOrderDocumentPdfInput({
+      order,
+      market,
+      bank,
+      bankDetailsSource: cart.bankDetailsSource === 'store' ? 'store' : 'cart',
+      orderPdfTitle: cart.orderPdfTitle,
+      paymentPurposeTemplate: cart.paymentPurposeTemplate,
+    })
+    return buildOrderDocumentPdf(input)
+  }
+
+  private async buildOrderPdfById(orderId: string): Promise<Buffer> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { orderNumber: true },
+    })
+    if (!order) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+    return this.buildOrderPdfByOrderNumber(String(order.orderNumber), undefined, { internal: true })
   }
 
   private async resolveOrderItemSnapshots(variantIds: string[]) {
@@ -448,6 +619,7 @@ export class OrdersService {
           orderBy: { id: 'asc' },
         },
         cancellationReason: true,
+        viesCheck: true,
       },
     })
 
@@ -489,6 +661,19 @@ export class OrdersService {
       erpLastErrorMessage: order.erpLastErrorMessage ?? null,
       erpLastSyncAt: order.erpLastSyncAt?.toISOString() ?? null,
       erpSyncedAt: order.erpSyncedAt?.toISOString() ?? null,
+      buyerType: order.buyerType,
+      taxRegime: order.taxRegime,
+      taxRatePercent: order.taxRatePercent,
+      taxCountryCode: order.taxCountryCode,
+      vatCountryCode: order.vatCountryCode,
+      companyLegalName: order.companyLegalName,
+      companyIco: order.companyIco,
+      companyDic: order.companyDic,
+      companyVatId: order.companyVatId,
+      companyStreet: order.companyStreet,
+      companyCity: order.companyCity,
+      companyPostalCode: order.companyPostalCode,
+      viesCheck: this.mapViesCheck(order.viesCheck),
       items: order.items.map((item) => {
         const price = Number(item.priceAtPurchase)
         return {
@@ -570,6 +755,7 @@ export class OrdersService {
       paymentMethod: order.paymentMethod,
       paymentStatus: order.paymentStatus,
       comment: order.comment,
+      ...this.mapPublicOrderFields(order),
       items: order.items.map((item) => {
         const lineTotal = Math.round(Number(item.priceAtPurchase) * item.quantity * 100) / 100
         return {
@@ -1179,11 +1365,22 @@ export class OrdersService {
     const cartSettings = cartSettingsEarly
 
     let viesValid: boolean | null = null
+    let viesAudit: ViesValidationResult | null = null
     const buyerType = dto.buyerType === 'company' ? 'company' : 'individual'
     const vatCountryCode = dto.vatCountryCode?.trim().toUpperCase() || null
     if (buyerType === 'company' && dto.companyVatId?.trim() && vatCountryCode) {
-      const viesResult = await this.vies.validateVat(vatCountryCode, dto.companyVatId)
-      viesValid = viesResult.valid
+      const [cartBank, store] = await Promise.all([
+        Promise.resolve(cartSettings),
+        this.settings.getStoreContactSettings(),
+      ])
+      const bankForRequester =
+        cartBank.bankDetailsSource === 'store' ? store.companyDetails : cartBank.bankDetails
+      viesAudit = await this.vies.validateVatForAudit(
+        vatCountryCode,
+        dto.companyVatId,
+        bankForRequester.icDph,
+      )
+      viesValid = viesAudit.valid
     }
 
     const cnByVariant = await this.pricing.getCnCodesForVariantIds(
@@ -1227,7 +1424,9 @@ export class OrdersService {
       deliveryMethod,
       paymentMethod: dto.paymentMethod,
       cartWeightKg: quote.cartWeightKg,
+      cartSizeEnvelope: quote.cartSizeEnvelope,
       cartVolumeL: quote.cartVolumeL,
+      audienceRole: audience.role,
       taxOverride: tax,
     })
 
@@ -1257,6 +1456,7 @@ export class OrdersService {
           checkout.minOrderAmount != null
             ? convertEurToHuf(checkout.minOrderAmount, rate)
             : null,
+        belowMinPackagingFee: convertEurToHuf(checkout.belowMinPackagingFee, rate),
         grandTotal: 0,
       }
       checkout.grandTotal = roundMoney(
@@ -1274,9 +1474,7 @@ export class OrdersService {
     }
 
     if (!checkout.canPlaceOrder) {
-      throw new BadRequestException(
-        checkout.belowMinOrderMessage ?? 'Сума замовлення менша за мінімальну.',
-      )
+      throw new BadRequestException('Сума замовлення менша за мінімальну.')
     }
 
     const receiverPhone =
@@ -1366,13 +1564,9 @@ export class OrdersService {
         .filter((d): d is Date => d instanceof Date)
         .map((d) => d.toISOString().slice(0, 10))
 
-      let dateToUse = dto.preferredShipDate?.trim() || ''
+      const dateToUse = dto.preferredShipDate?.trim() || ''
       if (!dateToUse) {
-        const dates = await this.dispatchCalendar.listAvailableDates({ availableFromDates })
-        dateToUse = dates[0]?.date ?? ''
-      }
-      if (!dateToUse) {
-        throw new BadRequestException('Немає доступних дат відправки.')
+        throw new BadRequestException('Оберіть дату відправки.')
       }
       try {
         await this.dispatchCalendar.assertDateAvailable(dateToUse, availableFromDates)
@@ -1499,11 +1693,32 @@ export class OrdersService {
           companyIco,
           companyDic,
           companyVatId,
+          vatCountryCode,
           companyStreet,
           companyCity,
           companyPostalCode,
           preferredShipDate,
           userId,
+          viesCheck: viesAudit
+            ? {
+                create: {
+                  vatCountryCode: viesAudit.countryCode,
+                  vatNumber: viesAudit.vatNumber,
+                  valid: viesAudit.valid,
+                  checkedAt: new Date(),
+                  viesRequestDate: viesAudit.checkedAt ?? null,
+                  requestIdentifier: viesAudit.requestIdentifier ?? null,
+                  registeredName: viesAudit.name ?? null,
+                  registeredAddress: viesAudit.address ?? null,
+                  requesterCountryCode: viesAudit.requesterCountryCode ?? null,
+                  requesterVatNumber: viesAudit.requesterVatNumber ?? null,
+                  source: viesAudit.source ?? 'vies_rest',
+                  rawResponse: viesAudit.rawResponse
+                    ? (JSON.parse(JSON.stringify(viesAudit.rawResponse)) as Prisma.InputJsonValue)
+                    : undefined,
+                },
+              }
+            : undefined,
           privacyConsentAt: hasPrivacyConsent ? new Date() : null,
           privacyConsentVersion: hasPrivacyConsent
             ? dto.privacyConsentVersion?.trim() || marketSettings.privacyConsentVersion
@@ -1721,7 +1936,11 @@ export class OrdersService {
         returnBaseUrl: dto.returnBaseUrl,
         confirmationToken,
       })
-      if (payment) response.paymentPageUrl = payment.paymentPageUrl
+      if (payment) {
+        if (payment.paymentPageUrl) response.paymentPageUrl = payment.paymentPageUrl
+        if (payment.clientSecret) response.clientSecret = payment.clientSecret
+        if (payment.publishableKey) response.publishableKey = payment.publishableKey
+      }
     }
 
     // LOCAL async export, or EXTERNAL offline — never double-enqueue after successful connected await.
@@ -1746,20 +1965,7 @@ export class OrdersService {
       if (sendSitePdf) {
         void this.sendOrderConfirmationEmailSafe({
           to: customerEmail,
-          orderNumber: response.orderNumber,
-          currency: response.currency,
-          customerName: `${dto.customerFirstName} ${dto.customerLastName}`.trim(),
-          checkout,
-          items: quote.lines.map((line) => {
-            const snapshot = snapshotByVariantId.get(line.productVariantId)
-            const label = snapshot?.variantLabel
-            const baseName = snapshot?.productName ?? line.productVariantId
-            return {
-              name: label ? `${baseName} (${label})` : baseName,
-              quantity: line.quantity,
-              lineTotal: line.lineTotal,
-            }
-          }),
+          orderId: order.id,
         })
       }
     }
@@ -1830,71 +2036,40 @@ export class OrdersService {
     })
   }
 
-  private async sendOrderConfirmationEmailSafe(input: {
-    to: string
-    orderNumber: string
-    currency: string
-    customerName: string
-    checkout: ReturnType<typeof computeCheckoutTotals>
-    items: Array<{ name: string; quantity: number; lineTotal: number }>
-  }) {
+  async buildConfirmationPdf(
+    orderNumber: string,
+    auth?: { userId?: string; confirmationToken?: string },
+  ): Promise<Buffer> {
+    return this.buildOrderPdfByOrderNumber(orderNumber, auth)
+  }
+
+  private async sendOrderConfirmationEmailSafe(input: { to: string; orderId: string }) {
     try {
-      const [cart, market, store] = await Promise.all([
+      const [cart, market] = await Promise.all([
         this.settings.getCartCheckoutSettings(),
         this.settings.getMarketSettings(),
-        this.settings.getStoreContactSettings(),
       ])
       if (cart.orderPdfEmailEnabled === false) {
         return
       }
 
-      const bank =
-        cart.bankDetailsSource === 'store' ? store.companyDetails : cart.bankDetails
-      const isSk = market.region === 'sk'
-      const companyLines = [
-        bank.organizationName,
-        bank.edrpou ? (isSk ? `IČO: ${bank.edrpou}` : `ЄДРПОУ / ІПН: ${bank.edrpou}`) : '',
-        bank.dic ? `DIČ: ${bank.dic}` : '',
-        bank.icDph ? `IČ DPH: ${bank.icDph}` : '',
-        bank.iban ? `IBAN: ${bank.iban}` : '',
-        bank.bic ? `BIC: ${bank.bic}` : '',
-        bank.mfo && !isSk ? `МФО: ${bank.mfo}` : '',
-        bank.bankName,
-        bank.legalAddress,
-        bank.taxStatus,
-      ].filter(Boolean)
-
-      const title =
-        cart.orderPdfTitle.trim() ||
-        (isSk
-          ? 'Order confirmation / Potvrdenie objednávky'
-          : 'Підтвердження замовлення')
-
-      const pdf = await buildOrderConfirmationPdf({
-        orderNumber: input.orderNumber,
-        customerName: input.customerName,
-        customerEmail: input.to,
-        currency: input.currency,
-        items: input.items,
-        productsSubtotal: input.checkout.productsSubtotal,
-        taxAmount: input.checkout.taxAmount,
-        taxIncluded: input.checkout.taxIncluded,
-        deliveryAmount: input.checkout.deliveryAmount,
-        packagingAmount: input.checkout.packagingAmount,
-        codFeeAmount: input.checkout.codFeeAmount,
-        grandTotal: input.checkout.grandTotal,
-        companyLines,
-        title,
+      const order = await this.prisma.order.findUnique({
+        where: { id: input.orderId },
+        select: { orderNumber: true },
       })
+      if (!order) return
+
+      const formatted = this.formatOrderNumber(order.orderNumber)
+      const pdf = await this.buildOrderPdfById(input.orderId)
       await this.mail.sendOrderConfirmationEmail({
         to: input.to,
-        orderNumber: input.orderNumber,
+        orderNumber: formatted,
         pdf,
         region: market.region,
       })
     } catch (err) {
       this.logger.warn(
-        `Не вдалося надіслати підтвердження ${input.orderNumber}: ${
+        `Не вдалося надіслати підтвердження для ${input.orderId}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       )

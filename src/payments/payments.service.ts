@@ -122,6 +122,7 @@ export class PaymentsService {
       customerEmail: order.customerEmail,
       successUrl: `${shopUrl}/checkout/success?order=${encodeURIComponent(orderNumber)}${confirmationQuery}`,
       failUrl: `${shopUrl}/checkout/success?order=${encodeURIComponent(orderNumber)}${confirmationQuery}&payment=cancelled`,
+      returnUrl: `${shopUrl}/checkout?stripe_return=1&order=${encodeURIComponent(orderNumber)}${confirmationQuery}`,
       confirmationToken: confirmationToken || undefined,
       metadata: Object.keys(metadata).length ? metadata : undefined,
     }

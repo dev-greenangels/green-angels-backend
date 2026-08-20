@@ -18,6 +18,7 @@ import { VariantLabelService } from '../products/variant-label.service'
 import { VARIANT_LABEL_ATTRIBUTE_SELECT } from '../products/variant-label.util'
 import { SettingsService } from '../settings/settings.service'
 import { buildCategoryDescendantMap, type CategoryDescendantMap } from './category-scope.util'
+import { computeCartSizeEnvelope } from './delivery-size.util'
 import { computeCartWeightKg, computeCartVolumeLiters } from './delivery-weight.util'
 import {
   isWithinDateRange,
@@ -880,6 +881,7 @@ export class PricingService {
 
     const cartWeightKg = computeCartWeightKg(variants, uniqueItems, cartWeightSettings)
     const cartVolumeL = computeCartVolumeLiters(variants, uniqueItems)
+    const cartSizeEnvelope = computeCartSizeEnvelope(variants, uniqueItems)
 
     return {
       lines,
@@ -888,6 +890,7 @@ export class PricingService {
       totalAmount,
       cartWeightKg,
       cartVolumeL,
+      cartSizeEnvelope,
       promoCodeId: appliedPromoIdList[0] ?? null,
       promoCode: appliedPromoCodes[0] ?? null,
       promoCodeIds: appliedPromoIdList,

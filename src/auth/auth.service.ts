@@ -104,6 +104,7 @@ export class AuthService {
       firstName: user.firstName ?? null,
       lastName: user.lastName ?? null,
       role: prismaRoleToApi(user.role),
+      accountType: user.role === Role.WHOLESALER ? 'wholesale' : 'retail',
     }
   }
 
@@ -116,6 +117,7 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        accountType: user.accountType,
       },
     }
   }
