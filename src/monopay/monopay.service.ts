@@ -1,15 +1,17 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { createPublicKey, createVerify } from 'crypto'
 
+import { OrderPaymentLifecycleService } from '../orders/order-payment-lifecycle.service'
 import { PrismaService } from '../prisma/prisma.service'
-import { FlexiQueueService } from '../flexi/flexi.queue.service'
 import { MonopaySyncTokenService } from './monopay-sync-token.service'
 import {
   MONOPAY_API_BASE,
@@ -17,7 +19,6 @@ import {
   MONOPAY_INVOICE_VALIDITY_SEC,
   MONOPAY_PAYMENT_METHOD,
   type MonopayCreateInvoiceResponse,
-  type MonopayInvoiceStatus,
   type MonopayWebhookPayload,
 } from './monopay.constants'
 
@@ -47,8 +48,9 @@ export class MonopayService {
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
-    private readonly flexiQueue: FlexiQueueService,
     private readonly syncTokens: MonopaySyncTokenService,
+    @Inject(forwardRef(() => OrderPaymentLifecycleService))
+    private readonly paymentLifecycle: OrderPaymentLifecycleService,
   ) {}
 
   private formatOrderNumber(orderNumber: number): string {
@@ -363,16 +365,38 @@ export class MonopayService {
       return order
     }
 
-    const nextStatus = this.mapPaymentToOrderStatus(payload.status, order.status)
+    const monopayModifiedAt = payload.modifiedDate
+      ? new Date(payload.modifiedDate)
+      : new Date()
+    const invoiceId = order.monopayInvoiceId ?? payload.invoiceId
+
+    if (payload.status === 'success') {
+      await this.paymentLifecycle.applyPaymentSuccess(order.id, {
+        provider: 'monopay',
+        paymentId: invoiceId,
+        monopayModifiedAt,
+      })
+      const refreshed = await this.prisma.order.findUnique({
+        where: { id: order.id },
+        select: {
+          id: true,
+          status: true,
+          paymentMethod: true,
+          orderNumber: true,
+          monopayInvoiceId: true,
+          monopayModifiedAt: true,
+          paymentStatus: true,
+        },
+      })
+      return refreshed ?? order
+    }
+
     const updated = await this.prisma.order.update({
       where: { id: order.id },
       data: {
         paymentStatus: payload.status,
-        monopayInvoiceId: order.monopayInvoiceId ?? payload.invoiceId,
-        monopayModifiedAt: payload.modifiedDate
-          ? new Date(payload.modifiedDate)
-          : new Date(),
-        ...(nextStatus ? { status: nextStatus } : {}),
+        monopayInvoiceId: invoiceId,
+        monopayModifiedAt,
       },
       select: {
         id: true,
@@ -385,28 +409,47 @@ export class MonopayService {
       },
     })
 
-    if (payload.status === 'success') {
-      void this.flexiQueue.enqueueExportOrderAfterOnlineCardPaid(order.id).catch((err) => {
-        this.logger.warn(
-          `Flexi export after MonoPay paid failed for ${order.id}: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        )
-      })
-    }
-
     return updated
   }
 
-  /** Only advances order status on successful payment; unpaid/failed leave AWAITING_PAYMENT. */
-  private mapPaymentToOrderStatus(
-    paymentStatus: MonopayInvoiceStatus | string,
-    currentOrderStatus: string,
-  ): string | null {
-    if (paymentStatus !== 'success') return null
-    if (currentOrderStatus === 'AWAITING_PAYMENT' || currentOrderStatus === 'PENDING') {
-      return 'PROCESSING'
+  /** Invalidate unpaid invoice on cancel (Mono POST /api/merchant/invoice/remove). */
+  async removeInvoiceIfPossible(invoiceId: string): Promise<boolean> {
+    if (!invoiceId.trim() || !this.isConfigured()) return false
+    try {
+      await this.monopayFetch<{ status?: string }>('/api/merchant/invoice/remove', {
+        method: 'POST',
+        body: JSON.stringify({ invoiceId }),
+      })
+      return true
+    } catch (err) {
+      this.logger.warn(
+        `Mono invoice/remove ${invoiceId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+      return false
     }
-    return null
+  }
+
+  /**
+   * Late-pay refund/reverse for a paid invoice.
+   * Mono: POST /api/merchant/invoice/cancel — best-effort; logs if unavailable.
+   */
+  async refundOrCancelPaidInvoice(invoiceId: string): Promise<boolean> {
+    if (!invoiceId.trim() || !this.isConfigured()) return false
+    try {
+      await this.monopayFetch<{ status?: string }>('/api/merchant/invoice/cancel', {
+        method: 'POST',
+        body: JSON.stringify({ invoiceId }),
+      })
+      return true
+    } catch (err) {
+      this.logger.error(
+        `Mono invoice/cancel (late refund) ${invoiceId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+      return false
+    }
   }
 }

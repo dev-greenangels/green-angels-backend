@@ -2,6 +2,13 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import PDFDocument from 'pdfkit'
 
+import {
+  getOrderPdfLabels,
+  pdfIntlLocale,
+  resolveOrderPdfLocale,
+  type OrderPdfLocale,
+} from '../orders/order-pdf-labels'
+
 export type OrderDocumentParty = {
   name: string
   lines: string[]
@@ -25,7 +32,9 @@ export type OrderDocumentVies = {
 
 export type OrderDocumentPdfInput = {
   region: 'ua' | 'sk'
-  title: string
+  /** UI locale for PDF strings (uk|en|sk|hu|de|cs). */
+  locale?: string
+  title?: string
   orderNumber: string
   orderDate: string
   currency: string
@@ -63,6 +72,19 @@ function resolveDejaVuPath(file: string): string | null {
     join(process.cwd(), 'assets', 'fonts', file),
     join(process.cwd(), 'green-angels-backend', 'assets', 'fonts', file),
   ]
+  return candidates.find((p) => existsSync(p)) ?? null
+}
+
+function resolveLogoPath(region: 'ua' | 'sk'): string | null {
+  const file = region === 'sk' ? 'logo-sk.png' : 'logo-ua.png'
+  const candidates = [
+    process.env.ORDER_PDF_LOGO_PATH?.trim() || '',
+    join(__dirname, '..', '..', 'assets', 'branding', file),
+    join(process.cwd(), 'assets', 'branding', file),
+    join(process.cwd(), 'green-angels-backend', 'assets', 'branding', file),
+    join(__dirname, '..', '..', 'assets', 'watermarks', `${region}.png`),
+    join(process.cwd(), 'assets', 'watermarks', `${region}.png`),
+  ].filter(Boolean)
   return candidates.find((p) => existsSync(p)) ?? null
 }
 
@@ -125,30 +147,44 @@ export async function buildOrderDocumentPdf(input: OrderDocumentPdfInput): Promi
       doc.registerFont('DejaVu-Bold', boldPath ?? regularPath)
     }
 
-    const locale = input.region === 'sk' ? 'sk-SK' : 'uk-UA'
+    const pdfLocale: OrderPdfLocale = input.locale
+      ? resolveOrderPdfLocale(input.locale)
+      : input.region === 'sk'
+        ? 'sk'
+        : 'uk'
+    const labels = getOrderPdfLabels(pdfLocale)
+    const intlLocale = pdfIntlLocale(pdfLocale)
     const pageWidth = doc.page.width - margin * 2
     const colGap = 16
     const colWidth = (pageWidth - colGap) / 2
 
-    // Title band
-    doc.rect(margin, margin, pageWidth, 28).fill(BRAND_GREEN)
-    doc.font(bold).fontSize(14).fillColor('#FFFFFF').text(input.title, margin + 10, margin + 7, {
+    // Logo + title band
+    const logoPath = resolveLogoPath(input.region)
+    let y = margin
+    if (logoPath) {
+      try {
+        const logoW = 140
+        const logoH = 40
+        doc.image(logoPath, margin, y, { fit: [logoW, logoH] })
+        y += logoH + 10
+      } catch {
+        // Soft-degrade: continue without logo
+      }
+    }
+
+    const title = input.title?.trim() || labels.title
+    doc.rect(margin, y, pageWidth, 28).fill(BRAND_GREEN)
+    doc.font(bold).fontSize(13).fillColor('#FFFFFF').text(title, margin + 10, y + 7, {
       width: pageWidth - 20,
     })
+    y += 38
 
-    let y = margin + 38
-    doc.font(regular).fontSize(9).fillColor(MUTED)
-    doc.text(
-      `${input.region === 'sk' ? 'Objednávka / Order' : 'Замовлення'}: ${input.orderNumber}`,
-      margin,
-      y,
-    )
-    doc.text(
-      `${input.region === 'sk' ? 'Dátum' : 'Дата'}: ${input.orderDate}`,
-      margin + colWidth + colGap,
-      y,
-      { width: colWidth, align: 'right' },
-    )
+    doc.font(regular).fontSize(10).fillColor('#111111')
+    doc.text(`${labels.order}: ${input.orderNumber}`, margin, y)
+    doc.text(`${labels.date}: ${input.orderDate}`, margin + colWidth + colGap, y, {
+      width: colWidth,
+      align: 'right',
+    })
     y += 18
 
     const sellerBottom = drawPartyBlock(
@@ -156,36 +192,38 @@ export async function buildOrderDocumentPdf(input: OrderDocumentPdfInput): Promi
       margin,
       y,
       colWidth,
-      input.region === 'sk' ? 'DODÁVATEĽ / SUPPLIER' : 'ПРОДАВЕЦЬ',
+      labels.supplier,
       input.seller,
       { regular, bold },
     )
-    const metaLines = [
-      `${input.region === 'sk' ? 'Doprava' : 'Доставка'}: ${input.deliveryLabel}`,
-      `${input.region === 'sk' ? 'Platba' : 'Оплата'}: ${input.paymentLabel}`,
-      input.currency ? `${input.region === 'sk' ? 'Mena' : 'Валюта'}: ${input.currency}` : '',
-    ].filter(Boolean)
     const buyerBottom = drawPartyBlock(
       doc,
       margin + colWidth + colGap,
       y,
       colWidth,
-      input.region === 'sk' ? 'ODBERATEĽ / BUYER' : 'ПОКУПЕЦЬ',
+      labels.buyer,
       input.buyer,
       { regular, bold },
     )
-    y = Math.max(sellerBottom, buyerBottom) + 6
+    y = Math.max(sellerBottom, buyerBottom) + 2
+
+    doc.font(regular).fontSize(9).fillColor(MUTED)
+    const metaLines = [
+      `${labels.delivery}: ${input.deliveryLabel}`,
+      `${labels.payment}: ${input.paymentLabel}`,
+      input.currency ? `${labels.currency}: ${input.currency}` : '',
+    ].filter(Boolean)
+    for (const line of metaLines) {
+      doc.text(line, margin, y, { width: pageWidth })
+      y += 12
+    }
+    y += 4
 
     if (input.shipTo) {
-      y = drawPartyBlock(
-        doc,
-        margin,
-        y,
-        pageWidth,
-        input.region === 'sk' ? 'DODACIA ADRESA / SHIP TO' : 'АДРЕСА ДОСТАВКИ',
-        input.shipTo,
-        { regular, bold },
-      )
+      y = drawPartyBlock(doc, margin, y, pageWidth, labels.shipTo, input.shipTo, {
+        regular,
+        bold,
+      })
     }
 
     // Table header
@@ -200,15 +238,15 @@ export async function buildOrderDocumentPdf(input: OrderDocumentPdfInput): Promi
     doc.rect(margin, tableTop, pageWidth, 18).fill('#F3F4F0')
     doc.font(bold).fontSize(8).fillColor('#333333')
     let hx = margin + 4
-    doc.text(input.region === 'sk' ? 'Popis' : 'Опис', hx, tableTop + 5, { width: descW - 8 })
+    doc.text(labels.colDescription, hx, tableTop + 5, { width: descW - 8 })
     hx += descW
-    doc.text(input.region === 'sk' ? 'Množ.' : 'К-сть', hx, tableTop + 5, { width: qtyW - 4, align: 'right' })
+    doc.text(labels.colQty, hx, tableTop + 5, { width: qtyW - 4, align: 'right' })
     hx += qtyW
-    doc.text(input.region === 'sk' ? 'Cena' : 'Ціна', hx, tableTop + 5, { width: priceW - 4, align: 'right' })
+    doc.text(labels.colPrice, hx, tableTop + 5, { width: priceW - 4, align: 'right' })
     hx += priceW
-    doc.text('DPH %', hx, tableTop + 5, { width: vatW - 4, align: 'right' })
+    doc.text(labels.colVat, hx, tableTop + 5, { width: vatW - 4, align: 'right' })
     hx += vatW
-    doc.text(input.region === 'sk' ? 'Suma' : 'Сума', hx, tableTop + 5, { width: amountW - 8, align: 'right' })
+    doc.text(labels.colAmount, hx, tableTop + 5, { width: amountW - 8, align: 'right' })
 
     y = tableTop + 20
     doc.font(regular).fontSize(8.5).fillColor('#111111')
@@ -226,14 +264,14 @@ export async function buildOrderDocumentPdf(input: OrderDocumentPdfInput): Promi
       cx += descW
       doc.text(String(line.quantity), cx, y + 4, { width: qtyW - 4, align: 'right' })
       cx += qtyW
-      doc.text(money(line.unitPrice, input.currency, locale), cx, y + 4, {
+      doc.text(money(line.unitPrice, input.currency, intlLocale), cx, y + 4, {
         width: priceW - 4,
         align: 'right',
       })
       cx += priceW
       doc.text(`${line.vatPercent.toFixed(0)}`, cx, y + 4, { width: vatW - 4, align: 'right' })
       cx += vatW
-      doc.text(money(line.lineTotal, input.currency, locale), cx, y + 4, {
+      doc.text(money(line.lineTotal, input.currency, intlLocale), cx, y + 4, {
         width: amountW - 8,
         align: 'right',
       })
@@ -241,83 +279,58 @@ export async function buildOrderDocumentPdf(input: OrderDocumentPdfInput): Promi
     }
 
     doc.moveTo(margin, y).lineTo(margin + pageWidth, y).strokeColor(BORDER).lineWidth(0.5).stroke()
-    y += 10
+    y += 12
 
-    const totalsX = margin + pageWidth * 0.55
-    const totalsW = pageWidth * 0.45
+    const totalsX = margin + pageWidth * 0.5
+    const totalsW = pageWidth * 0.5
+    const labelW = totalsW * 0.58
+    const valueW = totalsW * 0.42
     const addTotalRow = (label: string, value: string, boldRow = false) => {
-      y = ensurePage(doc, y, 14, margin)
-      doc.font(boldRow ? bold : regular).fontSize(boldRow ? 11 : 9).fillColor('#111111')
-      doc.text(label, totalsX, y, { width: totalsW * 0.55 })
-      doc.text(value, totalsX + totalsW * 0.55, y, { width: totalsW * 0.45, align: 'right' })
-      y += boldRow ? 16 : 13
+      const fontSize = boldRow ? 11 : 9
+      doc.font(boldRow ? bold : regular).fontSize(fontSize).fillColor('#111111')
+      const labelHeight = doc.heightOfString(label, { width: labelW })
+      const valueHeight = doc.heightOfString(value, { width: valueW, align: 'right' })
+      const rowH = Math.max(labelHeight, valueHeight, boldRow ? 14 : 12) + 4
+      y = ensurePage(doc, y, rowH + 2, margin)
+      doc.text(label, totalsX, y, { width: labelW })
+      doc.text(value, totalsX + labelW, y, { width: valueW, align: 'right' })
+      y += rowH
     }
 
-    addTotalRow(
-      input.region === 'sk' ? 'Tovar / Products' : 'Товари',
-      money(input.productsSubtotal, input.currency, locale),
-    )
+    addTotalRow(labels.products, money(input.productsSubtotal, input.currency, intlLocale))
     if (input.deliveryAmount > 0) {
-      addTotalRow(
-        input.region === 'sk' ? 'Doprava' : 'Доставка',
-        money(input.deliveryAmount, input.currency, locale),
-      )
+      addTotalRow(labels.shipping, money(input.deliveryAmount, input.currency, intlLocale))
     }
     if (input.packagingAmount > 0) {
-      addTotalRow(
-        input.region === 'sk' ? 'Balenie' : 'Пакування',
-        money(input.packagingAmount, input.currency, locale),
-      )
+      addTotalRow(labels.packaging, money(input.packagingAmount, input.currency, intlLocale))
     }
     if (input.codFeeAmount > 0) {
-      addTotalRow(
-        input.region === 'sk' ? 'Dobierka' : 'Післяплата',
-        money(input.codFeeAmount, input.currency, locale),
-      )
+      addTotalRow(labels.codFee, money(input.codFeeAmount, input.currency, intlLocale))
     }
 
     const vatRate = input.taxRatePercent ?? 0
     if (input.taxRegime === 'reverse_charge') {
-      addTotalRow('DPH / VAT', '0 % — reverse charge', false)
+      addTotalRow(labels.vat, '0 % — reverse charge', false)
     } else if (input.taxAmount > 0) {
       addTotalRow(
-        input.taxIncluded
-          ? input.region === 'sk'
-            ? 'DPH zahrnutá / VAT included'
-            : 'ПДВ включено'
-          : 'DPH / VAT',
-        money(input.taxAmount, input.currency, locale),
+        input.taxIncluded ? labels.vatIncluded : labels.vat,
+        money(input.taxAmount, input.currency, intlLocale),
       )
     } else if (vatRate > 0) {
-      addTotalRow('DPH / VAT', `${vatRate.toFixed(0)} %`, false)
+      addTotalRow(labels.vat, `${vatRate.toFixed(0)} %`, false)
     }
 
-    addTotalRow(
-      input.region === 'sk' ? 'SPOLU / TOTAL' : 'РАЗОМ',
-      money(input.grandTotal, input.currency, locale),
-      true,
-    )
+    addTotalRow(labels.total, money(input.grandTotal, input.currency, intlLocale), true)
 
-    // VAT summary box for reverse charge / B2B
     if (input.taxRegime === 'reverse_charge') {
       y = ensurePage(doc, y, 40, margin)
       doc.rect(margin, y, pageWidth, 36).strokeColor(BRAND_GREEN).lineWidth(1).stroke()
-      doc.font(bold).fontSize(8.5).fillColor(BRAND_GREEN).text(
-        input.region === 'sk'
-          ? 'Prenesenie daňovej povinnosti / Intra-Community supply — DPH 0 %'
-          : 'Reverse charge — 0% VAT',
-        margin + 8,
-        y + 8,
-        { width: pageWidth - 16 },
-      )
-      doc.font(regular).fontSize(8).fillColor('#333333').text(
-        input.region === 'sk'
-          ? 'Daň odvedie odberateľ podľa platných predpisov EÚ / VAT to be accounted for by the recipient.'
-          : 'VAT to be accounted for by the recipient under applicable EU rules.',
-        margin + 8,
-        y + 22,
-        { width: pageWidth - 16 },
-      )
+      doc.font(bold).fontSize(8.5).fillColor(BRAND_GREEN).text(labels.reverseChargeTitle, margin + 8, y + 8, {
+        width: pageWidth - 16,
+      })
+      doc.font(regular).fontSize(8).fillColor('#333333').text(labels.reverseChargeBody, margin + 8, y + 22, {
+        width: pageWidth - 16,
+      })
       y += 44
     }
 
@@ -326,23 +339,17 @@ export async function buildOrderDocumentPdf(input: OrderDocumentPdfInput): Promi
       const viesLines = [
         `VIES IČ DPH: ${input.vies.vatId}`,
         input.vies.valid === true
-          ? input.region === 'sk'
-            ? 'VIES: platné / valid'
-            : 'VIES: дійсний'
+          ? labels.viesValid
           : input.vies.valid === false
-            ? input.region === 'sk'
-              ? 'VIES: neplatné / invalid'
-              : 'VIES: недійсний'
-            : input.region === 'sk'
-              ? 'VIES: nedostupné / unavailable'
-              : 'VIES: недоступний',
-        `${input.region === 'sk' ? 'Overené' : 'Перевірено'}: ${input.vies.checkedAt}`,
+            ? labels.viesInvalid
+            : labels.viesUnavailable,
+        `${labels.viesChecked}: ${input.vies.checkedAt}`,
       ]
       if (input.vies.consultationNumber) {
         viesLines.push(`VIES consultation: ${input.vies.consultationNumber}`)
       }
       if (input.vies.registeredName) {
-        viesLines.push(`${input.region === 'sk' ? 'Názov v registri' : 'Назва в реєстрі'}: ${input.vies.registeredName}`)
+        viesLines.push(`${labels.viesRegistryName}: ${input.vies.registeredName}`)
       }
       doc.font(regular).fontSize(8).fillColor(MUTED)
       for (const line of viesLines) {
@@ -364,20 +371,18 @@ export async function buildOrderDocumentPdf(input: OrderDocumentPdfInput): Promi
       }
       if (input.bankSection.purpose) {
         y += 2
-        doc.font(bold).text(
-          `${input.region === 'sk' ? 'Variabilný symbol / účel' : 'Призначення платежу'}: ${input.bankSection.purpose}`,
-          margin,
-          y,
-          { width: pageWidth },
-        )
+        doc.font(bold).text(`${labels.paymentPurpose}: ${input.bankSection.purpose}`, margin, y, {
+          width: pageWidth,
+        })
         y += 14
       }
     }
 
-    if (input.footerNotes?.length) {
+    const footerNotes = input.footerNotes?.length ? input.footerNotes : labels.footer
+    if (footerNotes.length) {
       y = ensurePage(doc, y, 20, margin)
       doc.font(regular).fontSize(7.5).fillColor(MUTED)
-      for (const note of input.footerNotes) {
+      for (const note of footerNotes) {
         doc.text(note, margin, y, { width: pageWidth })
         y += doc.heightOfString(note, { width: pageWidth }) + 3
       }

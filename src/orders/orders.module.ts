@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common'
+import { Module, forwardRef } from '@nestjs/common'
 
 import { AuthModule } from '../auth/auth.module'
 import { CancellationReasonsModule } from '../cancellation-reasons/cancellation-reasons.module'
@@ -14,10 +14,13 @@ import { SettingsModule } from '../settings/settings.module'
 import { PrismaModule } from '../prisma/prisma.module'
 import { VariantLabelModule } from '../products/variant-label.module'
 import { MailModule } from '../mail/mail.module'
+import { MonopayModule } from '../monopay/monopay.module'
+import { QueueModule } from '../queue/queue.module'
 import { ViesModule } from '../vies/vies.module'
 import { LegalModule } from '../legal/legal.module'
 import { OrderConfirmationTokenService } from './order-confirmation-token.service'
 import { OrderIdempotencyService } from './order-idempotency.service'
+import { OrderPaymentLifecycleService } from './order-payment-lifecycle.service'
 import { OrdersController } from './orders.controller'
 import { OrdersService } from './orders.service'
 
@@ -28,7 +31,9 @@ import { OrdersService } from './orders.service'
     PricingModule,
     SettingsModule,
     VariantLabelModule,
-    PaymentsModule,
+    forwardRef(() => PaymentsModule),
+    forwardRef(() => MonopayModule),
+    forwardRef(() => QueueModule),
     CommerceModule,
     ProductsModule,
     OrderStatusesModule,
@@ -41,6 +46,12 @@ import { OrdersService } from './orders.service'
     LegalModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, OrderConfirmationTokenService, OrderIdempotencyService],
+  providers: [
+    OrdersService,
+    OrderConfirmationTokenService,
+    OrderIdempotencyService,
+    OrderPaymentLifecycleService,
+  ],
+  exports: [OrdersService, OrderPaymentLifecycleService, OrderConfirmationTokenService],
 })
 export class OrdersModule {}

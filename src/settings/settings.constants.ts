@@ -23,6 +23,7 @@ export const SETTINGS_KEYS = {
   DISPATCH_CALENDAR: 'commerce.dispatchCalendar',
   MEDIA_WATERMARK: 'media.watermark',
   WHOLESALE_PAGE: 'page.wholesale',
+  ABOUT_PAGE: 'page.about',
 } as const
 
 export type {

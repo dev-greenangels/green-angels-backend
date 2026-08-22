@@ -42,8 +42,10 @@ import { FlexiSettingsService } from '../flexi/flexi.settings.service'
 import { LegalService } from '../legal/legal.service'
 import { OrderConfirmationTokenService } from './order-confirmation-token.service'
 import { OrderIdempotencyService } from './order-idempotency.service'
+import { OrderPaymentLifecycleService } from './order-payment-lifecycle.service'
+import { StripePaymentProvider } from '../payments/stripe.payment-provider'
+import { MonopayService } from '../monopay/monopay.service'
 import { classifyFlexiError, isFlexiTransportError } from './erp-sync.errors'
-import { resolveErpSyncStatus } from './erp-sync.constants'
 
 const PREORDER_MAX_QTY = 99
 const DEFAULT_LOCALE = 'uk'
@@ -168,6 +170,14 @@ export type CreatedOrderResponse = {
   clientSecret?: string
   /** Stripe publishable key — only when clientSecret is present. */
   publishableKey?: string
+  /** Card online: customer payment deadline (ISO). */
+  paymentExpiresAt?: string
+  /** Line items for payment summary UI (products only). */
+  items?: Array<{
+    productName: string
+    variantLabel: string | null
+    quantity: number
+  }>
 }
 
 export type PublicOrderConfirmationItem = {
@@ -208,6 +218,12 @@ export type PublicOrderConfirmation = {
   deliveryHouseNumber: string | null
   paymentMethod: string
   paymentStatus: string | null
+  paymentProvider: string | null
+  paymentExpiresAt: string | null
+  canRetry: boolean
+  clientSecret?: string
+  publishableKey?: string
+  paymentPageUrl?: string
   comment: string | null
   buyerType: string | null
   taxRegime: string | null
@@ -250,6 +266,9 @@ export class OrdersService {
     private readonly confirmationTokens: OrderConfirmationTokenService,
     private readonly orderIdempotency: OrderIdempotencyService,
     private readonly legal: LegalService,
+    private readonly paymentLifecycle: OrderPaymentLifecycleService,
+    private readonly stripeProvider: StripePaymentProvider,
+    private readonly monopay: MonopayService,
   ) {}
 
   private statusLabelCache: Map<string, string> | null = null
@@ -726,6 +745,43 @@ export class OrdersService {
       }
     }
 
+    const awaitingUnpaid =
+      order.status === 'AWAITING_PAYMENT' &&
+      order.paymentMethod === ONLINE_CARD_PAYMENT_METHOD &&
+      order.paymentStatus !== 'success'
+
+    let clientSecret: string | undefined
+    let publishableKey: string | undefined
+    let paymentPageUrl: string | undefined
+    let canRetry = false
+
+    if (awaitingUnpaid) {
+      canRetry =
+        !order.paymentStatus ||
+        order.paymentStatus === 'failure' ||
+        order.paymentStatus === 'expired' ||
+        order.paymentStatus === 'created' ||
+        order.paymentStatus === 'processing'
+
+      if (order.paymentProvider === 'stripe' && order.stripePaymentId) {
+        const open = await this.stripeProvider.retrieveOpenSessionClientSecret(
+          order.stripePaymentId,
+        )
+        if (open) {
+          clientSecret = open.clientSecret
+          publishableKey = open.publishableKey
+          canRetry = true
+        } else {
+          canRetry = true
+        }
+      } else if (order.paymentProvider === 'monopay' && order.monopayInvoiceId) {
+        // Resume uses retry to mint a fresh pageUrl when needed; expose retry CTA.
+        canRetry = true
+      } else {
+        canRetry = true
+      }
+    }
+
     return {
       id: order.id,
       orderNumber,
@@ -754,6 +810,12 @@ export class OrdersService {
       deliveryHouseNumber: order.deliveryHouseNumber,
       paymentMethod: order.paymentMethod,
       paymentStatus: order.paymentStatus,
+      paymentProvider: order.paymentProvider,
+      paymentExpiresAt: order.paymentExpiresAt?.toISOString() ?? null,
+      canRetry,
+      ...(clientSecret ? { clientSecret } : {}),
+      ...(publishableKey ? { publishableKey } : {}),
+      ...(paymentPageUrl ? { paymentPageUrl } : {}),
       comment: order.comment,
       ...this.mapPublicOrderFields(order),
       items: order.items.map((item) => {
@@ -803,6 +865,7 @@ export class OrdersService {
         items: {
           select: {
             quantity: true,
+            stockDecremented: true,
             productVariantId: true,
             sku: true,
           },
@@ -817,6 +880,23 @@ export class OrdersService {
     const data: Prisma.OrderUpdateInput = {}
     const requestedStatus = dto.status?.trim().toUpperCase()
     const cancellingNow = requestedStatus === 'CANCELLED' && existing.status !== 'CANCELLED'
+    const unpaidAwaitingCancel =
+      cancellingNow &&
+      existing.status === 'AWAITING_PAYMENT' &&
+      existing.paymentStatus !== 'success'
+
+    // Unpaid awaiting: shared lifecycle cancel (PSP invalidate + stockDecremented release).
+    if (unpaidAwaitingCancel) {
+      if (!dto.cancellationReasonId) {
+        throw new BadRequestException('Оберіть причину скасування.')
+      }
+      await this.paymentLifecycle.cancelUnpaidOrder(id, {
+        source: 'ADMIN',
+        reasonId: dto.cancellationReasonId,
+        note: dto.cancellationNote,
+      })
+      return this.findOne(id)
+    }
 
     if (dto.status !== undefined) {
       const nextStatus = await this.orderStatuses.assertActiveCode(dto.status)
@@ -882,11 +962,12 @@ export class OrdersService {
     }
 
     if (cancellingNow) {
-      await this.applyRel003CancelSideEffects({
+      await this.paymentLifecycle.applyRel003CancelSideEffects({
         id: existing.id,
         erpSyncStatus: existing.erpSyncStatus,
         erpNativeId: existing.erpNativeId,
         externalErpId: existing.externalErpId,
+        stockReleasedAt: existing.stockReleasedAt,
         items: existing.items,
       })
     }
@@ -894,107 +975,135 @@ export class OrdersService {
     return this.findOne(updated.id)
   }
 
+  async cancelConfirmationOrder(
+    rawOrderNumber: string,
+    auth?: { userId?: string; confirmationToken?: string },
+  ): Promise<{ ok: true; status: string }> {
+    const order = await this.findOrderForConfirmationMutation(rawOrderNumber, auth)
+    const result = await this.paymentLifecycle.cancelUnpaidOrder(order.id, {
+      source: 'USER',
+      reasonCode: 'customer_request',
+      note: 'Скасовано клієнтом під час очікування оплати',
+    })
+    if (!result.cancelled && result.reason === 'already_paid') {
+      throw new BadRequestException('Замовлення вже оплачено — скасування недоступне.')
+    }
+    if (!result.cancelled && result.reason === 'not_awaiting_payment') {
+      throw new BadRequestException('Скасування доступне лише для замовлень, що очікують оплату.')
+    }
+    return { ok: true, status: 'CANCELLED' }
+  }
+
+  async retryConfirmationPayment(
+    rawOrderNumber: string,
+    auth?: { userId?: string; confirmationToken?: string; returnBaseUrl?: string | null },
+  ): Promise<{
+    orderNumber: string
+    paymentPageUrl?: string
+    clientSecret?: string
+    publishableKey?: string
+    confirmationToken: string
+  }> {
+    const order = await this.findOrderForConfirmationMutation(rawOrderNumber, auth)
+    if (order.status !== 'AWAITING_PAYMENT') {
+      throw new BadRequestException('Повторна оплата доступна лише для замовлень, що очікують оплату.')
+    }
+    if (order.paymentStatus === 'success') {
+      throw new BadRequestException('Замовлення вже оплачено.')
+    }
+    if (order.paymentMethod !== ONLINE_CARD_PAYMENT_METHOD) {
+      throw new BadRequestException('Це замовлення не потребує онлайн-оплати.')
+    }
+
+    // Best-effort invalidate previous PSP session before creating a new one.
+    if (order.stripePaymentId) {
+      await this.stripeProvider.expireCheckoutSessionIfOpen(order.stripePaymentId).catch(() => undefined)
+    }
+    if (order.monopayInvoiceId) {
+      await this.monopay.removeInvoiceIfPossible(order.monopayInvoiceId).catch(() => undefined)
+    }
+
+    const orderNumber = this.formatOrderNumber(order.orderNumber)
+    const confirmationToken = this.confirmationTokens.sign(orderNumber)
+    const payment = await this.payments.createPaymentForOrder(order.id, {
+      returnBaseUrl: auth?.returnBaseUrl,
+      confirmationToken,
+    })
+    if (!payment) {
+      throw new BadRequestException('Онлайн-оплата тимчасово недоступна.')
+    }
+
+    return {
+      orderNumber,
+      confirmationToken,
+      ...(payment.paymentPageUrl ? { paymentPageUrl: payment.paymentPageUrl } : {}),
+      ...(payment.clientSecret ? { clientSecret: payment.clientSecret } : {}),
+      ...(payment.publishableKey ? { publishableKey: payment.publishableKey } : {}),
+    }
+  }
+
+  private async findOrderForConfirmationMutation(
+    rawOrderNumber: string,
+    auth?: { userId?: string; confirmationToken?: string },
+  ) {
+    const match = rawOrderNumber.trim().match(/(\d+)$/)
+    const numeric = match ? Number(match[1]) : Number.NaN
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { orderNumber: numeric },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        paymentMethod: true,
+        paymentStatus: true,
+        paymentProvider: true,
+        stripePaymentId: true,
+        monopayInvoiceId: true,
+        orderNumber: true,
+      },
+    })
+    if (!order) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+
+    const orderNumber = this.formatOrderNumber(order.orderNumber)
+    const isOwner = Boolean(auth?.userId && order.userId && order.userId === auth.userId)
+    if (!isOwner) {
+      try {
+        this.confirmationTokens.assertValid(auth?.confirmationToken, orderNumber)
+      } catch {
+        throw new NotFoundException('Замовлення не знайдено.')
+      }
+    }
+
+    return order
+  }
+
   /**
-   * REL-003 / DEC-004 §J:
-   * - LOCAL / PENDING_ERP / never exported → release local REL-002 stock; abort export queue
-   * - SYNCED (ERP accepted) → Flexi @action=storno; no blind stock++ when EXTERNAL
-   * - ERP_CONFLICT → website cancel only; no blind stock++
+   * REL-003 / DEC-004 §J — delegates to OrderPaymentLifecycleService (stockDecremented + stockReleasedAt).
    */
   private async applyRel003CancelSideEffects(order: {
     id: string
     erpSyncStatus: string | null
     erpNativeId: string | null
     externalErpId: string | null
-    items: Array<{ quantity: number; productVariantId: string | null; sku: string | null }>
+    stockReleasedAt: Date | null
+    items: Array<{
+      quantity: number
+      stockDecremented: number
+      productVariantId: string | null
+      sku: string | null
+    }>
   }): Promise<void> {
-    const sync = resolveErpSyncStatus(order.erpSyncStatus)
-    const isExternal = await this.settings.isExternalInventoryMode()
-    const flexiConfigured = await this.flexi.isConfigured()
-
-    await this.flexiQueue.removeExportOrderJob(order.id).catch(() => undefined)
-
-    const shouldReleaseLocal =
-      sync === 'NOT_REQUIRED' ||
-      sync === 'PENDING_ERP' ||
-      sync === 'RETRYING' ||
-      sync === 'FAILED' ||
-      sync === 'CANCEL_PENDING_ERP' ||
-      (!isExternal && sync !== 'ERP_CONFLICT')
-
-    // EXTERNAL + SYNCED / ERP_CONFLICT / CANCEL_SYNCED: ERP is inventory authority — no blind stock++.
-    if (isExternal && (sync === 'SYNCED' || sync === 'ERP_CONFLICT' || sync === 'CANCEL_SYNCED')) {
-      // skip local release
-    } else if (shouldReleaseLocal || !isExternal) {
-      await this.releaseLocalStockReservation(order.items)
-    }
-
-    // Only storno when an ERP document is known/accepted (or exception doc under ERP_CONFLICT).
-    // PENDING_ERP / RETRYING / FAILED without native id: abort queue + local release only.
-    const needsErpStorno =
-      flexiConfigured &&
-      (sync === 'SYNCED' ||
-        sync === 'CANCEL_SYNCED' ||
-        Boolean(order.erpNativeId?.trim()) ||
-        (sync === 'ERP_CONFLICT' &&
-          (Boolean(order.erpNativeId?.trim()) || Boolean(order.externalErpId?.trim()))))
-
-    if (sync === 'PENDING_ERP' || sync === 'RETRYING' || sync === 'FAILED') {
-      await this.prisma.order.update({
-        where: { id: order.id },
-        data: {
-          erpSyncStatus: 'CANCEL_PENDING_ERP',
-          erpLastSyncAt: new Date(),
-          erpLastErrorCode: null,
-          erpLastErrorMessage: null,
-        },
-      })
-    }
-
-    if (needsErpStorno) {
-      const result = await this.flexi.stornoOrder(order.id)
-      if (!result.ok) {
-        this.logger.warn(`REL-003 storno ${order.id}: ${result.message}`)
-        void this.flexiQueue.enqueueStornoOrder(order.id).catch((err) => {
-          this.logger.warn(
-            `storno enqueue failed for ${order.id}: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          )
-        })
-      }
-    }
+    await this.paymentLifecycle.applyRel003CancelSideEffects(order)
   }
 
-  private async releaseLocalStockReservation(
-    items: Array<{ quantity: number; productVariantId: string | null }>,
-  ): Promise<void> {
-    const stockNeeds = new Map<string, number>()
-    for (const item of items) {
-      if (!item.productVariantId || item.quantity <= 0) continue
-      stockNeeds.set(
-        item.productVariantId,
-        (stockNeeds.get(item.productVariantId) ?? 0) + item.quantity,
-      )
-    }
-    if (stockNeeds.size === 0) return
-
-    await this.prisma.$transaction(async (tx) => {
-      const affectedProductIds = new Set<string>()
-      for (const [productVariantId, quantity] of stockNeeds) {
-        await tx.productVariant.update({
-          where: { id: productVariantId },
-          data: { stock: { increment: quantity } },
-        })
-        const variant = await tx.productVariant.findUnique({
-          where: { id: productVariantId },
-          select: { productId: true },
-        })
-        if (variant?.productId) affectedProductIds.add(variant.productId)
-      }
-      for (const productId of affectedProductIds) {
-        await this.products.touchProductAvailability(productId, tx)
-      }
-    })
+  private async releaseLocalStockReservation(orderId: string): Promise<void> {
+    await this.paymentLifecycle.releaseLocalStockReservation(orderId)
   }
 
   async syncTracking(id: string): Promise<BackstageOrderDetail> {
@@ -1737,6 +1846,7 @@ export class OrdersService {
               return {
                 productVariantId: item.productVariantId,
                 quantity: item.quantity,
+                stockDecremented: item.stockToDecrement,
                 priceAtPurchase: item.priceAtPurchase,
                 productName: snapshot.productName,
                 productSlug: snapshot.productSlug,
@@ -1755,6 +1865,16 @@ export class OrdersService {
           createdAt: true,
         },
       })
+
+      // After create: set card paymentExpiresAt (+30m) in same TX.
+      if (paymentMethod === ONLINE_CARD_PAYMENT_METHOD) {
+        await tx.order.update({
+          where: { id: created.id },
+          data: {
+            paymentExpiresAt: this.paymentLifecycle.paymentExpiresAtFrom(created.createdAt),
+          },
+        })
+      }
 
       // REL-002: conditional stock reservation — single UPDATE … WHERE stock >= n.
       // Never read-then-unconditional-decrement. Gift/preorder lines use
@@ -1929,6 +2049,14 @@ export class OrdersService {
       currency: order.currency,
       createdAt: order.createdAt.toISOString(),
       confirmationToken,
+      items: lineItems.map((item) => {
+        const snapshot = snapshotByVariantId.get(item.productVariantId)!
+        return {
+          productName: snapshot.productName,
+          variantLabel: snapshot.variantLabel,
+          quantity: item.quantity,
+        }
+      }),
     }
 
     if (paymentMethod === ONLINE_CARD_PAYMENT_METHOD) {
@@ -1941,6 +2069,9 @@ export class OrdersService {
         if (payment.clientSecret) response.clientSecret = payment.clientSecret
         if (payment.publishableKey) response.publishableKey = payment.publishableKey
       }
+      response.paymentExpiresAt = this.paymentLifecycle
+        .paymentExpiresAtFrom(order.createdAt)
+        .toISOString()
     }
 
     // LOCAL async export, or EXTERNAL offline — never double-enqueue after successful connected await.
@@ -1956,17 +2087,22 @@ export class OrdersService {
 
     const customerEmail = dto.customerEmail?.trim()
     if (customerEmail) {
-      let sendSitePdf = true
-      if (flexiConfigured) {
-        const flexiCfg = await this.flexiSettings.getSettings()
-        const mode = this.flexi.resolveDocumentSendMode(isB2b, flexiCfg.documentSend)
-        sendSitePdf = this.flexi.shouldSendSiteDocument(mode)
-      }
-      if (sendSitePdf) {
-        void this.sendOrderConfirmationEmailSafe({
-          to: customerEmail,
-          orderId: order.id,
-        })
+      if (paymentMethod === ONLINE_CARD_PAYMENT_METHOD) {
+        // Card: awaiting-payment email (no PDF). PDF only after applyPaymentSuccess.
+        void this.paymentLifecycle.scheduleCardPaymentLifecycleEmails(order.id)
+      } else {
+        let sendSitePdf = true
+        if (flexiConfigured) {
+          const flexiCfg = await this.flexiSettings.getSettings()
+          const mode = this.flexi.resolveDocumentSendMode(isB2b, flexiCfg.documentSend)
+          sendSitePdf = this.flexi.shouldSendSiteDocument(mode)
+        }
+        if (sendSitePdf) {
+          void this.sendOrderConfirmationEmailSafe({
+            to: customerEmail,
+            orderId: order.id,
+          })
+        }
       }
     }
 
@@ -2043,6 +2179,17 @@ export class OrdersService {
     return this.buildOrderPdfByOrderNumber(orderNumber, auth)
   }
 
+  /** Used by APP_QUEUE after card payment success (and non-card create path). */
+  async sendOrderConfirmationEmailById(orderId: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { customerEmail: true },
+    })
+    const to = order?.customerEmail?.trim()
+    if (!to) return
+    await this.sendOrderConfirmationEmailSafe({ to, orderId })
+  }
+
   private async sendOrderConfirmationEmailSafe(input: { to: string; orderId: string }) {
     try {
       const [cart, market] = await Promise.all([
@@ -2055,9 +2202,22 @@ export class OrdersService {
 
       const order = await this.prisma.order.findUnique({
         where: { id: input.orderId },
-        select: { orderNumber: true },
+        select: {
+          orderNumber: true,
+          paymentMethod: true,
+          paymentStatus: true,
+          status: true,
+        },
       })
       if (!order) return
+
+      // Card-online: never send PDF while unpaid (awaiting email covers create).
+      if (
+        order.paymentMethod === ONLINE_CARD_PAYMENT_METHOD &&
+        order.paymentStatus !== 'success'
+      ) {
+        return
+      }
 
       const formatted = this.formatOrderNumber(order.orderNumber)
       const pdf = await this.buildOrderPdfById(input.orderId)

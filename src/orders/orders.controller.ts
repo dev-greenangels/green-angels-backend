@@ -85,6 +85,34 @@ export class OrdersController {
     })
   }
 
+  @Post('confirmation/:orderNumber/cancel')
+  @UseGuards(OptionalJwtAuthGuard)
+  cancelConfirmation(
+    @Param('orderNumber') orderNumber: string,
+    @Req() req: Request & { user?: SessionJwtPayload },
+    @Headers(ORDER_CONFIRMATION_TOKEN_HEADER) confirmationToken?: string,
+  ) {
+    return this.orders.cancelConfirmationOrder(orderNumber, {
+      userId: req.user?.userId,
+      confirmationToken,
+    })
+  }
+
+  @Post('confirmation/:orderNumber/payment/retry')
+  @UseGuards(OptionalJwtAuthGuard)
+  retryConfirmationPayment(
+    @Param('orderNumber') orderNumber: string,
+    @Req() req: Request & { user?: SessionJwtPayload },
+    @Headers(ORDER_CONFIRMATION_TOKEN_HEADER) confirmationToken?: string,
+    @Body() body?: { returnBaseUrl?: string },
+  ) {
+    return this.orders.retryConfirmationPayment(orderNumber, {
+      userId: req.user?.userId,
+      confirmationToken,
+      returnBaseUrl: body?.returnBaseUrl,
+    })
+  }
+
   @Get(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)

@@ -848,6 +848,16 @@ model Order {
   cancellationSource     String?
   cancellationNote       String?              @db.Text
   cancelledAt            DateTime?
+  /// REL-002 release gate — set once when reserved stock is returned (or intentionally skipped for EXTERNAL).
+  stockReleasedAt        DateTime?
+  /// Customer-facing card payment deadline (createdAt + 30m). SYSTEM cancel runs at +40m.
+  paymentExpiresAt       DateTime?
+  /// First successful card payment timestamp.
+  paidAt                 DateTime?
+  awaitingPaymentEmailSentAt DateTime?
+  paymentReminderEmailSentAt DateTime?
+  cancelledUnpaidEmailSentAt DateTime?
+  latePayRefundEmailSentAt   DateTime?
   /// ERP correlation id only (Flexi ext:GA:{uuid} / legacy). NOT the native ERP document number.
   externalErpId          String?
   /// @deprecated Use externalErpId
@@ -890,6 +900,7 @@ model Order {
   @@index([preferredShipDate])
   @@index([createdAt])
   @@index([status, createdAt])
+  @@index([status, paymentExpiresAt])
   @@index([userId, createdAt])
 }
 
@@ -906,6 +917,8 @@ model OrderPromoCode {
 model OrderItem {
   id               String          @id @default(uuid())
   quantity         Int
+  /// Exact units decremented from ProductVariant.stock at create (0 for gift/preorder).
+  stockDecremented Int             @default(0)
   priceAtPurchase  Decimal         @db.Decimal(10, 2)
   productName      String
   productSlug      String

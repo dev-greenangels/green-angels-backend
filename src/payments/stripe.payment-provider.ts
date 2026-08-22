@@ -1,14 +1,22 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  forwardRef,
+} from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { JwtService } from '@nestjs/jwt'
 import { Prisma } from '@prisma/client'
 import Stripe from 'stripe'
 
 import { PrismaService } from '../prisma/prisma.service'
-import { FlexiQueueService } from '../flexi/flexi.queue.service'
 import {
   ORDER_CONFIRMATION_TOKEN_PURPOSE,
 } from '../orders/order-confirmation.constants'
+import { OrderPaymentLifecycleService } from '../orders/order-payment-lifecycle.service'
+import { CUSTOMER_PAYMENT_WINDOW_SEC } from '../orders/payment-lifecycle.constants'
 import { ONLINE_CARD_PAYMENT_METHOD } from './payments.constants'
 import type {
   CreatePaymentInput,
@@ -66,8 +74,9 @@ export class StripePaymentProvider implements PaymentProvider {
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
-    private readonly flexiQueue: FlexiQueueService,
     private readonly jwt: JwtService,
+    @Inject(forwardRef(() => OrderPaymentLifecycleService))
+    private readonly paymentLifecycle: OrderPaymentLifecycleService,
   ) {}
 
   private getSecretKey(): string {
@@ -82,16 +91,37 @@ export class StripePaymentProvider implements PaymentProvider {
     return this.config.get<string>('STRIPE_WEBHOOK_SECRET')?.trim() ?? ''
   }
 
+  /** test | live | null — from sk_* / pk_* prefix. */
+  private keyMode(key: string): 'test' | 'live' | null {
+    if (key.startsWith('sk_test_') || key.startsWith('pk_test_')) return 'test'
+    if (key.startsWith('sk_live_') || key.startsWith('pk_live_')) return 'live'
+    return null
+  }
+
   isConfigured(): boolean {
-    return Boolean(this.getSecretKey() && this.getPublishableKey())
+    const secret = this.getSecretKey()
+    const publishable = this.getPublishableKey()
+    if (!secret || !publishable) return false
+    const secretMode = this.keyMode(secret)
+    const publishableMode = this.keyMode(publishable)
+    if (!secretMode || !publishableMode || secretMode !== publishableMode) {
+      this.logger.warn(
+        `Stripe keys mode mismatch or invalid (secret=${secretMode ?? '?'}, publishable=${publishableMode ?? '?'}). Use matching test or live pair from one Stripe account.`,
+      )
+      return false
+    }
+    return true
   }
 
   private getClient(): Stripe {
     const secretKey = this.getSecretKey()
     if (!secretKey) {
-      throw new BadRequestException(
-        'Оплата картою через Stripe тимчасово недоступна. Спробуйте інший спосіб оплати.',
-      )
+      throw new BadRequestException({
+        statusCode: 400,
+        message:
+          'Онлайн-оплата карткою тимчасово недоступна. Оберіть інший спосіб оплати або спробуйте пізніше.',
+        code: 'ONLINE_CARD_UNAVAILABLE',
+      })
     }
     if (!this.client) {
       this.client = new Stripe(secretKey)
@@ -103,17 +133,22 @@ export class StripePaymentProvider implements PaymentProvider {
     const stripe = this.getClient()
     const publishableKey = this.getPublishableKey()
     if (!publishableKey) {
-      throw new BadRequestException(
-        'Оплата картою через Stripe тимчасово недоступна. Спробуйте інший спосіб оплати.',
-      )
+      throw new BadRequestException({
+        statusCode: 400,
+        message:
+          'Онлайн-оплата карткою тимчасово недоступна. Оберіть інший спосіб оплати або спробуйте пізніше.',
+        code: 'ONLINE_CARD_UNAVAILABLE',
+      })
     }
 
     const currency = input.currency.toLowerCase()
     const returnUrl = this.buildElementsReturnUrl(input)
+    const expiresAt = Math.floor(Date.now() / 1000) + CUSTOMER_PAYMENT_WINDOW_SEC
 
     const session = await stripe.checkout.sessions.create({
       ui_mode: 'elements',
       mode: 'payment',
+      expires_at: expiresAt,
       line_items: [
         {
           quantity: 1,
@@ -136,7 +171,15 @@ export class StripePaymentProvider implements PaymentProvider {
     })
 
     if (!session.client_secret) {
-      throw new BadRequestException('Stripe не повернув ключ сесії для оплати.')
+      this.logger.error(
+        `Stripe Checkout Session missing client_secret for order ${input.orderNumber}`,
+      )
+      throw new BadRequestException({
+        statusCode: 400,
+        message:
+          'Онлайн-оплата карткою тимчасово недоступна. Оберіть інший спосіб оплати або спробуйте пізніше.',
+        code: 'ONLINE_CARD_UNAVAILABLE',
+      })
     }
 
     await this.prisma.order.update({
@@ -205,6 +248,94 @@ export class StripePaymentProvider implements PaymentProvider {
       status: updated?.status ?? order.status,
       paymentStatus: updated?.paymentStatus ?? order.paymentStatus,
       synced: true,
+    }
+  }
+
+  /** Resume helpers: retrieve open session client_secret if still payable. */
+  async retrieveOpenSessionClientSecret(
+    sessionId: string,
+  ): Promise<{ clientSecret: string; publishableKey: string } | null> {
+    if (!this.isConfigured()) return null
+    try {
+      const session = await this.getClient().checkout.sessions.retrieve(sessionId)
+      if (session.status !== 'open' || !session.client_secret) return null
+      return {
+        clientSecret: session.client_secret,
+        publishableKey: this.getPublishableKey(),
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Stripe retrieve session ${sessionId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+      return null
+    }
+  }
+
+  async getCheckoutSessionPayState(
+    sessionId: string,
+  ): Promise<'paid' | 'open' | 'expired' | 'unknown'> {
+    if (!this.isConfigured() || !sessionId.trim()) return 'unknown'
+    try {
+      const session = await this.getClient().checkout.sessions.retrieve(sessionId)
+      if (session.status === 'complete' || session.payment_status === 'paid') return 'paid'
+      if (session.status === 'open') return 'open'
+      if (session.status === 'expired') return 'expired'
+      return 'unknown'
+    } catch {
+      return 'unknown'
+    }
+  }
+
+  /** Expire open Checkout Session on unpaid cancel (best-effort). */
+  async expireCheckoutSessionIfOpen(sessionId: string): Promise<'expired' | 'skipped' | 'paid'> {
+    if (!sessionId.trim() || !this.isConfigured()) return 'skipped'
+    const stripe = this.getClient()
+    try {
+      const session = await stripe.checkout.sessions.retrieve(sessionId)
+      if (session.status === 'complete' || session.payment_status === 'paid') {
+        return 'paid'
+      }
+      if (session.status !== 'open') {
+        return 'skipped'
+      }
+      await stripe.checkout.sessions.expire(sessionId)
+      return 'expired'
+    } catch (err) {
+      this.logger.warn(
+        `Stripe sessions.expire ${sessionId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+      return 'skipped'
+    }
+  }
+
+  /** Late-pay / duplicate charge refund via PaymentIntent on the Checkout Session. */
+  async refundSessionPayment(sessionId: string): Promise<boolean> {
+    if (!sessionId.trim() || !this.isConfigured()) return false
+    const stripe = this.getClient()
+    try {
+      const session = await stripe.checkout.sessions.retrieve(sessionId, {
+        expand: ['payment_intent'],
+      })
+      const pi = session.payment_intent
+      const paymentIntentId =
+        typeof pi === 'string' ? pi : pi && typeof pi === 'object' ? pi.id : null
+      if (!paymentIntentId) {
+        this.logger.warn(`Stripe refund: no payment_intent on session ${sessionId}`)
+        return false
+      }
+      await stripe.refunds.create({ payment_intent: paymentIntentId })
+      return true
+    } catch (err) {
+      this.logger.error(
+        `Stripe refund failed for session ${sessionId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+      return false
     }
   }
 
@@ -356,33 +487,9 @@ export class StripePaymentProvider implements PaymentProvider {
       return
     }
 
-    const nextStatus =
-      order.status === 'AWAITING_PAYMENT' || order.status === 'PENDING'
-        ? 'PROCESSING'
-        : undefined
-
-    const updated = await this.prisma.order.updateMany({
-      where: {
-        id: order.id,
-        OR: [
-          { paymentStatus: { not: 'success' } },
-          ...(nextStatus ? [{ status: { in: ['AWAITING_PAYMENT', 'PENDING'] } }] : []),
-        ],
-      },
-      data: {
-        stripePaymentId: session.id,
-        paymentStatus: 'success',
-        ...(nextStatus ? { status: nextStatus } : {}),
-      },
-    })
-    if (updated.count === 0) return
-
-    void this.flexiQueue.enqueueExportOrderAfterOnlineCardPaid(order.id).catch((err) => {
-      this.logger.warn(
-        `Flexi export after Stripe paid failed for ${order.id}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      )
+    await this.paymentLifecycle.applyPaymentSuccess(order.id, {
+      provider: 'stripe',
+      paymentId: session.id,
     })
   }
 

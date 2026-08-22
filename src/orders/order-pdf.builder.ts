@@ -2,14 +2,13 @@ import type { Order, OrderItem, OrderViesCheck } from '@prisma/client'
 
 import type { CheckoutBankDetails } from '../settings/cart-checkout.types'
 import type { MarketSettings } from '../settings/market.types'
-import {
-  DELIVERY_METHOD_BACKSTAGE_LABELS,
-  PAYMENT_METHOD_BACKSTAGE_LABELS,
-  type CheckoutDeliveryMethodSlug,
-  type CheckoutPaymentMethodSlug,
-} from '../settings/checkout-methods.constants'
 import { formatEuVatId } from '../vies/vies.types'
 import type { OrderDocumentPdfInput } from '../mail/order-document-pdf'
+import {
+  getOrderPdfLabels,
+  resolveOrderPdfLocale,
+  type OrderPdfLocale,
+} from './order-pdf-labels'
 
 type OrderWithItems = Order & {
   items: OrderItem[]
@@ -20,8 +19,8 @@ function formatPersonName(first: string, last: string, patronymic?: string | nul
   return [last, first, patronymic?.trim()].filter(Boolean).join(' ')
 }
 
-function formatDeliveryAddress(order: OrderWithItems): string {
-  if (order.deliveryMethod === 'pickup') return 'Самовивіз / Pickup'
+function formatDeliveryAddress(order: OrderWithItems, pickupLabel: string): string {
+  if (order.deliveryMethod === 'pickup') return pickupLabel
   const parts = [
     order.deliveryCity,
     order.deliveryBranchLabel || order.deliveryBranch,
@@ -44,17 +43,30 @@ function isBankTransfer(method: string): boolean {
   return method === 'bank-transfer' || method === 'bank-transfer-legal'
 }
 
+function formatOrderNumberDisplay(orderNumber: number): string {
+  return `ZY-${String(orderNumber).padStart(8, '0')}`
+}
+
 export function buildOrderDocumentPdfInput(input: {
   order: OrderWithItems
-  market: Pick<MarketSettings, 'region'>
+  market: Pick<MarketSettings, 'region' | 'countrySites'>
   bank: CheckoutBankDetails
   bankDetailsSource: 'cart' | 'store'
   orderPdfTitle?: string
   paymentPurposeTemplate?: string
+  /** Override UI locale (e.g. customer email language). */
+  locale?: string
 }): OrderDocumentPdfInput {
   const { order, market, bank } = input
   const isSk = market.region === 'sk'
   const region = isSk ? 'sk' : 'ua'
+  const siteDefault = isSk
+    ? market.countrySites?.find((s) => s.enabled)?.defaultLocale ??
+      market.countrySites?.[0]?.defaultLocale ??
+      'sk'
+    : 'uk'
+  const pdfLocale: OrderPdfLocale = resolveOrderPdfLocale(input.locale ?? siteDefault)
+  const labels = getOrderPdfLabels(pdfLocale)
   const localeDate = order.createdAt.toISOString().slice(0, 10)
   const taxRate = order.taxRatePercent != null ? Number(order.taxRatePercent) : 0
   const isCompany = order.buyerType === 'company'
@@ -71,7 +83,8 @@ export function buildOrderDocumentPdfInput(input: {
   ].filter(Boolean) as string[]
 
   const buyerName = isCompany
-    ? order.companyLegalName?.trim() || formatPersonName(order.customerFirstName, order.customerLastName, order.customerPatronymic)
+    ? order.companyLegalName?.trim() ||
+      formatPersonName(order.customerFirstName, order.customerLastName, order.customerPatronymic)
     : formatPersonName(order.customerFirstName, order.customerLastName, order.customerPatronymic)
 
   const buyerLines = [
@@ -93,17 +106,15 @@ export function buildOrderDocumentPdfInput(input: {
     order.receiverPatronymic,
   )
   const shipLines = [
-    formatDeliveryAddress(order),
+    formatDeliveryAddress(order, labels.pickup),
     order.receiverPhone,
     order.receiverCompanyName ?? '',
   ].filter(Boolean)
 
   const deliveryLabel =
-    DELIVERY_METHOD_BACKSTAGE_LABELS[order.deliveryMethod as CheckoutDeliveryMethodSlug] ??
-    order.deliveryMethod
+    labels.deliveryMethods[order.deliveryMethod] ?? order.deliveryMethod
   const paymentLabel =
-    PAYMENT_METHOD_BACKSTAGE_LABELS[order.paymentMethod as CheckoutPaymentMethodSlug] ??
-    order.paymentMethod
+    labels.paymentMethods[order.paymentMethod] ?? order.paymentMethod
 
   const lineVat =
     order.taxRegime === 'reverse_charge' ? 0 : taxRate > 0 ? taxRate : 0
@@ -127,7 +138,7 @@ export function buildOrderDocumentPdfInput(input: {
   const packagingAmount = order.packagingAmount != null ? Number(order.packagingAmount) : 0
   if (deliveryAmount > 0) {
     docLines.push({
-      description: isSk ? 'Doprava / Shipping' : 'Доставка',
+      description: labels.shippingLine,
       quantity: 1,
       unitPrice: deliveryAmount,
       vatPercent: lineVat,
@@ -136,7 +147,7 @@ export function buildOrderDocumentPdfInput(input: {
   }
   if (packagingAmount > 0) {
     docLines.push({
-      description: isSk ? 'Balenie / Packaging' : 'Пакування',
+      description: labels.packagingLine,
       quantity: 1,
       unitPrice: packagingAmount,
       vatPercent: lineVat,
@@ -146,7 +157,7 @@ export function buildOrderDocumentPdfInput(input: {
   const codFee = order.codFeeAmount != null ? Number(order.codFeeAmount) : 0
   if (codFee > 0) {
     docLines.push({
-      description: isSk ? 'Dobierka / COD fee' : 'Комісія післяплати',
+      description: labels.codFeeLine,
       quantity: 1,
       unitPrice: codFee,
       vatPercent: lineVat,
@@ -166,32 +177,31 @@ export function buildOrderDocumentPdfInput(input: {
         }
       : null
 
-  const title =
-    input.orderPdfTitle?.trim() ||
-    (isSk
-      ? 'Potvrdenie objednávky / Order confirmation'
-      : 'Підтвердження замовлення')
+  const title = input.orderPdfTitle?.trim() || labels.title
 
   const bankSection =
     isBankTransfer(order.paymentMethod) && bank.iban
       ? {
-          title: isSk ? 'Platobné údaje / Payment details' : 'Реквізити для оплати',
+          title: labels.paymentDetails,
           rows: [
-            bank.organizationName ? { label: isSk ? 'Príjemca' : 'Одержувач', value: bank.organizationName } : null,
+            bank.organizationName
+              ? { label: labels.recipient, value: bank.organizationName }
+              : null,
             bank.iban ? { label: 'IBAN', value: bank.iban } : null,
             bank.bic ? { label: 'BIC / SWIFT', value: bank.bic } : null,
-            bank.bankName ? { label: isSk ? 'Banka' : 'Банк', value: bank.bankName } : null,
+            bank.bankName ? { label: labels.bank, value: bank.bankName } : null,
           ].filter(Boolean) as Array<{ label: string; value: string }>,
           purpose: (input.paymentPurposeTemplate ?? 'Order {orderNumber}')
-            .replace(/\{orderNumber\}/g, String(order.orderNumber))
-            .replace(/\{orderNumbers\}/g, String(order.orderNumber)),
+            .replace(/\{orderNumber\}/g, formatOrderNumberDisplay(order.orderNumber))
+            .replace(/\{orderNumbers\}/g, formatOrderNumberDisplay(order.orderNumber)),
         }
       : null
 
   return {
     region,
+    locale: pdfLocale,
     title,
-    orderNumber: String(order.orderNumber),
+    orderNumber: formatOrderNumberDisplay(order.orderNumber),
     orderDate: localeDate,
     currency: order.currency,
     seller: { name: bank.organizationName || 'Green Angels', lines: sellerLines },
@@ -200,7 +210,8 @@ export function buildOrderDocumentPdfInput(input: {
     deliveryLabel,
     paymentLabel,
     lines: docLines,
-    productsSubtotal: order.productsSubtotal != null ? Number(order.productsSubtotal) : Number(order.totalAmount),
+    productsSubtotal:
+      order.productsSubtotal != null ? Number(order.productsSubtotal) : Number(order.totalAmount),
     deliveryAmount,
     packagingAmount,
     codFeeAmount: codFee,
@@ -211,11 +222,6 @@ export function buildOrderDocumentPdfInput(input: {
     taxRegime: order.taxRegime,
     vies: vies?.vatId ? vies : null,
     bankSection,
-    footerNotes: isSk
-      ? [
-          'Toto potvrdenie nie je daňový doklad. Daňový doklad vystaví dodávateľ podľa platných predpisov SR/EÚ.',
-          'This document is an order confirmation, not a tax invoice.',
-        ]
-      : ['Це підтвердження замовлення, не податкова накладна.'],
+    footerNotes: labels.footer,
   }
 }

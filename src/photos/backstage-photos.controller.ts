@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -6,15 +7,20 @@ import {
   Param,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common'
+import { FileInterceptor } from '@nestjs/platform-express'
 import { Role } from '@prisma/client'
 import { IsArray, IsIn, IsOptional, IsString, IsUrl, ValidateNested } from 'class-validator'
 import { Type } from 'class-transformer'
+import { memoryStorage } from 'multer'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
+import { PhotoUploadBodyDto } from './dto/photo-upload-body.dto'
 import { PhotosService } from './photos.service'
 import { LegacyPhotoSyncService } from './legacy-photo-sync.service'
 import { ViberRecipientsService } from '../viber-photos/viber-recipients.service'
@@ -106,6 +112,27 @@ export class BackstagePhotosController {
   @Post('delete')
   deleteMany(@Body() body: DeletePhotosDto) {
     return this.photosService.deletePhotos(body.ids ?? [])
+  }
+
+  @Post('upload')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 15 * 1024 * 1024 },
+    }),
+  )
+  async upload(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: PhotoUploadBodyDto,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Оберіть файл зображення.')
+    }
+    const result = await this.photosService.uploadPhoto(file, body)
+    if (result && typeof result === 'object' && 'error' in result && result.error) {
+      throw new BadRequestException(String(result.error))
+    }
+    return result
   }
 
   @Delete(':id')

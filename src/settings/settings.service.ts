@@ -53,6 +53,11 @@ import {
   type WholesalePageCmsCopy,
   type WholesalePageSettings,
 } from './wholesale-page.types'
+import { normalizeAboutPageSettings } from './about-page.normalize'
+import {
+  type AboutPageCmsCopy,
+  type AboutPageSettings,
+} from './about-page.types'
 import type { AppLocale } from './localization.types'
 
 export type PublicSiteSettings = {
@@ -65,6 +70,7 @@ export type PublicSiteSettings = {
   navigation: NavigationSettings
   market: MarketSettings
   wholesale: PublicWholesalePageSettings
+  about: AboutPageSettings
   dispatchCalendar: { enabled: boolean }
 }
 
@@ -210,6 +216,12 @@ export class SettingsService {
     return normalizeWholesalePageSettings(raw, market.region)
   }
 
+  async getAboutPageSettings(): Promise<AboutPageSettings> {
+    const market = await this.getMarketSettings()
+    const raw = await this.readSetting(SETTINGS_KEYS.ABOUT_PAGE, {} as AboutPageSettings)
+    return normalizeAboutPageSettings(raw, market.region)
+  }
+
   async getPublicSettings(): Promise<PublicSiteSettings> {
     const [store, home, cart, catalog, recentlyViewed, localization, navigation, market, dispatch] =
       await Promise.all([
@@ -227,6 +239,7 @@ export class SettingsService {
       SETTINGS_KEYS.WHOLESALE_PAGE,
       {} as WholesalePageSettings,
     )
+    const aboutRaw = await this.readSetting(SETTINGS_KEYS.ABOUT_PAGE, {} as AboutPageSettings)
     return {
       store,
       home,
@@ -239,6 +252,7 @@ export class SettingsService {
       wholesale: toPublicWholesalePageSettings(
         normalizeWholesalePageSettings(wholesaleRaw, market.region),
       ),
+      about: normalizeAboutPageSettings(aboutRaw, market.region),
       dispatchCalendar: { enabled: dispatch.enabled },
     }
   }
@@ -397,6 +411,26 @@ export class SettingsService {
       market.region,
     )
     return this.writeSetting(SETTINGS_KEYS.WHOLESALE_PAGE, next)
+  }
+
+  async updateAboutPage(
+    patch: import('./dto/update-about-page-settings.dto').UpdateAboutPageSettingsDto,
+  ): Promise<AboutPageSettings> {
+    const market = await this.getMarketSettings()
+    const current = await this.getAboutPageSettings()
+    const mergedByLocale: AboutPageSettings['byLocale'] = {
+      ...current.byLocale,
+    }
+
+    if (patch.byLocale && typeof patch.byLocale === 'object') {
+      for (const [loc, copy] of Object.entries(patch.byLocale)) {
+        if (!copy || typeof copy !== 'object') continue
+        mergedByLocale[loc as AppLocale] = copy as AboutPageCmsCopy
+      }
+    }
+
+    const next = normalizeAboutPageSettings({ byLocale: mergedByLocale }, market.region)
+    return this.writeSetting(SETTINGS_KEYS.ABOUT_PAGE, next)
   }
 
   async updateCartCheckout(patch: Partial<CartCheckoutSettings>): Promise<CartCheckoutSettings> {

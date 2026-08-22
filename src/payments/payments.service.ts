@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common'
+import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 
 import { PrismaService } from '../prisma/prisma.service'
@@ -14,6 +14,7 @@ import type {
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name)
   private readonly providers: Map<string, PaymentProvider>
 
   constructor(
@@ -39,6 +40,7 @@ export class PaymentsService {
   /**
    * Resolves which PaymentProvider should handle a given checkout `paymentMethod`.
    * Returns null when the method needs no online provider (bank transfer etc).
+   * Never silently falls back to another PSP — misconfig must fail loudly.
    */
   async resolveProviderForMethod(
     paymentMethod: string,
@@ -47,13 +49,28 @@ export class PaymentsService {
     if (paymentMethod !== ONLINE_CARD_PAYMENT_METHOD) return null
 
     const cartSettings = await this.settings.getCartCheckoutSettings()
-    const providerId = preferredProvider ?? cartSettings.onlineCardProvider ?? 'monopay'
-    const provider = this.providers.get(providerId) ?? this.monopayProvider
+    const providerId = (preferredProvider ?? cartSettings.onlineCardProvider ?? 'monopay')
+      .trim()
+      .toLowerCase()
+    const provider = this.providers.get(providerId)
+    if (!provider) {
+      this.logger.error(`Online card provider not registered: ${providerId}`)
+      throw new BadRequestException({
+        statusCode: 400,
+        message:
+          'Онлайн-оплата карткою тимчасово недоступна. Оберіть інший спосіб оплати або спробуйте пізніше.',
+        code: 'ONLINE_CARD_UNAVAILABLE',
+      })
+    }
 
     if (!provider.isConfigured()) {
-      throw new BadRequestException(
-        'Онлайн-оплата тимчасово недоступна. Спробуйте інший спосіб оплати.',
-      )
+      this.logger.warn(`Online card provider not configured: ${providerId}`)
+      throw new BadRequestException({
+        statusCode: 400,
+        message:
+          'Онлайн-оплата карткою тимчасово недоступна. Оберіть інший спосіб оплати або спробуйте пізніше.',
+        code: 'ONLINE_CARD_UNAVAILABLE',
+      })
     }
 
     return provider

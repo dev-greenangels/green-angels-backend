@@ -25,8 +25,19 @@ export class FavoritesService {
   }
 
   async findProductIds(userId: string): Promise<string[]> {
+    // Drop favorites for unpublished products (deleted products already cascade).
+    await this.prisma.userFavorite.deleteMany({
+      where: {
+        userId,
+        product: { isPublished: false },
+      },
+    })
+
     const rows = await this.prisma.userFavorite.findMany({
-      where: { userId },
+      where: {
+        userId,
+        product: { isPublished: true },
+      },
       orderBy: { createdAt: 'desc' },
       select: { productId: true },
     })

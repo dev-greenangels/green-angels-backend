@@ -2,7 +2,7 @@ export const MONOPAY_API_BASE = 'https://api.monobank.ua'
 
 export const MONOPAY_CURRENCY_UAH = 980
 
-export const MONOPAY_INVOICE_VALIDITY_SEC = 86_400
+export const MONOPAY_INVOICE_VALIDITY_SEC = 1800
 
 export const MONOPAY_PAYMENT_METHOD = 'card-online'
 

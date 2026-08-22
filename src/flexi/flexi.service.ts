@@ -1818,7 +1818,12 @@ export class FlexiService {
   ): Promise<void> {
     const existing = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { erpSyncStatus: true, status: true },
+      select: {
+        erpSyncStatus: true,
+        status: true,
+        paymentMethod: true,
+        paymentStatus: true,
+      },
     })
     if (!existing) {
       this.logger.warn(`runExportOrderJob(${orderId}): order not found`)
@@ -1827,6 +1832,16 @@ export class FlexiService {
 
     if (existing.status === 'CANCELLED') {
       this.logger.log(`runExportOrderJob(${orderId}): order CANCELLED — skip export`)
+      return
+    }
+
+    if (
+      existing.paymentMethod === 'card-online' &&
+      existing.paymentStatus !== 'success'
+    ) {
+      this.logger.log(
+        `runExportOrderJob(${orderId}): card-online unpaid (paymentStatus=${existing.paymentStatus}) — skip export`,
+      )
       return
     }
 
