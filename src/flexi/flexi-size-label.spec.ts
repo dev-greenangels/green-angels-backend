@@ -38,4 +38,12 @@ describe('parseSizeLabel', () => {
       null,
     )
   })
+
+  it('reads CUT / GROW type suffix from Name', () => {
+    assert.equal(
+      parseSizeLabel('PLANT999', 'Achillea millefolium Skysail Yellow PBR - CUT'),
+      'CUT',
+    )
+    assert.equal(parseSizeLabel('G1', 'Lavandula angustifolia - GROW'), 'GROW')
+  })
 })

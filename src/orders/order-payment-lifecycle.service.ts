@@ -460,13 +460,15 @@ export class OrderPaymentLifecycleService {
       })
     }
 
+    const hasFlexiOrderRef =
+      Boolean(order.erpNativeId?.trim()) || Boolean(order.externalErpId?.trim())
+
     const needsErpStorno =
       flexiConfigured &&
-      (sync === 'SYNCED' ||
+      (hasFlexiOrderRef ||
+        sync === 'SYNCED' ||
         sync === 'CANCEL_SYNCED' ||
-        Boolean(order.erpNativeId?.trim()) ||
-        (sync === 'ERP_CONFLICT' &&
-          (Boolean(order.erpNativeId?.trim()) || Boolean(order.externalErpId?.trim()))))
+        sync === 'ERP_CONFLICT')
 
     if (needsErpStorno) {
       const result = await this.flexi.stornoOrder(order.id)

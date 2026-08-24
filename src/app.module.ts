@@ -46,6 +46,7 @@ import { ViesModule } from './vies/vies.module'
 import { TedbModule } from './tedb/tedb.module'
 import { LegalModule } from './legal/legal.module'
 import { WholesaleInquiriesModule } from './wholesale-inquiries/wholesale-inquiries.module'
+import { SupplierInvoicesModule } from './supplier-invoices/supplier-invoices.module'
 
 @Module({
   imports: [
@@ -107,6 +108,7 @@ import { WholesaleInquiriesModule } from './wholesale-inquiries/wholesale-inquir
     TedbModule,
     LegalModule,
     WholesaleInquiriesModule,
+    SupplierInvoicesModule,
     MediaModule,
   ],
 })

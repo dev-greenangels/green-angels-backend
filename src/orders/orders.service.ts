@@ -177,6 +177,7 @@ export type CreatedOrderResponse = {
     productName: string
     variantLabel: string | null
     quantity: number
+    lineTotal: number
   }>
 }
 
@@ -1003,6 +1004,7 @@ export class OrdersService {
     clientSecret?: string
     publishableKey?: string
     confirmationToken: string
+    paymentExpiresAt?: string
   }> {
     const order = await this.findOrderForConfirmationMutation(rawOrderNumber, auth)
     if (order.status !== 'AWAITING_PAYMENT') {
@@ -1033,9 +1035,16 @@ export class OrdersService {
       throw new BadRequestException('Онлайн-оплата тимчасово недоступна.')
     }
 
+    const paymentExpiresAt = this.paymentLifecycle.paymentExpiresAtFrom()
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: { paymentExpiresAt },
+    })
+
     return {
       orderNumber,
       confirmationToken,
+      paymentExpiresAt: paymentExpiresAt.toISOString(),
       ...(payment.paymentPageUrl ? { paymentPageUrl: payment.paymentPageUrl } : {}),
       ...(payment.clientSecret ? { clientSecret: payment.clientSecret } : {}),
       ...(payment.publishableKey ? { publishableKey: payment.publishableKey } : {}),
@@ -2055,6 +2064,7 @@ export class OrdersService {
           productName: snapshot.productName,
           variantLabel: snapshot.variantLabel,
           quantity: item.quantity,
+          lineTotal: Math.round(item.priceAtPurchase * item.quantity * 100) / 100,
         }
       }),
     }

@@ -24,9 +24,10 @@ export class PaymentsService {
     private readonly monopayProvider: MonopayPaymentProvider,
     private readonly stripeProvider: StripePaymentProvider,
   ) {
+    // Literal keys — stripeProvider.id can be undefined here (Nest circular DI init order).
     this.providers = new Map<string, PaymentProvider>([
-      [monopayProvider.id, monopayProvider],
-      [stripeProvider.id, stripeProvider],
+      ['monopay', monopayProvider],
+      ['stripe', stripeProvider],
     ])
   }
 

@@ -76,14 +76,16 @@ function resolveDejaVuPath(file: string): string | null {
 }
 
 function resolveLogoPath(region: 'ua' | 'sk'): string | null {
-  const file = region === 'sk' ? 'logo-sk.png' : 'logo-ua.png'
+  const file = region === 'sk' ? 'logo-sk-header.png' : 'logo-ua-header.png'
+  const legacy = region === 'sk' ? 'logo-sk.png' : 'logo-ua.png'
   const candidates = [
     process.env.ORDER_PDF_LOGO_PATH?.trim() || '',
     join(__dirname, '..', '..', 'assets', 'branding', file),
     join(process.cwd(), 'assets', 'branding', file),
     join(process.cwd(), 'green-angels-backend', 'assets', 'branding', file),
-    join(__dirname, '..', '..', 'assets', 'watermarks', `${region}.png`),
-    join(process.cwd(), 'assets', 'watermarks', `${region}.png`),
+    join(__dirname, '..', '..', 'assets', 'branding', legacy),
+    join(process.cwd(), 'assets', 'branding', legacy),
+    join(process.cwd(), 'green-angels-backend', 'assets', 'branding', legacy),
   ].filter(Boolean)
   return candidates.find((p) => existsSync(p)) ?? null
 }

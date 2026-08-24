@@ -16,6 +16,9 @@ export const FLEXI_JOB_NAMES = {
 /** REL-003 / product: late-conflict / unconfirmed document status (live-verified). */
 export const FLEXI_ORDER_CONFLICT_USER_STATUS = 'stavDoklObch.nespec'
 
+/** REL-003: document user status after website cancel (Abra “Document status” = Storno). */
+export const FLEXI_ORDER_STORNO_USER_STATUS = 'stavDoklObch.storno'
+
 export const FLEXI_REPEATABLE_POLL_JOB_ID = 'flexi-poll-changes'
 export const FLEXI_REPEATABLE_FULL_SYNC_JOB_ID = 'flexi-full-cenik-sync'
 /** Stable wake-up job — coalesce webhook storms into one worker pass. */

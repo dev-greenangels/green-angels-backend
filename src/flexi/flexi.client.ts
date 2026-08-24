@@ -704,6 +704,114 @@ export class FlexiClient {
    * REL-003-PRE-A: direct `/objednavka-prijata/{extId}.json` returns 404 on live Flexi.
    * Use path-filter `/(id='ext:…')` (same class as WEBHOOK-002B multi-id). Never query `?filter=`.
    */
+  async putFakturaPrijata(document: Record<string, unknown>): Promise<{
+    nativeId: string | null
+    ref: string | null
+    raw: unknown
+  }> {
+    const payload = await this.request<unknown>('PUT', '/faktura-prijata.json', {
+      winstrom: {
+        '@version': '1.0',
+        'faktura-prijata': [document],
+      },
+    })
+    return this.parseWriteResult(payload)
+  }
+
+  /**
+   * Attach binary PDF to received invoice (faktura-prijata).
+   * @see https://podpora.flexibee.eu/en/articles/4783164-how-to-save-a-pdf-to-a-document-via-api
+   */
+  async putFakturaPrijataAttachment(
+    nativeId: string,
+    fileName: string,
+    pdfBuffer: Buffer,
+    settingsOverride?: FlexiSettings,
+  ): Promise<void> {
+    const settings = settingsOverride ?? (await this.settingsService.getSettings())
+    if (!settings.baseUrl || !settings.companyId) {
+      throw new Error('ABRA Flexi не налаштовано (baseUrl / companyId).')
+    }
+
+    const safeName = fileName.trim() || 'invoice.pdf'
+    const encodedName = encodeURIComponent(safeName)
+    const url = `${this.companyBase(settings)}/faktura-prijata/${encodeURIComponent(nativeId)}/prilohy/new/${encodedName}`
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), FLEXI_HTTP_TIMEOUT_MS)
+    try {
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          Authorization: this.authHeader(settings),
+          Accept: 'application/json',
+          'Content-Type': 'application/pdf',
+        },
+        body: new Uint8Array(pdfBuffer),
+        signal: controller.signal,
+      })
+
+      void this.settingsService.incrementApiCalls(1)
+
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(`Flexi attachment HTTP ${response.status}: ${text.slice(0, 500)}`)
+      }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /**
+   * Search cenik by name. Flexi path-filter does NOT support leading-wildcard
+   * `like '%…%'` (returns empty). Use `nazev begins '…'` and optional `nazev ends 'CUT'|'C2'`.
+   */
+  async searchCenikByNameFragment(
+    fragment: string,
+    limit = 20,
+    sizeOrType?: string,
+  ): Promise<FlexiCenikItem[]> {
+    const trimmed = fragment.trim()
+    if (!trimmed) return []
+
+    const prefixes = buildFlexiBeginsPrefixes(trimmed)
+    if (prefixes.length === 0) return []
+
+    const size = sizeOrType?.trim()
+    const seen = new Set<string>()
+    const items: FlexiCenikItem[] = []
+
+    for (const prefix of prefixes) {
+      const escaped = this.escapeFlexiLiteral(prefix.replace(/'/g, "''"))
+      let wql = `nazev begins '${escaped}'`
+      if (size) {
+        const sizeEsc = this.escapeFlexiLiteral(size.replace(/'/g, "''"))
+        wql += ` and nazev ends '${sizeEsc}'`
+      }
+      const filter = encodeURIComponent(wql)
+      const path = `/cenik/(${filter}).json?limit=${limit}&detail=${encodeURIComponent(CENIK_DETAIL)}`
+      try {
+        const payload = await this.request<unknown>('GET', path)
+        const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
+        for (const row of rows) {
+          const item = this.parseCenikRow(row)
+          if (!item || seen.has(item.id)) continue
+          seen.add(item.id)
+          items.push(item)
+        }
+        if (items.length > 0) break
+      } catch (error) {
+        this.logger.warn(
+          `searchCenikByNameFragment begins("${prefix}", size=${size ?? ''}) failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+      }
+    }
+
+    return this.overlayWarehouseStock(items)
+  }
+
   async fetchObjednavkaByExtId(extId: string): Promise<Record<string, unknown> | null> {
     const trimmed = extId.trim()
     if (!trimmed) return null
@@ -814,4 +922,22 @@ export class FlexiClient {
     }
     return links
   }
+}
+
+/**
+ * Prefixes for Flexi `nazev begins '…'` (leading-wildcard like is unsupported).
+ * Prefer genus + species, then genus only.
+ */
+function buildFlexiBeginsPrefixes(fragment: string): string[] {
+  const cleaned = fragment
+    .replace(/['’]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!cleaned) return []
+  const words = cleaned.split(' ').filter(Boolean)
+  const out: string[] = []
+  if (words.length >= 2) out.push(`${words[0]} ${words[1]}`)
+  if (words.length >= 1) out.push(words[0])
+  if (words.length >= 3) out.push(`${words[0]} ${words[1]} ${words[2]}`)
+  return [...new Set(out.filter((p) => p.length >= 3))]
 }

@@ -17,7 +17,7 @@ import {
 } from '../orders/erp-sync.errors'
 import { resolveErpSyncStatus } from '../orders/erp-sync.constants'
 import { formatEuVatId } from '../vies/vies.types'
-import { FLEXI_ORDER_CONFLICT_USER_STATUS, FLEXI_STOCK_FILTER_CHUNK } from './flexi.constants'
+import { FLEXI_ORDER_CONFLICT_USER_STATUS, FLEXI_ORDER_STORNO_USER_STATUS, FLEXI_STOCK_FILTER_CHUNK } from './flexi.constants'
 import { applyFlexiOrderHeaderMapping } from './flexi-order-export-mapping'
 import { parseSizeLabel } from './flexi-size-label'
 import {
@@ -1756,7 +1756,8 @@ export class FlexiService {
   }
 
   /**
-   * REL-003: ERP-led cancel via official `@action=storno` (prefer native id).
+   * REL-003: ERP-led cancel via official `@action=storno` (prefer native id),
+   * then set document user status to Storno for Abra UI.
    */
   async stornoOrder(orderId: string): Promise<{ ok: boolean; message: string }> {
     const configured = await this.isConfigured()
@@ -1775,18 +1776,53 @@ export class FlexiService {
     })
     if (!order) return { ok: false, message: 'Замовлення не знайдено.' }
 
-    const targetId =
-      order.erpNativeId?.trim() ||
-      order.externalErpId?.trim() ||
-      `ext:GA:${order.id}`
+    const extId = order.externalErpId?.trim() || `ext:GA:${order.id}`
+    let existingDoc: Record<string, unknown> | null = null
+    try {
+      existingDoc = await this.client.fetchObjednavkaByExtId(extId)
+    } catch (error) {
+      this.logger.warn(
+        `stornoOrder(${orderId}) GET-before-storno: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+
+    const nativeFromDoc =
+      existingDoc?.id != null ? String(existingDoc.id).trim() || null : null
+    const targetId = order.erpNativeId?.trim() || nativeFromDoc || extId
+
+    if (!order.erpNativeId?.trim() && !existingDoc) {
+      return { ok: true, message: 'Документ у ABRA Flexi відсутній — storno не потрібен.' }
+    }
 
     try {
       await this.client.putObjednavkaAction('storno', targetId)
+
+      const nativeForStatus =
+        order.erpNativeId?.trim() || nativeFromDoc || (/^\d+$/.test(targetId) ? targetId : null)
+
+      if (nativeForStatus) {
+        try {
+          await this.client.putObjednavkaPrijata({
+            id: nativeForStatus,
+            stavUzivK: FLEXI_ORDER_STORNO_USER_STATUS,
+          })
+        } catch (statusError) {
+          this.logger.warn(
+            `stornoOrder(${orderId}) stavUzivK→Storno: ${
+              statusError instanceof Error ? statusError.message : String(statusError)
+            }`,
+          )
+        }
+      }
+
       const now = new Date()
       await this.prisma.order.update({
         where: { id: orderId },
         data: {
           erpSyncStatus: 'CANCEL_SYNCED',
+          ...(nativeForStatus ? { erpNativeId: nativeForStatus } : {}),
           erpLastSyncAt: now,
           erpLastErrorCode: null,
           erpLastErrorMessage: null,
@@ -1799,7 +1835,6 @@ export class FlexiService {
       await this.prisma.order.update({
         where: { id: orderId },
         data: {
-          erpSyncStatus: 'CANCEL_SYNCED',
           erpLastSyncAt: new Date(),
           erpLastErrorCode: erpSyncErrorCodeForKind(classifyFlexiError(message)),
           erpLastErrorMessage: message,

@@ -93,6 +93,8 @@ export class FlexiSettingsService {
         (base.orderUserStatus ?? 'stavDoklObch.schvaleno').trim() || 'stavDoklObch.schvaleno',
       issuedInvoiceTypeCode:
         (base.issuedInvoiceTypeCode ?? 'FAKTURA').trim() || 'FAKTURA',
+      receivedInvoiceDocTypeCode:
+        (base.receivedInvoiceDocTypeCode ?? 'FAKTURA').trim() || 'FAKTURA',
       shippingCenikKod: (base.shippingCenikKod ?? 'SHIPPING').trim() || 'SHIPPING',
       boxesCenikKod: (base.boxesCenikKod ?? 'BOXES').trim() || 'BOXES',
       codFeeCenikKod: (base.codFeeCenikKod ?? 'COD').trim(),
@@ -162,6 +164,7 @@ export class FlexiSettingsService {
       centerCode: settings.centerCode,
       orderUserStatus: settings.orderUserStatus,
       issuedInvoiceTypeCode: settings.issuedInvoiceTypeCode,
+      receivedInvoiceDocTypeCode: settings.receivedInvoiceDocTypeCode,
       shippingCenikKod: settings.shippingCenikKod,
       boxesCenikKod: settings.boxesCenikKod,
       codFeeCenikKod: settings.codFeeCenikKod,

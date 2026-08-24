@@ -28,6 +28,8 @@ export type FlexiSettings = {
   orderUserStatus: string
   /** Issued invoice type for typDoklNabFak, e.g. FAKTURA */
   issuedInvoiceTypeCode: string
+  /** Received invoice type for faktura-prijata.typDokl (typ-faktury-prijate.kod), e.g. FAKTURA */
+  receivedInvoiceDocTypeCode: string
   /** Cenik code for delivery fee line (empty = skip) */
   shippingCenikKod: string
   /** Cenik code for packaging fee line (empty = skip) */
@@ -94,6 +96,7 @@ export const DEFAULT_FLEXI_SETTINGS: FlexiSettings = {
   centerCode: 'SITE',
   orderUserStatus: 'stavDoklObch.schvaleno',
   issuedInvoiceTypeCode: 'FAKTURA',
+  receivedInvoiceDocTypeCode: 'FAKTURA',
   shippingCenikKod: 'SHIPPING',
   boxesCenikKod: 'BOXES',
   codFeeCenikKod: 'COD',
@@ -129,6 +132,7 @@ export type FlexiPublicSettings = {
   centerCode: string
   orderUserStatus: string
   issuedInvoiceTypeCode: string
+  receivedInvoiceDocTypeCode: string
   shippingCenikKod: string
   boxesCenikKod: string
   codFeeCenikKod: string
