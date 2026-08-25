@@ -107,4 +107,88 @@ export class QueueService implements OnModuleInit {
       },
     )
   }
+
+  async enqueueStockAvailable(input: { productId?: string; notificationIds?: string[] }) {
+    const jobId = input.productId
+      ? `stock-available-${input.productId}`
+      : `stock-available-manual-${Date.now()}`
+
+    if (input.productId) {
+      try {
+        const existing = await this.queue.getJob(jobId)
+        if (existing) {
+          const state = await existing.getState()
+          if (state === 'waiting' || state === 'delayed' || state === 'active') {
+            return existing
+          }
+          await existing.remove().catch(() => undefined)
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    return this.queue.add(
+      APP_JOB_NAMES.SEND_STOCK_AVAILABLE,
+      {
+        type: 'send-stock-available',
+        productId: input.productId,
+        notificationIds: input.notificationIds,
+      },
+      {
+        jobId,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 8000 },
+        removeOnComplete: 50,
+        removeOnFail: 80,
+      },
+    )
+  }
+
+  async getJobCounts() {
+    return this.queue.getJobCounts('waiting', 'active', 'delayed', 'failed', 'completed')
+  }
+
+  async listJobsByName(name: string, limit = 30) {
+    const jobs = await this.queue.getJobs(['waiting', 'active', 'delayed', 'failed', 'completed'])
+    const filtered = jobs.filter((job) => job.name === name).slice(0, limit)
+    const items = await Promise.all(
+      filtered.map(async (job) => ({
+        id: job.id,
+        name: job.name,
+        state: await job.getState(),
+        attemptsMade: job.attemptsMade,
+        timestamp: job.timestamp,
+        failedReason: job.failedReason ?? null,
+        data: job.data,
+      })),
+    )
+    return items
+  }
+
+  async retryFailedByName(name: string) {
+    const jobs = await this.queue.getJobs(['failed'])
+    let count = 0
+    for (const job of jobs) {
+      if (job.name !== name) continue
+      await job.retry()
+      count += 1
+    }
+    return { ok: true as const, count }
+  }
+
+  async drainWaitingByName(name: string) {
+    const jobs = await this.queue.getJobs(['waiting', 'delayed'])
+    let removed = 0
+    for (const job of jobs) {
+      if (job.name !== name) continue
+      try {
+        await job.remove()
+        removed += 1
+      } catch {
+        // active/locked
+      }
+    }
+    return { ok: true as const, removed }
+  }
 }

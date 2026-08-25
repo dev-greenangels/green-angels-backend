@@ -38,6 +38,7 @@ export class SupplierInvoiceDraftService {
       editedLines: null,
       supplierMatch: null,
       status: 'uploaded',
+      sends: [],
       createdAt: now,
       parsedAt: null,
     }
@@ -113,7 +114,13 @@ export class SupplierInvoiceDraftService {
   private async readMeta(draftId: string): Promise<SupplierInvoiceDraftMeta | null> {
     const raw = await this.redis.client.get(`${SUPPLIER_INVOICE_DRAFT_META_PREFIX}${draftId}`)
     if (!raw) return null
-    return JSON.parse(raw) as SupplierInvoiceDraftMeta
+    const meta = JSON.parse(raw) as SupplierInvoiceDraftMeta & { status?: string }
+    if (!Array.isArray(meta.sends)) meta.sends = []
+    // Legacy drafts used status "submitted" before invoice/warehouse split.
+    if ((meta.status as string) === 'submitted') {
+      meta.status = 'submitted-invoice'
+    }
+    return meta as SupplierInvoiceDraftMeta
   }
 
   private async assertOwner(userId: string, draftId: string): Promise<void> {

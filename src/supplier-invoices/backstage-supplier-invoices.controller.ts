@@ -23,6 +23,8 @@ import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import {
   CreateSupplierInvoiceDto,
+  CreateWarehouseDocumentDto,
+  RematchSupplierInvoiceLinesDto,
   UpdateSupplierInvoiceDraftDto,
 } from './dto/supplier-invoice.dto'
 import { PDF_MIME, SUPPLIER_INVOICE_PDF_MAX_BYTES } from './supplier-invoices.constants'
@@ -112,5 +114,25 @@ export class BackstageSupplierInvoicesController {
     @Body() body: CreateSupplierInvoiceDto,
   ) {
     return this.supplierInvoices.createInFlexi(req.user.userId, draftId, body)
+  }
+
+  @Post('drafts/:draftId/warehouse')
+  async createWarehouse(
+    @Req() req: AuthedRequest,
+    @Param('draftId') draftId: string,
+    @Body() body: CreateWarehouseDocumentDto,
+  ) {
+    return this.supplierInvoices.createWarehouseInFlexi(req.user.userId, draftId, body)
+  }
+
+  @Post('drafts/:draftId/rematch')
+  async rematchLines(
+    @Req() req: AuthedRequest,
+    @Param('draftId') draftId: string,
+    @Body() body: RematchSupplierInvoiceLinesDto,
+  ) {
+    const meta = await this.supplierInvoices.rematchLines(req.user.userId, draftId, body)
+    const createPayload = this.supplierInvoices.buildCreateDtoFromDraft(meta)
+    return { meta, createPayload }
   }
 }

@@ -36,6 +36,7 @@ import { NovaPoshtaSyncService } from './nova-poshta.sync.service'
     NovaPoshtaSearchService,
     NovaPoshtaSyncService,
     NovaPoshtaClient,
+    NovaPoshtaQueueService,
   ],
 })
 export class NovaPoshtaModule {}

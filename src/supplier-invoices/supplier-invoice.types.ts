@@ -108,9 +108,21 @@ export type SupplierInvoiceDraftMeta = {
     abraRef: string | null
     matchConfidence: MatchConfidence
   } | null
-  status: 'uploaded' | 'parsed' | 'submitted'
+  status: 'uploaded' | 'parsed' | 'submitted-invoice' | 'submitted-warehouse'
+  sends: SupplierInvoiceSendRecord[]
   createdAt: string
   parsedAt: string | null
+}
+
+export type SupplierInvoiceSendRecord = {
+  kind: 'invoice' | 'warehouse'
+  at: string
+  ok: boolean
+  externalId?: string
+  nativeKod?: string
+  message: string
+  voucherType?: string
+  movement?: string
 }
 
 export type CreateFakturaPrijataResult = {
@@ -119,5 +131,13 @@ export type CreateFakturaPrijataResult = {
   nativeId?: string
   nativeKod?: string
   attachmentOk: boolean
+  message: string
+}
+
+export type CreateWarehouseDocumentResult = {
+  ok: boolean
+  externalId?: string
+  nativeId?: string
+  nativeKod?: string
   message: string
 }

@@ -664,24 +664,49 @@ export class FlexiClient {
   }
 
   async findAdresarByIc(ic: string): Promise<Record<string, unknown> | null> {
-    const trimmed = ic.trim()
-    if (!trimmed) return null
-    const filter = encodeURIComponent(`ic='${this.escapeFlexiLiteral(trimmed)}'`)
-    const path = `/adresar.json?limit=1&detail=custom:id,kod,nazev,ic,dic,email&filter=${filter}`
-    try {
-      const payload = await this.request<unknown>('GET', path)
-      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'adresar')
-      return rows[0] ?? null
-    } catch {
-      return null
+    return this.findAdresarByField('ic', ic)
+  }
+
+  async findAdresarByVatId(vatId: string): Promise<Record<string, unknown> | null> {
+    return this.findAdresarByField('vatId', vatId)
+  }
+
+  async findAdresarByDic(dic: string): Promise<Record<string, unknown> | null> {
+    return this.findAdresarByField('dic', dic)
+  }
+
+  /**
+   * Try vatId, then ic, then dic for each candidate string (order preserved).
+   */
+  async findAdresarByTaxCandidates(candidates: string[]): Promise<Record<string, unknown> | null> {
+    for (const raw of candidates) {
+      const value = raw.trim()
+      if (!value) continue
+      const byVat = await this.findAdresarByVatId(value)
+      if (byVat) return byVat
+      const byIc = await this.findAdresarByIc(value)
+      if (byIc) return byIc
+      const byDic = await this.findAdresarByDic(value)
+      if (byDic) return byDic
     }
+    return null
   }
 
   async findAdresarByEmail(email: string): Promise<Record<string, unknown> | null> {
     const trimmed = email.trim().toLowerCase()
     if (!trimmed) return null
-    const filter = encodeURIComponent(`email='${this.escapeFlexiLiteral(trimmed)}'`)
-    const path = `/adresar.json?limit=1&detail=custom:id,kod,nazev,ic,dic,email&filter=${filter}`
+    return this.findAdresarByField('email', trimmed)
+  }
+
+  private async findAdresarByField(
+    field: 'ic' | 'vatId' | 'dic' | 'email',
+    value: string,
+  ): Promise<Record<string, unknown> | null> {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    const filter = encodeURIComponent(`${field}='${this.escapeFlexiLiteral(trimmed)}'`)
+    const path =
+      `/adresar.json?limit=1&detail=custom:id,kod,nazev,ic,dic,vatId,email&filter=${filter}`
     try {
       const payload = await this.request<unknown>('GET', path)
       const rows = this.extractEvidence<Record<string, unknown>>(payload, 'adresar')
@@ -696,6 +721,34 @@ export class FlexiClient {
       winstrom: {
         '@version': '1.0',
         adresar: [document],
+      },
+    })
+  }
+
+  async putSkladovyPohyb(document: Record<string, unknown>): Promise<{
+    nativeId: string | null
+    ref: string | null
+    raw: unknown
+  }> {
+    const payload = await this.request<unknown>('PUT', '/skladovy-pohyb.json', {
+      winstrom: {
+        '@version': '1.0',
+        'skladovy-pohyb': [document],
+      },
+    })
+    return this.parseWriteResult(payload)
+  }
+
+  async completePrevodka(documentId: string): Promise<unknown> {
+    return this.request('PUT', '/skladovy-pohyb.json', {
+      winstrom: {
+        '@version': '1.0',
+        'skladovy-pohyb': [
+          {
+            id: documentId,
+            '@action': 'dokoncit-prevodku',
+          },
+        ],
       },
     })
   }

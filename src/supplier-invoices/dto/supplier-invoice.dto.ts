@@ -50,8 +50,8 @@ export class CreateInvoiceLineDto {
   @MaxLength(500)
   rawName!: string
 
+  /** May be empty while editing / before rematch; create endpoints enforce non-empty. */
   @IsString()
-  @IsNotEmpty()
   @MaxLength(64)
   abraCode!: string
 
@@ -181,4 +181,51 @@ export class UpdateSupplierInvoiceDraftDto {
   @Type(() => CreateInvoiceLineDto)
   @IsArray()
   editedLines!: CreateInvoiceLineDto[]
+}
+
+export class RematchSupplierInvoiceLinesDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(32)
+  sizeLabel!: string
+
+  /** Empty / omitted = rematch all lines. */
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  lineIndexes?: number[]
+}
+
+export class CreateWarehouseDocumentDto {
+  @IsIn(['STANDARD', 'VYROBA', 'PREVODKA'])
+  voucherType!: 'STANDARD' | 'VYROBA' | 'PREVODKA'
+
+  @IsIn(['prijem', 'vydej'])
+  movement!: 'prijem' | 'vydej'
+
+  @IsString()
+  @IsNotEmpty()
+  issueDate!: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  stockCode?: string
+
+  /** Target warehouse for PREVODKA (skladCil). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  targetStockCode?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string
+
+  @ValidateNested({ each: true })
+  @Type(() => CreateInvoiceLineDto)
+  @IsArray()
+  lines!: CreateInvoiceLineDto[]
 }

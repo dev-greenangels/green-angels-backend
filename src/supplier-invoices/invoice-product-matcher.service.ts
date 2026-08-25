@@ -26,7 +26,84 @@ export class InvoiceProductMatcherService {
     parsed: GeminiParsedInvoice,
     options: SupplierInvoiceParseOptions,
   ): Promise<InvoiceLinePreview[]> {
-    const eans = [...new Set(parsed.items.map((i) => i.ean?.trim()).filter(Boolean))] as string[]
+    const ctx = await this.buildMatchContext(parsed.items, options)
+    const lines: InvoiceLinePreview[] = []
+    for (const item of parsed.items) {
+      lines.push(await this.matchLine(item, options, ctx.byEan, ctx.serviceKodByAlias))
+    }
+    return lines
+  }
+
+  /**
+   * Rematch selected (or all) lines with an explicit size label (C2 → CUT, etc.).
+   * Preserves qty/price/batch/stock from the previous edited row.
+   */
+  async rematchLines(
+    lines: InvoiceLinePreview[],
+    options: SupplierInvoiceParseOptions,
+    sizeLabel: string,
+    lineIndexes?: number[],
+  ): Promise<InvoiceLinePreview[]> {
+    const wanted = sizeLabel.trim()
+    if (!wanted) return lines
+
+    const indexSet =
+      lineIndexes && lineIndexes.length > 0 ? new Set(lineIndexes) : new Set(lines.map((_, i) => i))
+
+    const rematchOptions: SupplierInvoiceParseOptions = {
+      ...options,
+      defaultSizeLabel: wanted,
+    }
+    const items = lines.map((line) => ({
+      lineIndex: line.lineIndex,
+      rawName: line.rawName,
+      sku: line.sku,
+      ean: line.ean,
+      quantity: line.quantity,
+      unit: line.unit,
+      unitPrice: line.unitPrice,
+      lineTotal: line.lineTotal,
+      vatRate: line.vatRate,
+      batchNumber: line.batchNumber,
+      serialNumber: line.serialNumber,
+      countryOfOrigin: line.countryOfOrigin,
+      hsCode: line.hsCode,
+      notes: line.notes,
+    }))
+    const ctx = await this.buildMatchContext(items, rematchOptions)
+
+    const next = [...lines]
+    for (const i of indexSet) {
+      if (i < 0 || i >= next.length) continue
+      const prev = next[i]
+      const matched = await this.matchLine(items[i], rematchOptions, ctx.byEan, ctx.serviceKodByAlias, {
+        forceSizeLabel: wanted,
+      })
+      next[i] = {
+        ...matched,
+        quantity: prev.quantity,
+        unitPrice: prev.unitPrice,
+        lineTotal: prev.lineTotal,
+        vatRate: prev.vatRate,
+        batchNumber: prev.batchNumber,
+        stockCode: prev.stockCode,
+        serialNumber: prev.serialNumber,
+        countryOfOrigin: prev.countryOfOrigin,
+        hsCode: prev.hsCode,
+        notes: prev.notes,
+      }
+    }
+    return next
+  }
+
+  private async buildMatchContext(
+    items: GeminiParsedInvoice['items'],
+    options: SupplierInvoiceParseOptions,
+  ): Promise<{
+    byEan: Map<string, VariantRow>
+    serviceKodByAlias: Map<string, string>
+  }> {
+    const eans = [...new Set(items.map((i) => i.ean?.trim()).filter(Boolean))] as string[]
 
     // Only look up site variants by EAN — supplier Index/SKU (e.g. 1-71845-08) is never our Abra kod.
     const variants =
@@ -38,15 +115,9 @@ export class InvoiceProductMatcherService {
         : []
 
     const byEan = new Map(variants.filter((v) => v.ean).map((v) => [v.ean as string, v]))
-
     const settings = await this.flexiSettings.getSettings()
     const serviceKodByAlias = buildServiceKodAliases(settings.boxesCenikKod, settings.shippingCenikKod)
-
-    const lines: InvoiceLinePreview[] = []
-    for (const item of parsed.items) {
-      lines.push(await this.matchLine(item, options, byEan, serviceKodByAlias))
-    }
-    return lines
+    return { byEan, serviceKodByAlias }
   }
 
   private async matchLine(
@@ -54,6 +125,7 @@ export class InvoiceProductMatcherService {
     options: SupplierInvoiceParseOptions,
     byEan: Map<string, VariantRow>,
     serviceKodByAlias: Map<string, string>,
+    matchOpts?: { forceSizeLabel?: string },
   ): Promise<InvoiceLinePreview> {
     const unmatched = (): InvoiceLinePreview => ({
       ...item,
@@ -67,7 +139,9 @@ export class InvoiceProductMatcherService {
 
     const ean = item.ean?.trim()
     const rawName = item.rawName.trim()
-    const wantedSize = resolveWantedSize(rawName, options.defaultSizeLabel)
+    const wantedSize = matchOpts?.forceSizeLabel?.trim()
+      ? matchOpts.forceSizeLabel.trim()
+      : resolveWantedSize(rawName, options.defaultSizeLabel)
 
     if (ean && byEan.has(ean)) {
       const variant = byEan.get(ean)!

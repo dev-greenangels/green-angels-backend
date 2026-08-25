@@ -13,6 +13,6 @@ import { TedbService } from './tedb.service'
   imports: [PrismaModule, AuthModule, BullModule.registerQueue({ name: TEDB_QUEUE })],
   controllers: [TedbController],
   providers: [TedbClient, TedbService, TedbQueueService, TedbProcessor],
-  exports: [TedbService],
+  exports: [TedbService, TedbQueueService],
 })
 export class TedbModule {}

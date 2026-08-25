@@ -193,4 +193,8 @@ export class NovaPoshtaQueueService implements OnModuleInit {
     )
     return { cancelled: true, runsUpdated, jobsCleared }
   }
+
+  async getJobCounts() {
+    return this.queue.getJobCounts('waiting', 'active', 'delayed', 'failed', 'completed')
+  }
 }

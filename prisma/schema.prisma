@@ -172,12 +172,15 @@ model ProductStockNotification {
   name       String
   phone      String?
   email      String?
+  locale     String    @default("uk")
+  consentAt  DateTime?
   notifiedAt DateTime?
   createdAt  DateTime  @default(now())
 
   @@index([productId])
   @@index([productId, email])
   @@index([productId, phone])
+  @@index([notifiedAt, createdAt])
 }
 
 model ProductAdditionalCategory {

@@ -290,4 +290,54 @@ export class MailService {
       text: lines.join('\n'),
     })
   }
+
+  buildLocalizedProductUrl(locale: string, categorySlug: string, productSlug: string): string {
+    const origin = this.getShopPublicUrl()
+    const loc = locale.trim() || 'uk'
+    return `${origin}/${loc}/${categorySlug}/${productSlug}`
+  }
+
+  async sendStockAvailableEmail(input: {
+    to: string
+    name: string
+    productName: string
+    productUrl: string
+    locale: string
+  }): Promise<void> {
+    if (!this.isConfigured()) {
+      this.logger.warn(`SMTP не налаштовано — сповіщення про наявність не надіслано на ${input.to}`)
+      return
+    }
+
+    const copy = this.stockAvailableCopy(input.locale, input.name, input.productName, input.productUrl)
+    await this.getTransporter().sendMail({
+      from: this.getFromAddress(),
+      to: input.to,
+      subject: copy.subject,
+      text: copy.text,
+      html: copy.html,
+    })
+  }
+
+  private stockAvailableCopy(locale: string, name: string, productName: string, url: string) {
+    if (locale === 'sk') {
+      return {
+        subject: `${productName} je opäť na sklade`,
+        text: `Dobrý deň, ${name}.\n\n${productName} je opäť na sklade:\n${url}\n\nGreen Angels`,
+        html: `<p>Dobrý deň, ${name}.</p><p><strong>${productName}</strong> je opäť na sklade.</p><p><a href="${url}">Otvoriť produkt</a></p>`,
+      }
+    }
+    if (locale === 'en') {
+      return {
+        subject: `${productName} is back in stock`,
+        text: `Hello, ${name}.\n\n${productName} is back in stock:\n${url}\n\nGreen Angels`,
+        html: `<p>Hello, ${name}.</p><p><strong>${productName}</strong> is back in stock.</p><p><a href="${url}">Open product</a></p>`,
+      }
+    }
+    return {
+      subject: `${productName} знову в наявності`,
+      text: `Доброго дня, ${name}.\n\n${productName} знову в наявності:\n${url}\n\nЗелені Янголи`,
+      html: `<p>Доброго дня, ${name}.</p><p><strong>${productName}</strong> знову в наявності.</p><p><a href="${url}">Відкрити товар</a></p>`,
+    }
+  }
 }

@@ -9,10 +9,17 @@ import { validate } from 'class-validator'
 import { randomUUID } from 'crypto'
 
 import { FlexiClient } from '../flexi/flexi.client'
+import {
+  adresarRefFromRow,
+  buildTaxIdCandidates,
+  stableSupplierExtId,
+} from '../flexi/flexi-adresar-lookup'
 import { FlexiSettingsService } from '../flexi/flexi.settings.service'
 import type { MatchConfidence } from './supplier-invoice.types'
 import {
   CreateSupplierInvoiceDto,
+  CreateWarehouseDocumentDto,
+  RematchSupplierInvoiceLinesDto,
   SupplierInvoiceParseOptionsDto,
   UpdateSupplierInvoiceDraftDto,
 } from './dto/supplier-invoice.dto'
@@ -22,15 +29,18 @@ import {
   resolveDueDate,
   resolveReceivedInvoiceDocType,
 } from './flexi-faktura-prijata.mapper'
+import { buildSkladovyPohybDocument } from './flexi-skladovy-pohyb.mapper'
 import { GeminiInvoiceParserService } from './gemini-invoice-parser.service'
 import { InvoiceProductMatcherService } from './invoice-product-matcher.service'
 import { SupplierInvoiceDraftService } from './supplier-invoice-draft.service'
 import type {
   CreateFakturaPrijataResult,
+  CreateWarehouseDocumentResult,
   GeminiParsedInvoice,
   InvoiceLinePreview,
   SupplierInvoiceDraftMeta,
   SupplierInvoiceParseOptions,
+  SupplierInvoiceSendRecord,
 } from './supplier-invoice.types'
 
 @Injectable()
@@ -136,6 +146,40 @@ export class SupplierInvoicesService {
     return { ok: true }
   }
 
+  async rematchLines(
+    userId: string,
+    draftId: string,
+    body: RematchSupplierInvoiceLinesDto,
+  ): Promise<SupplierInvoiceDraftMeta> {
+    const { meta } = await this.draftService.getDraft(userId, draftId)
+    if (!meta.parsed) {
+      throw new BadRequestException('Спочатку завантажте та розпарсіть PDF.')
+    }
+    const current = meta.editedLines ?? meta.lines
+    if (!current?.length) {
+      throw new BadRequestException('Немає рядків для повторного зіставлення.')
+    }
+
+    const sizeLabel = body.sizeLabel.trim()
+    if (!sizeLabel) {
+      throw new BadRequestException('Вкажіть розмір / тип (C2, CUT, …).')
+    }
+
+    const rematched = await this.matcher.rematchLines(
+      current,
+      meta.parseOptions,
+      sizeLabel,
+      body.lineIndexes,
+    )
+    meta.editedLines = rematched
+    meta.parseOptions = {
+      ...meta.parseOptions,
+      defaultSizeLabel: sizeLabel,
+    }
+    await this.draftService.updateDraftMeta(meta)
+    return meta
+  }
+
   async createInFlexi(
     userId: string,
     draftId: string,
@@ -225,10 +269,7 @@ export class SupplierInvoicesService {
         }
       }
 
-      meta.status = 'submitted'
-      await this.draftService.deleteDraft(userId, draftId)
-
-      return {
+      const result: CreateFakturaPrijataResult = {
         ok: true,
         externalId,
         nativeId: nativeId ?? undefined,
@@ -238,11 +279,165 @@ export class SupplierInvoicesService {
           ? 'Прибуткову накладну створено в ABRA Flexi з PDF-вкладенням.'
           : 'Прибуткову накладну створено в ABRA Flexi (PDF-вкладення не вдалося).',
       }
+
+      await this.appendSend(meta, {
+        kind: 'invoice',
+        at: new Date().toISOString(),
+        ok: true,
+        externalId,
+        nativeKod: nativeKod ?? undefined,
+        message: result.message,
+      })
+      meta.status = 'submitted-invoice'
+      await this.draftService.updateDraftMeta(meta)
+
+      return result
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       this.logger.error(`createInFlexi failed: ${message}`)
+      await this.appendSend(meta, {
+        kind: 'invoice',
+        at: new Date().toISOString(),
+        ok: false,
+        message,
+      })
+      await this.draftService.updateDraftMeta(meta)
       return { ok: false, attachmentOk: false, message }
     }
+  }
+
+  async createWarehouseInFlexi(
+    userId: string,
+    draftId: string,
+    dtoRaw: CreateWarehouseDocumentDto,
+  ): Promise<CreateWarehouseDocumentResult> {
+    const dto = plainToInstance(CreateWarehouseDocumentDto, dtoRaw)
+    const errors = await validate(dto)
+    if (errors.length > 0) {
+      throw new BadRequestException('Некоректні дані для складського документа.')
+    }
+
+    const settings = await this.flexiSettings.getSettings()
+    if (!settings.enabled || !settings.baseUrl || !settings.companyId) {
+      throw new BadRequestException('ABRA Flexi не налаштовано.')
+    }
+
+    const { meta } = await this.draftService.getDraft(userId, draftId)
+    if (!meta.parsed) {
+      throw new BadRequestException('Чернетка не містить розпарсених даних.')
+    }
+
+    if (dto.lines.length === 0) {
+      throw new BadRequestException('Додайте хоча б один рядок товару.')
+    }
+    if (!dto.issueDate?.trim()) {
+      throw new BadRequestException('Вкажіть дату документа (datVyst).')
+    }
+    if (dto.voucherType === 'PREVODKA' && !dto.targetStockCode?.trim()) {
+      throw new BadRequestException('Для PŘEVODKA вкажіть цільовий склад (skladCil).')
+    }
+    if (!dto.stockCode?.trim() && !dto.lines.some((l) => l.stockCode?.trim())) {
+      throw new BadRequestException('Вкажіть склад (sklad) для документа або рядків.')
+    }
+    if (dto.lines.some((l) => !l.abraCode.trim())) {
+      throw new BadRequestException('Усі рядки повинні мати код Abra (cenik).')
+    }
+
+    const { document, externalId, needsPrevodkaComplete } = buildSkladovyPohybDocument({
+      dto: {
+        ...dto,
+        stockCode: dto.stockCode?.trim() || meta.parseOptions.targetStockCode,
+      },
+      noStockCenikKods: [
+        settings.boxesCenikKod,
+        settings.shippingCenikKod,
+        settings.codFeeCenikKod,
+        'BOXES',
+        'SHIPPING',
+        'COD',
+      ],
+    })
+
+    try {
+      const write = await this.flexiClient.putSkladovyPohyb(document)
+      const nativeId = write.nativeId
+      const nativeKod = write.ref
+
+      if (needsPrevodkaComplete && nativeId) {
+        try {
+          await this.flexiClient.completePrevodka(nativeId)
+        } catch (completeError) {
+          const message =
+            completeError instanceof Error ? completeError.message : String(completeError)
+          this.logger.warn(`dokoncit-prevodku failed for ${nativeId}: ${message}`)
+          const result: CreateWarehouseDocumentResult = {
+            ok: true,
+            externalId,
+            nativeId: nativeId ?? undefined,
+            nativeKod: nativeKod ?? undefined,
+            message: `Складський документ створено, але dokončit převodku не вдалося: ${message}`,
+          }
+          await this.appendSend(meta, {
+            kind: 'warehouse',
+            at: new Date().toISOString(),
+            ok: true,
+            externalId,
+            nativeKod: nativeKod ?? undefined,
+            message: result.message,
+            voucherType: dto.voucherType,
+            movement: dto.movement,
+          })
+          meta.status = 'submitted-warehouse'
+          await this.draftService.updateDraftMeta(meta)
+          return result
+        }
+      }
+
+      const result: CreateWarehouseDocumentResult = {
+        ok: true,
+        externalId,
+        nativeId: nativeId ?? undefined,
+        nativeKod: nativeKod ?? undefined,
+        message: needsPrevodkaComplete
+          ? 'Převodka створена і завершена в ABRA Flexi.'
+          : 'Складський документ створено в ABRA Flexi.',
+      }
+
+      await this.appendSend(meta, {
+        kind: 'warehouse',
+        at: new Date().toISOString(),
+        ok: true,
+        externalId,
+        nativeKod: nativeKod ?? undefined,
+        message: result.message,
+        voucherType: dto.voucherType,
+        movement: dto.movement,
+      })
+      meta.status = 'submitted-warehouse'
+      await this.draftService.updateDraftMeta(meta)
+      return result
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.error(`createWarehouseInFlexi failed: ${message}`)
+      await this.appendSend(meta, {
+        kind: 'warehouse',
+        at: new Date().toISOString(),
+        ok: false,
+        message,
+        voucherType: dto.voucherType,
+        movement: dto.movement,
+      })
+      await this.draftService.updateDraftMeta(meta)
+      return { ok: false, message }
+    }
+  }
+
+  private async appendSend(
+    meta: SupplierInvoiceDraftMeta,
+    record: SupplierInvoiceSendRecord,
+  ): Promise<void> {
+    if (!Array.isArray(meta.sends)) meta.sends = []
+    meta.sends = [...meta.sends, record].slice(-20)
   }
 
   buildCreateDtoFromDraft(meta: SupplierInvoiceDraftMeta): CreateSupplierInvoiceDto | null {
@@ -297,15 +492,20 @@ export class SupplierInvoicesService {
     abraRef: string | null
     matchConfidence: MatchConfidence
   }> {
-    const ico = parsed.supplier.ico?.trim()
-    if (ico) {
-      const byIc = await this.flexiClient.findAdresarByIc(ico)
-      if (byIc) {
-        const kod = byIc.kod != null ? String(byIc.kod) : null
-        return {
-          abraRef: kod ? `code:${kod}` : String(byIc.id),
-          matchConfidence: 'exact',
-        }
+    const candidates = buildTaxIdCandidates({
+      ico: parsed.supplier.ico,
+      vatId: parsed.supplier.vatId,
+      dic: parsed.supplier.dic,
+      countryHint: parsed.supplier.country,
+    })
+    if (candidates.length === 0) {
+      return { abraRef: null, matchConfidence: 'none' }
+    }
+    const byTax = await this.flexiClient.findAdresarByTaxCandidates(candidates)
+    if (byTax) {
+      return {
+        abraRef: adresarRefFromRow(byTax) || null,
+        matchConfidence: 'exact',
       }
     }
     return { abraRef: null, matchConfidence: 'none' }
@@ -315,24 +515,40 @@ export class SupplierInvoicesService {
     dto: CreateSupplierInvoiceDto,
     parsed: GeminiParsedInvoice,
   ): Promise<string> {
-    const ico = dto.supplierIco?.trim() ?? parsed.supplier.ico?.trim()
-    if (ico) {
-      const existing = await this.flexiClient.findAdresarByIc(ico)
+    const candidates = buildTaxIdCandidates({
+      ico: dto.supplierIco ?? parsed.supplier.ico,
+      vatId: dto.supplierVatId ?? parsed.supplier.vatId,
+      dic: dto.supplierDic ?? parsed.supplier.dic,
+      countryHint: parsed.supplier.country,
+    })
+
+    if (candidates.length > 0) {
+      const existing = await this.flexiClient.findAdresarByTaxCandidates(candidates)
       if (existing) {
-        const kod = existing.kod != null ? String(existing.kod).trim() : ''
-        if (kod) return `code:${kod}`
-        return String(existing.id)
+        const ref = adresarRefFromRow(existing)
+        if (ref) return ref
       }
     }
 
-    const extId = `ext:GA:SUP:${randomUUID()}`
+    const extId = stableSupplierExtId(candidates.length ? candidates : [`${Date.now()}`])
+    const existingExt = await this.flexiClient.findAdresarByExtId(extId)
+    if (existingExt) {
+      const ref = adresarRefFromRow(existingExt)
+      if (ref) return ref
+      return extId
+    }
+
+    const digits = candidates.map((c) => c.replace(/\D/g, '')).find((d) => d.length >= 6)
+    const vatPrefixed = candidates.find((c) => /^[A-Z]{2}/i.test(c) && c.replace(/\D/g, '').length >= 6)
+
     const adresar: Record<string, unknown> = {
       id: extId,
       nazev: dto.supplierName.trim() || parsed.supplier.name,
     }
-    if (ico) adresar.ic = ico
+    if (digits) adresar.ic = digits
+    if (vatPrefixed) adresar.vatId = vatPrefixed.toUpperCase()
+    else if (dto.supplierVatId?.trim()) adresar.vatId = dto.supplierVatId.trim()
     if (dto.supplierDic?.trim()) adresar.dic = dto.supplierDic.trim()
-    if (dto.supplierVatId?.trim()) adresar.vatId = dto.supplierVatId.trim()
     if (dto.supplierAddress?.trim()) adresar.ulice = dto.supplierAddress.trim()
     if (parsed.supplier.email) adresar.email = parsed.supplier.email
     if (parsed.supplier.phone) adresar.tel = parsed.supplier.phone

@@ -45,6 +45,10 @@ export class TedbQueueService implements OnModuleInit {
   async enqueueSyncNow() {
     await this.queue.add(TEDB_JOB_SYNC, { manual: true }, { removeOnComplete: 20 })
   }
+
+  async getJobCounts() {
+    return this.queue.getJobCounts('waiting', 'active', 'delayed', 'failed', 'completed')
+  }
 }
 
 @Processor(TEDB_QUEUE)

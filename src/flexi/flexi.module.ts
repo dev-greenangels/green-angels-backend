@@ -33,6 +33,6 @@ import { FlexiSettingsService } from './flexi.settings.service'
     FlexiQueueService,
     FlexiProcessor,
   ],
-  exports: [FlexiService, FlexiSettingsService, FlexiQueueService, FlexiClient],
+  exports: [FlexiService, FlexiSettingsService, FlexiQueueService, FlexiClient, FlexiChangeIntakeService],
 })
 export class FlexiModule {}

@@ -32,6 +32,12 @@ import {
 } from './flexi-strom-subtree'
 import { FlexiChangeIntakeService, type FlexiIntakeCollapseGroup } from './flexi.change-intake.service'
 import { FlexiClient } from './flexi.client'
+import {
+  adresarRefFromRow,
+  buildTaxIdCandidates,
+  normalizeAdresarEmail,
+  stableCustomerEmailExtId,
+} from './flexi-adresar-lookup'
 import { FlexiSettingsService } from './flexi.settings.service'
 import type {
   FlexiCenikItem,
@@ -2002,26 +2008,45 @@ export class FlexiService {
       return cusExt
     }
 
-    if (isB2b && order.companyIco?.trim()) {
-      const byIc = await this.client.findAdresarByIc(order.companyIco.trim())
-      if (byIc?.id != null) {
-        const kod = byIc.kod != null ? String(byIc.kod) : null
-        if (kod) return `code:${kod}`
-        return String(byIc.id)
+    const email = normalizeAdresarEmail(order.customerEmail)
+    if (email) {
+      const byEmail = await this.client.findAdresarByEmail(email)
+      if (byEmail?.id != null) {
+        const ref = adresarRefFromRow(byEmail)
+        if (ref) return ref
+      }
+      const emailExt = stableCustomerEmailExtId(email)
+      const byEmailExt = await this.client.findAdresarByExtId(emailExt)
+      if (byEmailExt?.id != null) {
+        return emailExt
       }
     }
 
-    if (order.customerEmail?.trim()) {
-      const byEmail = await this.client.findAdresarByEmail(order.customerEmail.trim())
-      if (byEmail?.id != null && !isB2b) {
-        const kod = byEmail.kod != null ? String(byEmail.kod) : null
-        if (kod) return `code:${kod}`
-        return String(byEmail.id)
+    if (isB2b) {
+      const candidates = buildTaxIdCandidates({
+        ico: order.companyIco,
+        vatId: formatEuVatId(order.vatCountryCode, order.companyVatId) ?? order.companyVatId,
+        dic: order.companyDic,
+        countryHint: order.vatCountryCode,
+      })
+      if (candidates.length > 0) {
+        const byTax = await this.client.findAdresarByTaxCandidates(candidates)
+        if (byTax?.id != null) {
+          const ref = adresarRefFromRow(byTax)
+          if (ref) return ref
+        }
       }
     }
+
+    const createExt =
+      order.userId != null
+        ? cusExt
+        : email
+          ? stableCustomerEmailExtId(email)
+          : cusExt
 
     const adresar: Record<string, unknown> = {
-      id: cusExt,
+      id: createExt,
       nazev: isB2b
         ? (order.companyLegalName?.trim() || contactName)
         : contactName,
@@ -2030,7 +2055,7 @@ export class FlexiService {
       tel: order.customerPhone,
     }
     if (isB2b) {
-      if (order.companyIco) adresar.ic = order.companyIco
+      if (order.companyIco) adresar.ic = order.companyIco.replace(/\D/g, '') || order.companyIco
       if (order.companyDic) adresar.dic = order.companyDic
       const vatId = formatEuVatId(order.vatCountryCode, order.companyVatId) ?? order.companyVatId?.trim()
       if (vatId) adresar.vatId = vatId
@@ -2041,7 +2066,7 @@ export class FlexiService {
     adresar.stat = order.currency === 'UAH' ? 'code:UA' : 'code:SK'
 
     await this.client.putAdresar(adresar)
-    return cusExt
+    return createExt
   }
 
   /** Prefer Strom catalog sync; orphans for leftover SKUs. */

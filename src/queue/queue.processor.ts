@@ -7,6 +7,7 @@ import { MailService } from '../mail/mail.service'
 import { OrderConfirmationTokenService } from '../orders/order-confirmation-token.service'
 import { OrderPaymentLifecycleService } from '../orders/order-payment-lifecycle.service'
 import { OrdersService } from '../orders/orders.service'
+import { StockNotificationsService } from '../stock-notifications/stock-notifications.service'
 import { ONLINE_CARD_PAYMENT_METHOD } from '../payments/payments.constants'
 import { PrismaService } from '../prisma/prisma.service'
 import {
@@ -29,6 +30,8 @@ export class QueueProcessor extends WorkerHost {
     private readonly paymentLifecycle: OrderPaymentLifecycleService,
     @Inject(forwardRef(() => OrdersService))
     private readonly orders: OrdersService,
+    @Inject(forwardRef(() => StockNotificationsService))
+    private readonly stockNotifications: StockNotificationsService,
   ) {
     super()
   }
@@ -57,6 +60,23 @@ export class QueueProcessor extends WorkerHost {
       }
       await this.processOrderEmail(job.data.orderId, job.data.emailType)
       return { sent: true, orderId: job.data.orderId, emailType: job.data.emailType }
+    }
+
+    if (
+      job.name === APP_JOB_NAMES.SEND_STOCK_AVAILABLE ||
+      job.data.type === 'send-stock-available'
+    ) {
+      if (job.data.type !== 'send-stock-available') {
+        return { skipped: true }
+      }
+      const result = await this.stockNotifications.processSendJob({
+        productId: job.data.productId,
+        notificationIds: job.data.notificationIds,
+      })
+      this.logger.log(
+        `send-stock-available: sent=${result.sent} skipped=${result.skipped}`,
+      )
+      return result
     }
 
     this.logger.warn(`Unknown app job ${job.name}`)

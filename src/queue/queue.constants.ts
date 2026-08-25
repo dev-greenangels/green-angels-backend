@@ -4,6 +4,7 @@ export const APP_JOB_NAMES = {
   PING: 'ping',
   EXPIRE_UNPAID_CARD_ORDERS: 'expire-unpaid-card-orders',
   SEND_ORDER_EMAIL: 'send-order-email',
+  SEND_STOCK_AVAILABLE: 'send-stock-available',
 } as const
 
 export const EXPIRE_UNPAID_CARD_ORDERS_JOB_ID = 'expire-unpaid-card-orders-repeatable'
@@ -24,4 +25,9 @@ export type AppJobPayload =
       type: 'send-order-email'
       orderId: string
       emailType: OrderEmailJobType
+    }
+  | {
+      type: 'send-stock-available'
+      productId?: string
+      notificationIds?: string[]
     }

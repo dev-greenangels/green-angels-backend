@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common'
 import { Prisma, VariantAttributeType, VariantQuantityDiscountType } from '@prisma/client'
 
@@ -12,6 +14,7 @@ import {
 } from './dto/variant-quantity-price.dto'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { StockNotificationsService } from '../stock-notifications/stock-notifications.service'
 import { pickLocalizedName, pickLocalizedText, pickTranslationHint } from '../i18n/pick-localized-name'
 import { CommerceService } from '../commerce/commerce.service'
 import { RETAIL_PRICE_TYPE } from '../commerce/commerce.constants'
@@ -139,6 +142,8 @@ export class ProductsService {
     private readonly categories: CategoriesService,
     private readonly variantLabels: VariantLabelService,
     private readonly commerce: CommerceService,
+    @Inject(forwardRef(() => StockNotificationsService))
+    private readonly stockNotifications: StockNotificationsService,
   ) {}
 
   private retailPriceFilter(currency: string) {
@@ -676,6 +681,7 @@ export class ProductsService {
           where: { id: productId },
           data: { restockedAt: new Date(), fullyOutOfStockAt: null },
         })
+        this.stockNotifications.scheduleRestockNotify(productId)
       } else if (product.restockedAt == null) {
         await client.product.update({
           where: { id: productId },
