@@ -7,6 +7,17 @@ export type PacketaSettings = {
   /** Show Z-BOX lockers in pickup-point search (default true). */
   includeZbox: boolean
   /**
+   * Merge Packeta “carrier PUDO” feed (needed for HU/AT/DE and other
+   * partner networks — branch/box feeds alone are mostly CZ/SK).
+   * @see https://docs.packeta.com/docs/pudo-delivery/carriers-pudos
+   */
+  includeCarrierPoints: boolean
+  /**
+   * Optional Packeta carrier IDs for `carrier_point` feed (`ids[]=`).
+   * Empty = request full carrier_point feed (all carriers on the account).
+   */
+  carrierPointIds: number[]
+  /**
    * Z-BOX L locker ceiling (cm): longest side / L+W+H.
    * Packeta L: 60 × 43 × 35 → longest 60, sum 138.
    */
@@ -23,6 +34,8 @@ export const DEFAULT_PACKETA_SETTINGS: PacketaSettings = {
   apiPassword: '',
   senderLabel: '',
   includeZbox: true,
+  includeCarrierPoints: true,
+  carrierPointIds: [],
   zboxMaxLongestSideCm: 60,
   zboxMaxSideSumCm: 138,
   branchMaxLongestSideCm: 120,
@@ -42,6 +55,8 @@ export type PacketaAdminSettings = {
   configured: boolean
   senderLabel: string
   includeZbox: boolean
+  includeCarrierPoints: boolean
+  carrierPointIds: number[]
   zboxMaxLongestSideCm: number
   zboxMaxSideSumCm: number
   branchMaxLongestSideCm: number
@@ -51,7 +66,7 @@ export type PacketaAdminSettings = {
   apiPasswordConfigured: boolean
 }
 
-export type PacketaPickupPointKind = 'branch' | 'box'
+export type PacketaPickupPointKind = 'branch' | 'box' | 'carrier'
 
 export type PacketaPickupPoint = {
   id: string

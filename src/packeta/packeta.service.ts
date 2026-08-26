@@ -28,7 +28,7 @@ type PacketaBranchRaw = {
   type?: string
 }
 
-type FeedKind = PacketaPickupPointKind
+type FeedKind = 'branch' | 'box'
 
 /** Cap only for legacy free-text search without a selected city. */
 const LEGACY_BRANCH_LIMIT = 30
@@ -36,7 +36,8 @@ const LEGACY_BOX_LIMIT = 30
 const CITY_SEARCH_LIMIT = 50
 
 /**
- * Packeta (Zásilkovna) — pickup points via v5 branch + Z-BOX feeds.
+ * Packeta (Zásilkovna) — pickup points via v5 branch + Z-BOX + carrier PUDO feeds.
+ * Carrier feed is required for HU/AT/DE partner networks (branch/box alone ≈ CZ/SK).
  * Shipment/label remain soft-degrade until credentials + full API wiring.
  */
 @Injectable()
@@ -145,31 +146,39 @@ export class PacketaService {
       return sortPoints(matched)
     }
 
-    const branches = matched.filter((p) => p.kind === 'branch').slice(0, LEGACY_BRANCH_LIMIT)
+    const branches = matched
+      .filter((p) => p.kind === 'branch' || p.kind === 'carrier')
+      .slice(0, LEGACY_BRANCH_LIMIT)
     const boxes = matched.filter((p) => p.kind === 'box').slice(0, LEGACY_BOX_LIMIT)
     return [...branches, ...boxes]
   }
 
   private async loadPoints(apiKey: string): Promise<PacketaPickupPoint[]> {
     const now = Date.now()
+    const settings = await this.settings.getSettings()
+    const cacheKey = `${apiKey}|c=${settings.includeCarrierPoints ? 1 : 0}|ids=${settings.carrierPointIds.join(',')}`
     if (
       this.branchCache &&
-      this.branchCache.apiKey === apiKey &&
+      this.branchCache.apiKey === cacheKey &&
       now - this.branchCache.fetchedAt < 6 * 60 * 60 * 1000
     ) {
       return this.branchCache.points
     }
 
-    const [branches, boxes] = await Promise.all([
+    const [branches, boxes, carriers] = await Promise.all([
       this.fetchFeed(apiKey, 'branch'),
       this.fetchFeed(apiKey, 'box'),
+      settings.includeCarrierPoints
+        ? this.fetchCarrierPoints(apiKey, settings.carrierPointIds)
+        : Promise.resolve([] as PacketaPickupPoint[]),
     ])
-    const points = [...branches, ...boxes]
+    const points = dedupePoints([...branches, ...boxes, ...carriers])
+    const byCountry = countByCountry(points)
     this.logger.log(
-      `Packeta feeds loaded: branch=${branches.length}, box=${boxes.length}, total=${points.length}`,
+      `Packeta feeds loaded: branch=${branches.length}, box=${boxes.length}, carrier=${carriers.length}, total=${points.length}, byCountry=${JSON.stringify(byCountry)}`,
     )
     if (points.length) {
-      this.branchCache = { fetchedAt: now, points, apiKey }
+      this.branchCache = { fetchedAt: now, points, apiKey: cacheKey }
     }
     return points
   }
@@ -240,6 +249,69 @@ export class PacketaService {
     }
   }
 
+  /**
+   * Partner PUDO network (HU/AT/DE/…). Separate from Packeta-owned branch/box feeds.
+   * @see https://docs.packeta.com/docs/pudo-delivery/carriers-pudos
+   */
+  private async fetchCarrierPoints(
+    apiKey: string,
+    carrierIds: number[],
+  ): Promise<PacketaPickupPoint[]> {
+    const params = new URLSearchParams()
+    for (const id of carrierIds) {
+      params.append('ids[]', String(id))
+    }
+    const qs = params.toString()
+    const url = `https://pickup-point.api.packeta.com/v5/${encodeURIComponent(apiKey)}/carrier_point/json${qs ? `?${qs}` : ''}`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 45_000)
+    try {
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      })
+      if (!res.ok) {
+        throw new Error(`Packeta carrier_point HTTP ${res.status}`)
+      }
+      const json: unknown = await res.json()
+      const carriers = extractCarrierList(json)
+      const points: PacketaPickupPoint[] = []
+      for (const carrier of carriers) {
+        const carrierName = String(carrier.name ?? '').trim()
+        for (const row of carrier.points ?? []) {
+          const id = String(row.code ?? row.id ?? '').trim()
+          if (!id) continue
+          if (!isDisplayFrontend(row.displayFrontend)) continue
+          const street = [row.street, row.streetNumber].filter(Boolean).join(' ').trim()
+          const city = String(row.city ?? '').trim()
+          const name =
+            String(row.name ?? '').trim() ||
+            [carrierName, street || city].filter(Boolean).join(' — ') ||
+            id
+          points.push({
+            id: `carrier:${id}`,
+            name,
+            street,
+            city,
+            zip: String(row.zip ?? '').trim(),
+            country: String(row.country ?? '').trim().toLowerCase(),
+            kind: 'carrier',
+            lat: row.coordinates?.latitude != null ? Number(row.coordinates.latitude) : undefined,
+            lng: row.coordinates?.longitude != null ? Number(row.coordinates.longitude) : undefined,
+          })
+        }
+      }
+      return points
+    } catch (error) {
+      this.logger.warn(
+        `Packeta load carrier_point failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
+      return []
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
   async createShipment(input: PacketaCreateShipmentInput): Promise<PacketaCreateShipmentResult> {
     const configured = await this.isConfigured()
     if (!configured) {
@@ -261,9 +333,61 @@ export class PacketaService {
 
 function sortPoints(points: PacketaPickupPoint[]): PacketaPickupPoint[] {
   return [...points].sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === 'branch' ? -1 : 1
+    const rank = (k: PacketaPickupPointKind) => (k === 'box' ? 1 : 0)
+    if (rank(a.kind) !== rank(b.kind)) return rank(a.kind) - rank(b.kind)
     return a.name.localeCompare(b.name, 'sk')
   })
+}
+
+function dedupePoints(points: PacketaPickupPoint[]): PacketaPickupPoint[] {
+  const seen = new Set<string>()
+  const out: PacketaPickupPoint[] = []
+  for (const p of points) {
+    const key = `${p.kind}:${p.id}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(p)
+  }
+  return out
+}
+
+function countByCountry(points: PacketaPickupPoint[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const p of points) {
+    const c = p.country || '?'
+    out[c] = (out[c] ?? 0) + 1
+  }
+  return out
+}
+
+type CarrierPointRaw = {
+  id?: string | number
+  code?: string
+  name?: string
+  street?: string
+  streetNumber?: string
+  city?: string
+  zip?: string
+  country?: string
+  displayFrontend?: string | number
+  coordinates?: { latitude?: string | number; longitude?: string | number }
+}
+
+type CarrierGroupRaw = {
+  id?: string | number
+  name?: string
+  points?: CarrierPointRaw[]
+}
+
+function extractCarrierList(json: unknown): CarrierGroupRaw[] {
+  if (!json || typeof json !== 'object') return []
+  const root = json as { carriers?: unknown; data?: unknown }
+  if (Array.isArray(root.carriers)) return root.carriers as CarrierGroupRaw[]
+  if (Array.isArray(json)) return json as CarrierGroupRaw[]
+  if (root.data && typeof root.data === 'object' && Array.isArray((root.data as { carriers?: unknown }).carriers)) {
+    return (root.data as { carriers: CarrierGroupRaw[] }).carriers
+  }
+  return []
 }
 
 /** Strip diacritics so "kosice" matches "Košice". */

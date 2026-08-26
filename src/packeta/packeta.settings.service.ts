@@ -23,6 +23,15 @@ function positiveCm(value: unknown, fallback: number): number {
   return Math.round(n)
 }
 
+function normalizeCarrierPointIds(value: unknown): number[] {
+  if (!Array.isArray(value)) return []
+  const ids = value
+    .map((v) => Number(v))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .map((n) => Math.trunc(n))
+  return [...new Set(ids)]
+}
+
 @Injectable()
 export class PacketaSettingsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -44,6 +53,8 @@ export class PacketaSettingsService {
       apiPassword: base.apiPassword ?? '',
       senderLabel: base.senderLabel?.trim() ?? '',
       includeZbox: base.includeZbox !== false,
+      includeCarrierPoints: base.includeCarrierPoints !== false,
+      carrierPointIds: normalizeCarrierPointIds(base.carrierPointIds),
       zboxMaxLongestSideCm: positiveCm(
         base.zboxMaxLongestSideCm,
         DEFAULT_PACKETA_SETTINGS.zboxMaxLongestSideCm,
@@ -71,6 +82,8 @@ export class PacketaSettingsService {
       configured: Boolean(settings.enabled && apiKey && settings.senderLabel),
       senderLabel: settings.senderLabel,
       includeZbox: settings.includeZbox,
+      includeCarrierPoints: settings.includeCarrierPoints,
+      carrierPointIds: settings.carrierPointIds,
       zboxMaxLongestSideCm: settings.zboxMaxLongestSideCm,
       zboxMaxSideSumCm: settings.zboxMaxSideSumCm,
       branchMaxLongestSideCm: settings.branchMaxLongestSideCm,
@@ -120,6 +133,14 @@ export class PacketaSettingsService {
           : patch.senderLabel.trim(),
       includeZbox:
         patch.includeZbox === undefined ? current.includeZbox : Boolean(patch.includeZbox),
+      includeCarrierPoints:
+        patch.includeCarrierPoints === undefined
+          ? current.includeCarrierPoints
+          : Boolean(patch.includeCarrierPoints),
+      carrierPointIds:
+        patch.carrierPointIds === undefined
+          ? current.carrierPointIds
+          : normalizeCarrierPointIds(patch.carrierPointIds),
     })
     await this.prisma.settings.upsert({
       where: { key: PACKETA_SETTINGS_KEY },
