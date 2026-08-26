@@ -17,7 +17,7 @@ import {
 } from '../orders/erp-sync.errors'
 import { resolveErpSyncStatus } from '../orders/erp-sync.constants'
 import { formatEuVatId } from '../vies/vies.types'
-import { FLEXI_ORDER_CONFLICT_USER_STATUS, FLEXI_ORDER_STORNO_USER_STATUS, FLEXI_STOCK_FILTER_CHUNK } from './flexi.constants'
+import { FLEXI_ORDER_CONFLICT_USER_STATUS, FLEXI_ORDER_STORNO_USER_STATUS, FLEXI_CENIK_QUERY_BATCH, FLEXI_STOCK_FILTER_CHUNK, isFlexiMissingRecordError, isImplementedFlexiEvidence, normalizeFlexiEvidence } from './flexi.constants'
 import { applyFlexiOrderHeaderMapping } from './flexi-order-export-mapping'
 import { parseSizeLabel } from './flexi-size-label'
 import {
@@ -474,6 +474,7 @@ export class FlexiService {
     lastSafeCursor: number
     pollStart: number
     httpFetches?: number
+    openRemaining: number
   }> {
     const groups = await this.intake.loadCollapseGroups()
     let fetched = 0
@@ -481,15 +482,21 @@ export class FlexiService {
     let httpFetches = 0
 
     const cenikBound: Array<{ group: FlexiIntakeCollapseGroup; cenikId: string }> = []
+    const stromGroups: FlexiIntakeCollapseGroup[] = []
     const otherGroups: FlexiIntakeCollapseGroup[] = []
+    const unsupportedGroups: FlexiIntakeCollapseGroup[] = []
 
     for (const group of groups) {
       const evidence = group.evidence
-      if (evidence.includes('strom') && !evidence.includes('strom-cenik')) {
-        otherGroups.push(group)
+      if (!isImplementedFlexiEvidence(evidence)) {
+        unsupportedGroups.push(group)
         continue
       }
-      if (evidence.includes('objednavka-prijata')) {
+      if (evidence.includes('strom') && !evidence.includes('strom-cenik')) {
+        stromGroups.push(group)
+        continue
+      }
+      if (normalizeFlexiEvidence(evidence) === 'objednavka-prijata') {
         otherGroups.push(group)
         continue
       }
@@ -504,11 +511,19 @@ export class FlexiService {
           cenikBound.push({ group, cenikId })
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
-          await this.intake.markGroupFailed(group, message)
-          failed += 1
-          this.logger.warn(
-            `processDurableIntake ${group.evidence}/${group.objectId}@${group.changeVersion}: ${message}`,
-          )
+          if (isFlexiMissingRecordError(message)) {
+            this.logger.warn(
+              `processDurableIntake soft-skip missing ${group.evidence}/${group.objectId}: ${message}`,
+            )
+            await this.intake.markGroupSuccess(group)
+            fetched += 1
+          } else {
+            await this.intake.markGroupFailed(group, message)
+            failed += 1
+            this.logger.warn(
+              `processDurableIntake ${group.evidence}/${group.objectId}@${group.changeVersion}: ${message}`,
+            )
+          }
         }
         continue
       }
@@ -519,13 +534,18 @@ export class FlexiService {
       otherGroups.push(group)
     }
 
+    for (const group of unsupportedGroups) {
+      await this.intake.markGroupSuccess(group)
+      fetched += 1
+    }
+
     // Batch GET unique cenik ids (LIVE-VERIFIED path-filter). One HTTP per chunk of 40, not per event.
     const uniqueCenikIds = [...new Set(cenikBound.map((b) => b.cenikId))]
     let cenikMap = new Map<string, FlexiCenikItem>()
     const perIdFallbackErrors = new Map<string, string>()
     if (uniqueCenikIds.length > 0) {
       try {
-        httpFetches += Math.max(1, Math.ceil(uniqueCenikIds.length / FLEXI_STOCK_FILTER_CHUNK))
+        httpFetches += Math.max(1, Math.ceil(uniqueCenikIds.length / FLEXI_CENIK_QUERY_BATCH))
         cenikMap = await this.client.fetchCenikByIds(uniqueCenikIds)
       } catch (error) {
         const batchError = error instanceof Error ? error.message : String(error)
@@ -564,11 +584,48 @@ export class FlexiService {
         fetched += 1
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        await this.intake.markGroupFailed(group, message)
-        failed += 1
-        this.logger.warn(
-          `processDurableIntake ${group.evidence}/${group.objectId}@${group.changeVersion}: ${message}`,
-        )
+        if (isFlexiMissingRecordError(message)) {
+          this.logger.warn(
+            `processDurableIntake soft-skip missing ${group.evidence}/${group.objectId}: ${message}`,
+          )
+          await this.intake.markGroupSuccess(group)
+          fetched += 1
+        } else {
+          await this.intake.markGroupFailed(group, message)
+          failed += 1
+          this.logger.warn(
+            `processDurableIntake ${group.evidence}/${group.objectId}@${group.changeVersion}: ${message}`,
+          )
+        }
+      }
+    }
+
+    // One full tree sync per pass — never N× syncStromCatalog for N strom groups.
+    if (stromGroups.length > 0) {
+      for (const group of stromGroups) {
+        await this.intake.markProcessing(group)
+      }
+      try {
+        const result = await this.syncStromCatalog({ createMissing: true, absorbJournal: false })
+        if (!result.ok && result.categoriesUpserted === 0 && result.productsUpserted === 0) {
+          throw new Error(result.message || 'Strom sync failed')
+        }
+        if (result.errors.length > 0) {
+          this.logger.warn(
+            `Strom sync item errors (${result.errors.length}): ${result.errors.slice(0, 8).join(' | ')}`,
+          )
+        }
+        for (const group of stromGroups) {
+          await this.intake.markGroupSuccess(group)
+          fetched += 1
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        for (const group of stromGroups) {
+          await this.intake.markGroupFailed(group, message)
+          failed += 1
+        }
+        this.logger.warn(`processDurableIntake strom×${stromGroups.length}: ${message}`)
       }
     }
 
@@ -589,6 +646,7 @@ export class FlexiService {
     }
 
     const cursor = await this.intake.recomputeAndPersistLastSafeCursor(opts?.flexiNextHint)
+    const openRemaining = await this.intake.countOpenEvents()
     return {
       ok: failed === 0,
       groups: groups.length,
@@ -597,6 +655,7 @@ export class FlexiService {
       lastSafeCursor: cursor.lastSafeCursor,
       pollStart: cursor.pollStart,
       httpFetches,
+      openRemaining,
     }
   }
 
@@ -635,19 +694,26 @@ export class FlexiService {
       return
     }
 
-    if (evidence.includes('objednavka-prijata')) {
+    if (normalizeFlexiEvidence(evidence) === 'objednavka-prijata') {
       await this.syncOrderFromFlexi(id)
       return
     }
 
-    // Unknown evidence: do not block cursor forever
+    // Unsupported evidence — should be handled in processDurableIntake fast-path.
     this.logger.debug(`Skipping unsupported Flexi evidence: ${evidence}`)
   }
 
   /**
    * Branch nodes → Category; leaf nodes → Product; strom-cenik → variants by SKU.
+   * Field mappers unchanged — createMissing only gates create vs skip-missing.
    */
-  async syncStromCatalog(): Promise<FlexiStromSyncResult> {
+  async syncStromCatalog(opts?: {
+    createMissing?: boolean
+    /** Manual backstage run: close catalog journal so webhook does not re-apply backlog. */
+    absorbJournal?: boolean
+  }): Promise<FlexiStromSyncResult> {
+    const createMissing = opts?.createMissing !== false
+    const absorbJournal = opts?.absorbJournal === true
     const configured = await this.isConfigured()
     if (!configured) {
       return {
@@ -656,6 +722,9 @@ export class FlexiService {
         productsUpserted: 0,
         variantsUpserted: 0,
         orphansCreated: 0,
+        skippedMissingCategories: 0,
+        skippedMissingProducts: 0,
+        skippedMissingVariants: 0,
         message: 'ABRA Flexi не налаштовано.',
         errors: [],
       }
@@ -667,6 +736,10 @@ export class FlexiService {
     let productsUpserted = 0
     let variantsUpserted = 0
     let orphansCreated = 0
+    let skippedMissingCategories = 0
+    let skippedMissingProducts = 0
+    let skippedMissingVariants = 0
+    let journalAbsorbed = 0
 
     try {
       const planned = resolveStromTreeAndShopRoot(
@@ -746,6 +819,10 @@ export class FlexiService {
           let existing = await this.prisma.category.findUnique({ where: { slug } })
 
           if (!existing) {
+            if (!createMissing) {
+              skippedMissingCategories += 1
+              continue
+            }
             existing = await this.prisma.category.create({
               data: {
                 slug,
@@ -820,6 +897,12 @@ export class FlexiService {
         const categoryId =
           resolveShopParentCategoryId(parentFlexiId) || settings.defaultCategoryId || null
         if (!categoryId) {
+          if (!createMissing) {
+            // Still allow price/stock updates for SKUs already on the site.
+            leafWork.push({ leaf, uniqueLinks, categoryId: '' })
+            for (const link of uniqueLinks) linkedCenikKods.add(link.cenikKod)
+            continue
+          }
           errors.push(`leaf ${leaf.kod || leaf.nazev}: немає parent Category і defaultCategoryId`)
           continue
         }
@@ -859,6 +942,31 @@ export class FlexiService {
             })) ?? null
 
           if (!product) {
+            if (!createMissing) {
+              skippedMissingProducts += 1
+              // Update-only: still refresh price/stock for SKUs that already exist.
+              for (const link of uniqueLinks) {
+                const item =
+                  cenikBySku.get(link.cenikKod) ??
+                  (await this.client.fetchCenikById(link.cenikId).catch(() => null))
+                if (!item) continue
+                const existingVariant = await this.prisma.productVariant.findUnique({
+                  where: { sku: item.kod },
+                  select: { id: true },
+                })
+                if (!existingVariant) {
+                  skippedMissingVariants += 1
+                  continue
+                }
+                await this.applyCenikItem(item)
+                variantsUpserted += 1
+              }
+              continue
+            }
+            if (!categoryId) {
+              errors.push(`leaf ${leaf.kod || leaf.nazev}: немає parent Category і defaultCategoryId`)
+              continue
+            }
             const slugTaken = await this.prisma.product.findUnique({ where: { slug } })
             if (slugTaken) slug = `${slug}-${slugify(leaf.kod || leaf.id)}`.slice(0, 120)
 
@@ -880,7 +988,7 @@ export class FlexiService {
             await this.prisma.product.update({
               where: { id: product.id },
               data: {
-                categoryId,
+                ...(categoryId ? { categoryId } : {}),
                 latinName: content.latinName,
                 legacyId: productLegacyId,
                 ...(cnCode ? { cnCode } : {}),
@@ -928,6 +1036,10 @@ export class FlexiService {
             }
 
             if (!existingVariant) {
+              if (!createMissing) {
+                skippedMissingVariants += 1
+                continue
+              }
               const createPrice = item.price > 0
               const createdVariant = await this.prisma.productVariant.create({
                 data: {
@@ -1003,7 +1115,8 @@ export class FlexiService {
 
       // Orphans: cenik with stock not under any leaf. Skip when a shop folder
       // is set — otherwise Materials / Non-added SKUs leak into the catalog.
-      if (settings.defaultCategoryId && !shopRootCode) {
+      // Update-only mode never creates orphans.
+      if (createMissing && settings.defaultCategoryId && !shopRootCode) {
         let start = 0
         const limit = 100
         for (;;) {
@@ -1046,11 +1159,24 @@ export class FlexiService {
 
       void currency
 
+      if (absorbJournal) {
+        journalAbsorbed = await this.absorbCatalogJournalAfterManualSync()
+      }
+
+      const modeLabel = createMissing ? 'імпорт' : 'лише існуючі'
+      const skipPart =
+        !createMissing &&
+        (skippedMissingCategories > 0 ||
+          skippedMissingProducts > 0 ||
+          skippedMissingVariants > 0)
+          ? ` пропущено нових: cat ${skippedMissingCategories}, prod ${skippedMissingProducts}, var ${skippedMissingVariants}.`
+          : ''
+      const absorbPart = absorbJournal ? ` журнал поглинуто ${journalAbsorbed}.` : ''
       const errorPreview = errors.length
         ? ` Перші помилки: ${errors.slice(0, 5).join(' | ')}`
         : ''
       const message =
-        `Strom: категорій ${categoriesUpserted}, товарів ${productsUpserted}, варіантів ${variantsUpserted}, orphan ${orphansCreated}, помилок ${errors.length}.${errorPreview}`
+        `Strom (${modeLabel}): категорій ${categoriesUpserted}, товарів ${productsUpserted}, варіантів ${variantsUpserted}, orphan ${orphansCreated}, помилок ${errors.length}.${skipPart}${absorbPart}${errorPreview}`
       await this.settings.updateSettings({
         lastStromSyncAt: new Date().toISOString(),
         lastStromSyncMessage: message,
@@ -1063,6 +1189,10 @@ export class FlexiService {
         productsUpserted,
         variantsUpserted,
         orphansCreated,
+        skippedMissingCategories,
+        skippedMissingProducts,
+        skippedMissingVariants,
+        journalAbsorbed,
         message,
         errors,
       }
@@ -1078,10 +1208,37 @@ export class FlexiService {
         productsUpserted,
         variantsUpserted,
         orphansCreated,
+        skippedMissingCategories,
+        skippedMissingProducts,
+        skippedMissingVariants,
+        journalAbsorbed,
         message,
         errors: [...errors, message],
       }
     }
+  }
+
+  /**
+   * Ingest remaining Changes pages (no object apply), then mark open catalog
+   * events PROCESSED and advance the safe cursor past the backlog.
+   */
+  private async absorbCatalogJournalAfterManualSync(): Promise<number> {
+    return this.intake.withIngestHold(async () => {
+      const settings = await this.settings.getSettings()
+      let flexiNextHint: number | undefined
+      try {
+        const { nextVersion } = await this.client.fetchChanges(settings.globalVersion)
+        if (nextVersion > settings.globalVersion) {
+          flexiNextHint = nextVersion
+        }
+      } catch (error) {
+        this.logger.warn(
+          `absorb journal fetchChanges: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+      const result = await this.intake.absorbCatalogOpenEvents({ flexiNextHint })
+      return result.absorbed
+    })
   }
 
   private async resolveSizeAttributeId(configuredId: string): Promise<string | null> {
@@ -2080,7 +2237,7 @@ export class FlexiService {
       )
     }
 
-    const strom = await this.syncStromCatalog()
+    const strom = await this.syncStromCatalog({ createMissing: true, absorbJournal: true })
     return {
       ok: strom.ok,
       created: strom.productsUpserted + strom.orphansCreated,

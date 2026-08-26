@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { isCatalogFlexiEvidence, normalizeFlexiEvidence } from './flexi.constants'
 import type { FlexiChangeEntry } from './flexi.types'
 import { FlexiSettingsService } from './flexi.settings.service'
 
@@ -22,14 +23,29 @@ export type FlexiIntakeCollapseGroup = {
 @Injectable()
 export class FlexiChangeIntakeService {
   private readonly logger = new Logger(FlexiChangeIntakeService.name)
+  private ingestHoldDepth = 0
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: FlexiSettingsService,
   ) {}
 
+  isIngestHeld(): boolean {
+    return this.ingestHoldDepth > 0
+  }
+
+  /** Block Changes ingest during absorb/backlog cleanup so rows are not re-added mid-operation. */
+  async withIngestHold<T>(fn: () => Promise<T>): Promise<T> {
+    this.ingestHoldDepth += 1
+    try {
+      return await fn()
+    } finally {
+      this.ingestHoldDepth -= 1
+    }
+  }
+
   normalizeEvidence(raw: string | undefined): string {
-    return (raw ?? '').trim().toLowerCase()
+    return normalizeFlexiEvidence(raw)
   }
 
   private isStromTreeEvidence(evidence: string): boolean {
@@ -71,6 +87,10 @@ export class FlexiChangeIntakeService {
    * Persist notifications. Duplicate (evidence, objectId, changeVersion) is idempotent.
    */
   async ingestChanges(entries: FlexiChangeEntry[]): Promise<{ inserted: number; skipped: number }> {
+    if (this.ingestHoldDepth > 0) {
+      return { inserted: 0, skipped: entries.length }
+    }
+
     let inserted = 0
     let skipped = 0
 
@@ -169,6 +189,33 @@ export class FlexiChangeIntakeService {
       data: { status: 'PROCESSED', processedAt: now },
     })
     return result.count
+  }
+
+  /**
+   * After a successful manual strom snapshot: close open catalog journal rows so
+   * webhook/poll do not re-fetch the same backlog. Never touches objednavka-prijata.
+   */
+  async absorbCatalogOpenEvents(opts?: {
+    flexiNextHint?: number
+  }): Promise<{ absorbed: number; pollStart: number; lastSafeCursor: number }> {
+    const open = await this.prisma.flexiChangeEvent.findMany({
+      where: { status: { in: ['PENDING', 'PROCESSING', 'FAILED'] } },
+      select: { id: true, evidence: true },
+    })
+    const ids = open
+      .filter((row) => isCatalogFlexiEvidence(row.evidence))
+      .map((row) => row.id)
+
+    const now = new Date()
+    if (ids.length > 0) {
+      await this.prisma.flexiChangeEvent.updateMany({
+        where: { id: { in: ids } },
+        data: { status: 'PROCESSED', processedAt: now, lastError: null },
+      })
+    }
+
+    const cursor = await this.recomputeAndPersistLastSafeCursor(opts?.flexiNextHint)
+    return { absorbed: ids.length, pollStart: cursor.pollStart, lastSafeCursor: cursor.lastSafeCursor }
   }
 
   async getQueueEventCounts(): Promise<Record<string, number>> {

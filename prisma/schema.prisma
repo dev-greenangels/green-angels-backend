@@ -173,6 +173,8 @@ model ProductStockNotification {
   phone      String?
   email      String?
   locale     String    @default("uk")
+  /// SK host country site when subscribed (sk|hu|at). Null on UA.
+  countrySiteCode String?
   consentAt  DateTime?
   notifiedAt DateTime?
   createdAt  DateTime  @default(now())
@@ -811,6 +813,10 @@ model Order {
   deliveryPostalCode     String?
   /// Shipping destination country (sk|hu|at) for SK multi-site
   deliveryCountryCode    String?
+  /// Storefront host country site at checkout (sk|hu|at). Null on UA. Never delivery/tax country.
+  countrySiteCode        String?
+  /// Checkout UI locale snapshot (uk|en|sk|…). Used for email resume links.
+  locale                 String?
   /// Optional company/org name on package recipient (not billing entity)
   receiverCompanyName    String?
   /// Human-readable Packeta / branch label (id stored in deliveryBranch)

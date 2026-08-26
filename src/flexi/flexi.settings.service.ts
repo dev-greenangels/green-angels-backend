@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 
 import { PrismaService } from '../prisma/prisma.service'
-import { FLEXI_API_WARN_THRESHOLD, FLEXI_SETTINGS_KEY, flexiApiCallsForUtcDay, flexiUtcDateStamp } from './flexi.constants'
+import { FLEXI_API_WARN_THRESHOLD, FLEXI_RECONCILE_OPEN_THRESHOLD_DEFAULT, FLEXI_SETTINGS_KEY, flexiApiCallsForUtcDay, flexiUtcDateStamp } from './flexi.constants'
 import {
   decryptSecret,
   encryptSecret,
@@ -126,6 +126,9 @@ export class FlexiSettingsService {
       lastImportMessage: base.lastImportMessage,
       lastStromSyncAt: base.lastStromSyncAt,
       lastStromSyncMessage: base.lastStromSyncMessage,
+      reconcileOpenThreshold: Number.isFinite(Number(base.reconcileOpenThreshold))
+        ? Math.max(0, Math.trunc(Number(base.reconcileOpenThreshold)))
+        : FLEXI_RECONCILE_OPEN_THRESHOLD_DEFAULT,
     }
   }
 

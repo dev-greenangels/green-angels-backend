@@ -19,7 +19,7 @@ import { pickLocalizedName, pickLocalizedText, pickTranslationHint } from '../i1
 import { CommerceService } from '../commerce/commerce.service'
 import { RETAIL_PRICE_TYPE } from '../commerce/commerce.constants'
 import { CategoriesService } from '../categories/categories.service'
-import { sortUkrainianAlphabetLetters, UKRAINIAN_ALPHABET } from '../catalog/ukrainian-alphabet'
+import { normalizeCatalogNameLetter, sortCatalogNameLetters } from '../catalog/locale-alphabet'
 import { normalizeSearchQuery } from '../search/normalize-search-query'
 import { ProductSearchService } from '../search/product-search.service'
 import { CreateProductDto } from './dto/create-product.dto'
@@ -2273,7 +2273,6 @@ export class ProductsService {
 
   async getAvailableNameLetters(locale?: string): Promise<string[]> {
     const loc = this.defaultLocale(locale)
-    const allowed = new Set<string>(UKRAINIAN_ALPHABET)
     const rows = await this.prisma.$queryRaw<Array<{ letter: string }>>`
       SELECT DISTINCT UPPER(SUBSTRING(pt.name FROM 1 FOR 1)) AS letter
       FROM "ProductTranslation" pt
@@ -2284,10 +2283,10 @@ export class ProductsService {
     `
 
     const letters = rows
-      .map((row) => row.letter?.trim().toUpperCase())
-      .filter((letter): letter is string => Boolean(letter && allowed.has(letter)))
+      .map((row) => normalizeCatalogNameLetter(row.letter ?? '', loc))
+      .filter((letter): letter is string => Boolean(letter))
 
-    return sortUkrainianAlphabetLetters([...new Set(letters)])
+    return sortCatalogNameLetters([...new Set(letters)], loc)
   }
 
   async findOne(id: string, locale?: string, strictLocale = false): Promise<BackstageProductDetail> {

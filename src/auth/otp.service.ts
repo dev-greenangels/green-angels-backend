@@ -236,7 +236,7 @@ export class OtpService {
     if (this.turboSms.isConfigured()) {
       await this.turboSms.sendSms(phoneE164ToTurboSms(normalized), text)
     } else {
-      this.logger.log(`[OTP dev phone ${normalizedPurpose}] ${normalized}: ${code}`)
+      this.logger.log(`[OTP dev phone ${normalizedPurpose}] code stored (sms off)`)
     }
   }
 
@@ -244,6 +244,7 @@ export class OtpService {
     email: string,
     ip?: string,
     purpose: OtpPurpose = 'login',
+    countrySiteCode?: 'sk' | 'hu' | 'at' | null,
   ): Promise<void> {
     const normalizedPurpose = this.normalizePurpose(purpose)
     const normalized = this.requireEmail(email)
@@ -254,9 +255,9 @@ export class OtpService {
     await this.storeOtp('email', normalizedPurpose, normalized, code)
 
     if (this.mail.isConfigured()) {
-      await this.mail.sendOtpEmail(normalized, code)
+      await this.mail.sendOtpEmail(normalized, code, countrySiteCode)
     } else {
-      this.logger.log(`[OTP dev email ${normalizedPurpose}] ${normalized}: ${code}`)
+      this.logger.log(`[OTP dev email ${normalizedPurpose}] code stored (mail off)`)
     }
   }
 

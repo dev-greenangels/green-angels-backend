@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 
 import {
   FLEXI_API_WARN_THRESHOLD,
+  FLEXI_CENIK_QUERY_BATCH,
   FLEXI_HTTP_TIMEOUT_MS,
   FLEXI_STOCK_FILTER_CHUNK,
 } from './flexi.constants'
@@ -385,16 +386,56 @@ export class FlexiClient {
 
   /**
    * ERP-WEBHOOK-002B: batch cenik by Flexi internal ids.
-   * LIVE-VERIFIED: path filter `/cenik/(id='1' or id='2').json` only.
-   * Do NOT use `?filter=` for id lists (observed unsafe: returned unrelated rows).
+   * Primary: POST /cenik/query.json (FLEXI-BULK-QUERY-SPIKE).
+   * Fallback: LIVE-VERIFIED GET path filter `/cenik/(id='1' or id='2').json`.
    */
   async fetchCenikByIds(ids: string[]): Promise<Map<string, FlexiCenikItem>> {
-    const result = new Map<string, FlexiCenikItem>()
     const unique = [...new Set(ids.map((id) => String(id).trim()).filter(Boolean))]
-    if (unique.length === 0) return result
+    if (unique.length === 0) return new Map()
 
-    for (let i = 0; i < unique.length; i += FLEXI_STOCK_FILTER_CHUNK) {
-      const chunk = unique.slice(i, i + FLEXI_STOCK_FILTER_CHUNK)
+    try {
+      return await this.fetchCenikByIdsViaQuery(unique)
+    } catch (error) {
+      this.logger.warn(
+        `fetchCenikByIds POST /query failed, falling back to GET path-filter: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+      return this.fetchCenikByIdsPathFilter(unique)
+    }
+  }
+
+  private async fetchCenikByIdsViaQuery(ids: string[]): Promise<Map<string, FlexiCenikItem>> {
+    const result = new Map<string, FlexiCenikItem>()
+    for (let i = 0; i < ids.length; i += FLEXI_CENIK_QUERY_BATCH) {
+      const chunk = ids.slice(i, i + FLEXI_CENIK_QUERY_BATCH)
+      const filter = chunk.map((id) => `id='${this.escapeFlexiLiteral(id)}'`).join(' or ')
+      const body = {
+        winstrom: {
+          detail: CENIK_DETAIL,
+          filter: `(${filter})`,
+          limit: String(Math.max(chunk.length, FLEXI_CENIK_QUERY_BATCH)),
+          'no-ext-ids': 'true',
+          '@version': '1.0',
+        },
+      }
+      const payload = await this.request<unknown>('POST', '/cenik/query.json', body)
+      if (!payload || typeof payload !== 'object') {
+        throw new Error('Flexi POST /cenik/query.json: malformed JSON response')
+      }
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
+      for (const row of rows) {
+        const item = this.parseCenikRow(row)
+        if (item) result.set(item.id, item)
+      }
+    }
+    return this.overlayWarehouseStockMap(result, 'id')
+  }
+
+  private async fetchCenikByIdsPathFilter(ids: string[]): Promise<Map<string, FlexiCenikItem>> {
+    const result = new Map<string, FlexiCenikItem>()
+    for (let i = 0; i < ids.length; i += FLEXI_STOCK_FILTER_CHUNK) {
+      const chunk = ids.slice(i, i + FLEXI_STOCK_FILTER_CHUNK)
       const filter = chunk.map((id) => `id='${this.escapeFlexiLiteral(id)}'`).join(' or ')
       const path = `/cenik/(${encodeURIComponent(filter)}).json?limit=0&detail=${encodeURIComponent(CENIK_DETAIL)}`
       const payload = await this.request<unknown>('GET', path)
@@ -407,7 +448,6 @@ export class FlexiClient {
     return this.overlayWarehouseStockMap(result, 'id')
   }
 
-  /** Resolve skladova-karta id → cenik internal id via cenik@ref (LIVE-VERIFIED). */
   async resolveCenikIdFromSkladovaKarta(cardId: string): Promise<string | null> {
     const path = `/skladova-karta/${encodeURIComponent(cardId)}.json?detail=custom:id,cenik,cenik(kod),dostupMj,stavMJ`
     const payload = await this.request<unknown>('GET', path)
@@ -863,6 +903,13 @@ export class FlexiClient {
     }
 
     return this.overlayWarehouseStock(items)
+  }
+
+  async isObjednavkaPrijataListEmpty(): Promise<boolean> {
+    const path = `/objednavka-prijata.json?limit=1&detail=custom:id`
+    const payload = await this.request<unknown>('GET', path)
+    const rows = this.extractEvidence<Record<string, unknown>>(payload, 'objednavka-prijata')
+    return rows.length === 0
   }
 
   async fetchObjednavkaByExtId(extId: string): Promise<Record<string, unknown> | null> {

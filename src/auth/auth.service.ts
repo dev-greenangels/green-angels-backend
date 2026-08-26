@@ -465,7 +465,7 @@ export class AuthService {
       if (!isOtpChannelEnabled(market, 'email', purpose)) {
         throw new BadRequestException('Email OTP вимкнено для цієї поверхні.')
       }
-      await this.otp.sendEmailOtp(dto.email, ip, purpose)
+      await this.otp.sendEmailOtp(dto.email, ip, purpose, dto.countrySiteCode)
       return { ok: true }
     }
     throw new BadRequestException('Вкажіть телефон або email.')

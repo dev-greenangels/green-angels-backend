@@ -83,6 +83,7 @@ export type FlexiSettings = {
   lastImportMessage?: string
   lastStromSyncAt?: string
   lastStromSyncMessage?: string
+  reconcileOpenThreshold?: number
 }
 
 export const DEFAULT_FLEXI_SETTINGS: FlexiSettings = {
@@ -120,6 +121,7 @@ export const DEFAULT_FLEXI_SETTINGS: FlexiSettings = {
   apiCallsToday: 0,
   apiCallsDate: '',
   lastSyncStatus: 'never',
+  reconcileOpenThreshold: 500,
 }
 
 export type FlexiPublicSettings = {
@@ -167,6 +169,39 @@ export type FlexiPublicSettings = {
   lastImportMessage?: string
   lastStromSyncAt?: string
   lastStromSyncMessage?: string
+  reconcileOpenThreshold?: number
+}
+
+export type FlexiBacklogDryRunReport = {
+  openByEvidence: Record<string, number>
+  catalogOpen: number
+  orderOpen: number
+  unsupportedOpen: number
+  changeVersionMinMax: [number, number] | null
+  flexiOrdersEmpty: boolean | null
+  wouldClose: {
+    catalog: number
+    orders: number
+    unsupportedSkippable: number
+    adresar: number
+  }
+  dryRunHash: string
+  cursor: number
+}
+
+export type FlexiBacklogTier = 'T1' | 'T2' | 'T3'
+
+export type FlexiBacklogCleanupResult = {
+  ok: boolean
+  tier: FlexiBacklogTier
+  closedCount: number
+  countsByEvidence: Record<string, number>
+  cursorBefore: number
+  cursorAfter: number
+  pollStart: number
+  lastSafeCursor: number
+  dryRunHash: string
+  message: string
 }
 
 export type FlexiStockLine = {
@@ -250,6 +285,12 @@ export type FlexiStromSyncResult = {
   productsUpserted: number
   variantsUpserted: number
   orphansCreated: number
+  /** Skipped because createMissing=false and entity was absent on the site. */
+  skippedMissingCategories?: number
+  skippedMissingProducts?: number
+  skippedMissingVariants?: number
+  /** Catalog journal rows closed after manual snapshot (orders not included). */
+  journalAbsorbed?: number
   message: string
   errors: string[]
 }
@@ -278,7 +319,7 @@ export type FlexiJobPayload =
   | { type: 'process-intake'; flexiNextHint?: number }
   | { type: 'poll-changes' }
   | { type: 'sync-cenik-full' }
-  | { type: 'sync-strom' }
+  | { type: 'sync-strom'; createMissing?: boolean }
   | { type: 'export-order'; orderId: string }
   | { type: 'storno-order'; orderId: string }
   | { type: 'import-new-products' }

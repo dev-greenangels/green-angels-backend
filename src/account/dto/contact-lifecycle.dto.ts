@@ -1,8 +1,12 @@
-import { IsEmail, IsString, MinLength } from 'class-validator'
+import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator'
 
 export class StartEmailContactDto {
   @IsEmail()
   email!: string
+
+  @IsOptional()
+  @IsIn(['sk', 'hu', 'at'])
+  countrySiteCode?: 'sk' | 'hu' | 'at'
 }
 
 export class StartPhoneContactDto {

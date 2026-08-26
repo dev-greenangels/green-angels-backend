@@ -301,7 +301,12 @@ export class AccountService {
    * Start add/replace email: store pending value, send OTP to NEW email.
    * Old User.email stays until confirm. Anti-enumeration: same OK when owned by other.
    */
-  async startEmailContact(userId: string, emailRaw: string, ip?: string) {
+  async startEmailContact(
+    userId: string,
+    emailRaw: string,
+    ip?: string,
+    countrySiteCode?: 'sk' | 'hu' | 'at' | null,
+  ) {
     const market = await this.settings.getMarketSettings()
     if (!isOtpChannelEnabled(market, 'email', 'profile')) {
       throw new BadRequestException('Підтвердження email зараз недоступне.')
@@ -320,7 +325,7 @@ export class AccountService {
     }
 
     await this.setPendingContact(userId, 'email', email)
-    await this.otp.sendEmailOtp(email, ip, 'profile')
+    await this.otp.sendEmailOtp(email, ip, 'profile', countrySiteCode)
     return { ok: true as const, pending: true as const, channel: 'email' as const }
   }
 

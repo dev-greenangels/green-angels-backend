@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -6,21 +7,24 @@ import {
   HttpCode,
   Patch,
   Post,
+  Req,
   Res,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common'
 import { Role } from '@prisma/client'
-import type { Response } from 'express'
+import type { Request, Response } from 'express'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
+import type { SessionJwtPayload } from '../auth/auth.constants'
+import { FlexiBacklogCleanupService } from './flexi.backlog-cleanup.service'
 import { FlexiChangeIntakeService } from './flexi.change-intake.service'
 import { FlexiQueueService } from './flexi.queue.service'
 import { FlexiService } from './flexi.service'
 import { FlexiSettingsService } from './flexi.settings.service'
-import type { FlexiChangeEntry, FlexiSettings } from './flexi.types'
+import type { FlexiBacklogTier, FlexiChangeEntry, FlexiSettings } from './flexi.types'
 
 @Controller('flexi')
 export class FlexiWebhookController {
@@ -113,6 +117,7 @@ export class FlexiAdminController {
     private readonly flexi: FlexiService,
     private readonly queue: FlexiQueueService,
     private readonly intake: FlexiChangeIntakeService,
+    private readonly backlogCleanup: FlexiBacklogCleanupService,
   ) {}
 
   @Get('settings')
@@ -181,14 +186,22 @@ export class FlexiAdminController {
   }
 
   @Post('sync-strom')
-  async syncStrom() {
-    const job = await this.queue.enqueueSyncStrom()
-    return { ok: true, jobId: job.id, message: 'Sync Strom→каталог поставлено в чергу.' }
+  async syncStrom(@Body() body?: { createMissing?: boolean }) {
+    const createMissing = body?.createMissing !== false
+    const job = await this.queue.enqueueSyncStrom(createMissing)
+    return {
+      ok: true,
+      jobId: job.id,
+      message: createMissing
+        ? 'Імпорт з ABRA (Strom) поставлено в чергу.'
+        : 'Оновлення існуючих з ABRA поставлено в чергу.',
+    }
   }
 
   @Post('sync-strom/run')
-  syncStromRun() {
-    return this.flexi.syncStromCatalog()
+  syncStromRun(@Body() body?: { createMissing?: boolean }) {
+    const createMissing = body?.createMissing !== false
+    return this.flexi.syncStromCatalog({ createMissing, absorbJournal: true })
   }
 
   @Post('import-new-products')
@@ -247,5 +260,30 @@ export class FlexiAdminController {
   async drainQueue() {
     const removed = await this.queue.drainWaitingJobs()
     return { ok: true, removed, message: `Знято очікуючих jobs: ${removed}.` }
+  }
+
+  @Get('backlog/dry-run')
+  backlogDryRun() {
+    return this.backlogCleanup.buildDryRun()
+  }
+
+  @Post('backlog/close')
+  backlogClose(
+    @Req() req: Request & { user: SessionJwtPayload },
+    @Body() body: { tier?: FlexiBacklogTier; dryRunHash?: string },
+  ) {
+    const tier = body?.tier
+    const dryRunHash = String(body?.dryRunHash ?? '').trim()
+    if (tier !== 'T1' && tier !== 'T2' && tier !== 'T3') {
+      throw new BadRequestException('tier must be T1, T2, or T3')
+    }
+    if (!dryRunHash) {
+      throw new BadRequestException('dryRunHash is required')
+    }
+    return this.backlogCleanup.closeTier({
+      tier,
+      dryRunHash,
+      actorUserId: req.user.userId,
+    })
   }
 }

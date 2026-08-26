@@ -156,6 +156,12 @@ export class StockNotificationsService {
         email,
         phone,
         locale,
+        countrySiteCode:
+          dto.countrySiteCode === 'sk' ||
+          dto.countrySiteCode === 'hu' ||
+          dto.countrySiteCode === 'at'
+            ? dto.countrySiteCode
+            : null,
         consentAt: new Date(),
       },
       select: { id: true },
@@ -372,6 +378,12 @@ export class StockNotificationsService {
     if (!row || row.notifiedAt) return
 
     const locale = this.normalizeLocale(row.locale)
+    const countrySiteCode =
+      row.countrySiteCode === 'sk' ||
+      row.countrySiteCode === 'hu' ||
+      row.countrySiteCode === 'at'
+        ? row.countrySiteCode
+        : null
     const productName =
       row.product.translations.find((item) => item.locale === locale)?.name ||
       row.product.translations.find((item) => item.locale === 'uk')?.name ||
@@ -381,12 +393,13 @@ export class StockNotificationsService {
       locale,
       row.product.category.slug,
       row.product.slug,
+      countrySiteCode,
     )
 
     let delivered = false
     if (row.email) {
       if (!this.mail.isConfigured()) {
-        this.logger.warn(`SMTP не налаштовано — лист не надіслано для ${id}`)
+        this.logger.warn(`Resend не налаштовано — лист не надіслано для ${id}`)
       } else {
         await this.mail.sendStockAvailableEmail({
           to: row.email,
@@ -394,6 +407,7 @@ export class StockNotificationsService {
           productName,
           productUrl,
           locale,
+          countrySiteCode,
         })
         delivered = true
       }

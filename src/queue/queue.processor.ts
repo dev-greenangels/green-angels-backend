@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config'
 import { Job } from 'bullmq'
 
 import { MailService } from '../mail/mail.service'
+import { resolveShopPublicOrigin } from '../mail/country-hosts'
 import { OrderConfirmationTokenService } from '../orders/order-confirmation-token.service'
 import { OrderPaymentLifecycleService } from '../orders/order-payment-lifecycle.service'
 import { OrdersService } from '../orders/orders.service'
@@ -93,6 +94,8 @@ export class QueueProcessor extends WorkerHost {
         paymentMethod: true,
         paymentStatus: true,
         customerEmail: true,
+        countrySiteCode: true,
+        locale: true,
         awaitingPaymentEmailSentAt: true,
         paymentReminderEmailSentAt: true,
         cancelledUnpaidEmailSentAt: true,
@@ -106,15 +109,33 @@ export class QueueProcessor extends WorkerHost {
 
     const orderNumber = this.formatOrderNumber(order.orderNumber)
     const confirmationToken = this.confirmationTokens.sign(orderNumber)
-    const resumeUrl = this.buildResumeUrl(orderNumber, confirmationToken)
-    const shopUrl = this.getShopPublicUrl()
+    const countrySiteCode =
+      order.countrySiteCode === 'sk' ||
+      order.countrySiteCode === 'hu' ||
+      order.countrySiteCode === 'at'
+        ? order.countrySiteCode
+        : null
+    const shopOrigin = this.resolveShopOrigin(countrySiteCode)
+    const localeSegment = this.normalizeLocaleSegment(order.locale, countrySiteCode)
+    const resumeUrl = this.buildResumeUrl(
+      shopOrigin,
+      localeSegment,
+      orderNumber,
+      confirmationToken,
+    )
+    const shopUrl = localeSegment ? `${shopOrigin}/${localeSegment}` : shopOrigin
 
     switch (emailType) {
       case 'awaiting_payment': {
         if (order.awaitingPaymentEmailSentAt) return
         if (order.status !== 'AWAITING_PAYMENT') return
         if (order.paymentStatus === 'success') return
-        await this.mail.sendAwaitingPaymentEmail({ to, orderNumber, resumeUrl })
+        await this.mail.sendAwaitingPaymentEmail({
+          to,
+          orderNumber,
+          resumeUrl,
+          countrySiteCode,
+        })
         await this.prisma.order.updateMany({
           where: { id: orderId, awaitingPaymentEmailSentAt: null },
           data: { awaitingPaymentEmailSentAt: new Date() },
@@ -125,7 +146,12 @@ export class QueueProcessor extends WorkerHost {
         if (order.paymentReminderEmailSentAt) return
         if (order.status !== 'AWAITING_PAYMENT') return
         if (order.paymentStatus === 'success') return
-        await this.mail.sendPaymentReminderEmail({ to, orderNumber, resumeUrl })
+        await this.mail.sendPaymentReminderEmail({
+          to,
+          orderNumber,
+          resumeUrl,
+          countrySiteCode,
+        })
         await this.prisma.order.updateMany({
           where: { id: orderId, paymentReminderEmailSentAt: null },
           data: { paymentReminderEmailSentAt: new Date() },
@@ -135,7 +161,12 @@ export class QueueProcessor extends WorkerHost {
       case 'cancelled_unpaid': {
         if (order.cancelledUnpaidEmailSentAt) return
         if (order.status !== 'CANCELLED') return
-        await this.mail.sendCancelledUnpaidEmail({ to, orderNumber, shopUrl })
+        await this.mail.sendCancelledUnpaidEmail({
+          to,
+          orderNumber,
+          shopUrl,
+          countrySiteCode,
+        })
         await this.prisma.order.updateMany({
           where: { id: orderId, cancelledUnpaidEmailSentAt: null },
           data: { cancelledUnpaidEmailSentAt: new Date() },
@@ -144,7 +175,12 @@ export class QueueProcessor extends WorkerHost {
       }
       case 'late_pay_refund': {
         if (order.latePayRefundEmailSentAt) return
-        await this.mail.sendLatePayRefundEmail({ to, orderNumber, shopUrl })
+        await this.mail.sendLatePayRefundEmail({
+          to,
+          orderNumber,
+          shopUrl,
+          countrySiteCode,
+        })
         await this.prisma.order.updateMany({
           where: { id: orderId, latePayRefundEmailSentAt: null },
           data: { latePayRefundEmailSentAt: new Date() },
@@ -167,15 +203,37 @@ export class QueueProcessor extends WorkerHost {
     return `ZY-${String(orderNumber).padStart(8, '0')}`
   }
 
-  private getShopPublicUrl(): string {
-    const fromEnv = this.config.get<string>('SHOP_PUBLIC_URL')?.trim()
-    if (fromEnv) return fromEnv.replace(/\/$/, '')
-    const cors = this.config.get<string>('CORS_ORIGIN', 'http://localhost:3000').trim()
-    return (cors.split(',')[0]?.trim() || 'http://localhost:3000').replace(/\/$/, '')
+  private resolveShopOrigin(countrySiteCode: 'sk' | 'hu' | 'at' | null): string {
+    return resolveShopPublicOrigin({
+      countrySiteCode,
+      countryHostsEnv: this.config.get<string>('GA_COUNTRY_HOSTS'),
+      shopPublicUrl: this.config.get<string>('SHOP_PUBLIC_URL'),
+      corsOrigin: this.config.get<string>('CORS_ORIGIN', 'http://localhost:3000'),
+    })
   }
 
-  private buildResumeUrl(orderNumber: string, confirmationToken: string): string {
-    const base = this.getShopPublicUrl()
-    return `${base}/checkout/pay?order=${encodeURIComponent(orderNumber)}&confirmation=${encodeURIComponent(confirmationToken)}`
+  private normalizeLocaleSegment(
+    locale: string | null | undefined,
+    countrySiteCode: 'sk' | 'hu' | 'at' | null,
+  ): string {
+    const allowed = new Set(['uk', 'en', 'sk', 'hu', 'de', 'cs'])
+    const raw = (locale ?? '').trim().toLowerCase()
+    if (raw && allowed.has(raw)) return raw
+    if (countrySiteCode === 'at') return 'de'
+    if (countrySiteCode === 'hu') return 'hu'
+    if (countrySiteCode === 'sk') return 'sk'
+    return 'uk'
+  }
+
+  private buildResumeUrl(
+    shopOrigin: string,
+    localeSegment: string,
+    orderNumber: string,
+    confirmationToken: string,
+  ): string {
+    const base = shopOrigin.replace(/\/$/, '')
+    const loc = localeSegment.trim()
+    const prefix = loc ? `${base}/${loc}` : base
+    return `${prefix}/checkout/pay?order=${encodeURIComponent(orderNumber)}&confirmation=${encodeURIComponent(confirmationToken)}`
   }
 }

@@ -33,6 +33,61 @@ export const FLEXI_BULL_LOCK_RENEW_MS = 30_000
 
 export const FLEXI_API_WARN_THRESHOLD = 8000
 export const FLEXI_STOCK_FILTER_CHUNK = 40
+/** POST /cenik/query.json batch size (spike verified to 200; margin below untested ceiling). */
+export const FLEXI_CENIK_QUERY_BATCH = 100
+/** Skip reconcilePendingChangeIntake on restart when open events exceed this count. */
+export const FLEXI_RECONCILE_OPEN_THRESHOLD_DEFAULT = 500
+
+export function normalizeFlexiEvidence(raw: string | undefined): string {
+  return (raw ?? '').trim().toLowerCase()
+}
+
+/** Catalog journal rows closed by manual absorb (never order events). */
+export function isCatalogFlexiEvidence(evidence: string): boolean {
+  const ev = normalizeFlexiEvidence(evidence)
+  if (ev.includes('objednavka')) return false
+  if (ev.includes('strom-cenik')) return false
+  return (
+    (ev.includes('cenik') && !ev.includes('strom-cenik')) ||
+    (ev.includes('strom') && !ev.includes('strom-cenik')) ||
+    ev.includes('skladova-karta') ||
+    ev.includes('sklad')
+  )
+}
+
+export function isOrderFlexiEvidence(evidence: string): boolean {
+  return normalizeFlexiEvidence(evidence).includes('objednavka')
+}
+
+/**
+ * Evidence types handled by processDurableIntake today.
+ * Source of truth: ORDER-BACKLOG-AUDIT.md appendix.
+ */
+export function isImplementedFlexiEvidence(evidence: string): boolean {
+  const ev = normalizeFlexiEvidence(evidence)
+  if (ev.includes('strom-cenik')) return false
+  if (ev.includes('strom') && !ev.includes('strom-cenik')) return true
+  if (ev.includes('skladova-karta') || ev.includes('skladova')) return true
+  if (ev === 'objednavka-prijata') return true
+  if (ev.includes('cenik') && !ev.includes('strom-cenik')) return true
+  return false
+}
+
+/** Unsupported noise (invoices, BOM, links, order lines, …) — safe to mark PROCESSED with no site effect. */
+export function isUnsupportedSkippableFlexiEvidence(evidence: string): boolean {
+  return !isImplementedFlexiEvidence(evidence) && !isCatalogFlexiEvidence(evidence)
+}
+
+/** Deleted / unknown Flexi row — safe to skip without blocking the Changes cursor. */
+export function isFlexiMissingRecordError(message: string): boolean {
+  const m = message.toLowerCase()
+  return (
+    m.includes('flexi http 404') ||
+    m.includes('formzaznamnenalezen') ||
+    m.includes('nebyl v datovém zdroji nalezen') ||
+    m.includes('nebyl v datovem zdroji nalezen')
+  )
+}
 
 export function flexiUtcDateStamp(now = new Date()): string {
   return now.toISOString().slice(0, 10)

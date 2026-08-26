@@ -48,4 +48,9 @@ export class CreateStockNotificationDto {
   @Transform(({ value }) => trimString(value))
   @IsIn(LOCALES)
   locale?: string
+
+  /** SK storefront host country site; omit on UA. */
+  @IsOptional()
+  @IsIn(['sk', 'hu', 'at'])
+  countrySiteCode?: 'sk' | 'hu' | 'at'
 }

@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 
+import { sanitizeReturnBaseUrl } from '../mail/country-hosts'
 import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
 import { ONLINE_CARD_PAYMENT_METHOD } from './payments.constants'
@@ -77,15 +78,21 @@ export class PaymentsService {
     return provider
   }
 
-  private getShopPublicUrl(): string {
-    return this.resolveShopPublicUrl(null)
-  }
-
   private resolveShopPublicUrl(returnBaseUrl?: string | null): string {
-    const fromClient = returnBaseUrl?.trim().replace(/\/$/, '')
-    if (fromClient && /^https?:\/\//i.test(fromClient)) {
-      return fromClient
+    const allowlist = {
+      countryHostsEnv: this.config.get<string>('GA_COUNTRY_HOSTS'),
+      shopPublicUrl: this.config.get<string>('SHOP_PUBLIC_URL'),
+      corsOrigin: this.config.get<string>('CORS_ORIGIN', 'http://localhost:3000'),
     }
+    const sanitized = sanitizeReturnBaseUrl(returnBaseUrl, allowlist)
+    if (sanitized) return sanitized
+
+    if (returnBaseUrl?.trim()) {
+      this.logger.warn(
+        `returnBaseUrl rejected (host not allowlisted): ${returnBaseUrl.trim().slice(0, 120)}`,
+      )
+    }
+
     const fromEnv = this.config.get<string>('SHOP_PUBLIC_URL')?.trim()
     if (fromEnv) return fromEnv.replace(/\/$/, '')
     const cors = this.config.get<string>('CORS_ORIGIN', 'http://localhost:3000').trim()

@@ -8,6 +8,7 @@ import {
   FLEXI_PROCESS_INTAKE_DELAY_MS,
   FLEXI_PROCESS_INTAKE_JOB_ID,
   FLEXI_QUEUE,
+  FLEXI_RECONCILE_OPEN_THRESHOLD_DEFAULT,
   FLEXI_REPEATABLE_FULL_SYNC_JOB_ID,
   FLEXI_REPEATABLE_POLL_JOB_ID,
 } from './flexi.constants'
@@ -156,6 +157,15 @@ export class FlexiQueueService implements OnModuleInit {
         where: { status: { in: ['PENDING', 'FAILED', 'PROCESSING'] } },
       })
       if (open === 0) return
+      const settings = await this.settings.getSettings()
+      const threshold =
+        settings.reconcileOpenThreshold ?? FLEXI_RECONCILE_OPEN_THRESHOLD_DEFAULT
+      if (threshold > 0 && open > threshold) {
+        this.logger.warn(
+          `reconcilePendingChangeIntake: skipping wake — ${open} open events > threshold ${threshold}`,
+        )
+        return
+      }
       this.logger.log(`Reconciling ${open} FlexiChangeEvent row(s) → process-intake`)
       await this.enqueueProcessIntake()
     } catch (error) {
@@ -183,10 +193,10 @@ export class FlexiQueueService implements OnModuleInit {
     )
   }
 
-  enqueueSyncStrom() {
+  enqueueSyncStrom(createMissing = true) {
     return this.queue.add(
       FLEXI_JOB_NAMES.SYNC_STROM,
-      { type: 'sync-strom' },
+      { type: 'sync-strom', createMissing },
       { jobId: `flexi-strom-${Date.now()}`, removeOnComplete: 10, removeOnFail: 20 },
     )
   }

@@ -1804,6 +1804,8 @@ export class OrdersService {
               ? dto.deliveryPostalCode?.trim() || null
               : null,
           deliveryCountryCode: dto.deliveryCountryCode?.trim() || dto.countryCode?.trim() || null,
+          countrySiteCode: dto.countryCode?.trim() || null,
+          locale: dto.locale?.trim() || null,
           receiverCompanyName: dto.receiverCompanyName?.trim() || null,
           paymentMethod: paymentMethod,
           comment: dto.comment?.trim() || null,
@@ -2217,6 +2219,7 @@ export class OrdersService {
           paymentMethod: true,
           paymentStatus: true,
           status: true,
+          countrySiteCode: true,
         },
       })
       if (!order) return
@@ -2231,11 +2234,18 @@ export class OrdersService {
 
       const formatted = this.formatOrderNumber(order.orderNumber)
       const pdf = await this.buildOrderPdfById(input.orderId)
+      const siteCode =
+        order.countrySiteCode === 'sk' ||
+        order.countrySiteCode === 'hu' ||
+        order.countrySiteCode === 'at'
+          ? order.countrySiteCode
+          : null
       await this.mail.sendOrderConfirmationEmail({
         to: input.to,
         orderNumber: formatted,
         pdf,
         region: market.region,
+        countrySiteCode: siteCode,
       })
     } catch (err) {
       this.logger.warn(

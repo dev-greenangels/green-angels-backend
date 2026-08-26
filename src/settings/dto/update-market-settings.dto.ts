@@ -8,6 +8,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator'
 import { Type } from 'class-transformer'
@@ -48,6 +49,20 @@ class CountrySiteProfileDto {
 
   @IsBoolean()
   taxIncluded!: boolean
+
+  /** null = fall back to store.contact */
+  @IsOptional()
+  @ValidateIf((_, value) => value != null)
+  @IsString()
+  @MaxLength(254)
+  supportEmail?: string | null
+
+  /** null = fall back to store.contact */
+  @IsOptional()
+  @ValidateIf((_, value) => value != null)
+  @IsString()
+  @MaxLength(40)
+  supportPhone?: string | null
 }
 
 class DeliveryReducedRateDto {

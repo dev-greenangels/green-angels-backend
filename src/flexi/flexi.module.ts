@@ -8,6 +8,7 @@ import { ProductsModule } from '../products/products.module'
 import { SettingsModule } from '../settings/settings.module'
 import { FLEXI_QUEUE } from './flexi.constants'
 import { FlexiAdminController, FlexiWebhookController } from './flexi.controller'
+import { FlexiBacklogCleanupService } from './flexi.backlog-cleanup.service'
 import { FlexiChangeIntakeService } from './flexi.change-intake.service'
 import { FlexiClient } from './flexi.client'
 import { FlexiProcessor } from './flexi.processor'
@@ -28,6 +29,7 @@ import { FlexiSettingsService } from './flexi.settings.service'
   providers: [
     FlexiSettingsService,
     FlexiChangeIntakeService,
+    FlexiBacklogCleanupService,
     FlexiClient,
     FlexiService,
     FlexiQueueService,

@@ -12,4 +12,9 @@ export class SendOtpDto {
   @IsOptional()
   @IsIn(['login', 'checkout', 'review', 'profile'])
   purpose?: 'login' | 'checkout' | 'review' | 'profile'
+
+  /** SK storefront host country site; omit on UA. Never derived from delivery/tax. */
+  @IsOptional()
+  @IsIn(['sk', 'hu', 'at'])
+  countrySiteCode?: 'sk' | 'hu' | 'at'
 }

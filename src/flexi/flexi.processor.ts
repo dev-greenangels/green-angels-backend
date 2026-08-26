@@ -8,6 +8,7 @@ import {
   FLEXI_QUEUE,
 } from './flexi.constants'
 import { FlexiService } from './flexi.service'
+import { FlexiQueueService } from './flexi.queue.service'
 import type { FlexiJobPayload } from './flexi.types'
 
 @Processor(FLEXI_QUEUE, {
@@ -18,7 +19,10 @@ import type { FlexiJobPayload } from './flexi.types'
 export class FlexiProcessor extends WorkerHost {
   private readonly logger = new Logger(FlexiProcessor.name)
 
-  constructor(private readonly flexi: FlexiService) {
+  constructor(
+    private readonly flexi: FlexiService,
+    private readonly queue: FlexiQueueService,
+  ) {
     super()
   }
 
@@ -36,6 +40,9 @@ export class FlexiProcessor extends WorkerHost {
         if (result.failed > 0) {
           throw new Error(`Flexi intake: ${result.failed} group(s) failed`)
         }
+        if (result.openRemaining > 0 && result.groups > 0) {
+          await this.queue.enqueueProcessIntake(data.flexiNextHint)
+        }
         return result
       }
       case 'poll-changes':
@@ -43,7 +50,10 @@ export class FlexiProcessor extends WorkerHost {
       case 'sync-cenik-full':
         return this.flexi.syncCenikFull()
       case 'sync-strom':
-        return this.flexi.syncStromCatalog()
+        return this.flexi.syncStromCatalog({
+          createMissing: data.createMissing !== false,
+          absorbJournal: true,
+        })
       case 'export-order':
         await this.flexi.runExportOrderJob(data.orderId, {
           attempt: job.attemptsMade + 1,

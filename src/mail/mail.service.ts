@@ -1,52 +1,39 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import nodemailer from 'nodemailer'
-import type { Transporter } from 'nodemailer'
+
+import type { CountrySiteCode } from '../settings/market.types'
+import { resolveShopPublicOrigin } from './country-hosts'
+import { MailIdentityService } from './mail-identity.service'
+import { ResendTransport } from './resend.transport'
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name)
-  private transporter: Transporter | null = null
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly identity: MailIdentityService,
+    private readonly resend: ResendTransport,
+  ) {}
 
   isConfigured(): boolean {
-    const user = this.config.get<string>('SMTP_USER')?.trim()
-    const pass = this.config.get<string>('SMTP_PASS')?.trim()
-    return Boolean(user && pass)
+    return this.resend.isConfigured()
   }
 
-  private getTransporter(): Transporter {
-    if (this.transporter) return this.transporter
-
-    const host = this.config.get<string>('SMTP_HOST', 'smtp.gmail.com')?.trim()
-    const port = this.config.get<number>('SMTP_PORT', 587)
-    const user = this.config.get<string>('SMTP_USER')?.trim()
-    const pass = this.config.get<string>('SMTP_PASS')?.trim()
-
-    if (!user || !pass) {
-      throw new ServiceUnavailableException('SMTP не налаштовано на сервері.')
-    }
-
-    this.transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465,
-      auth: { user, pass },
+  private getShopPublicUrl(countrySiteCode?: CountrySiteCode | null): string {
+    return resolveShopPublicOrigin({
+      countrySiteCode,
+      countryHostsEnv: this.config.get<string>('GA_COUNTRY_HOSTS'),
+      shopPublicUrl: this.config.get<string>('SHOP_PUBLIC_URL'),
+      corsOrigin: this.config.get<string>('CORS_ORIGIN', 'http://localhost:3000'),
     })
-
-    return this.transporter
   }
 
-  private getFromAddress(): string {
-    return (
-      this.config.get<string>('SMTP_FROM')?.trim() ||
-      this.config.get<string>('SMTP_USER')?.trim() ||
-      'noreply@green-angels.local'
-    )
-  }
-
-  async sendOtpEmail(to: string, code: string): Promise<void> {
+  async sendOtpEmail(
+    to: string,
+    code: string,
+    countrySiteCode?: CountrySiteCode | null,
+  ): Promise<void> {
     const subject = 'Код для входу — Зелені Янголи'
     const text = `Код для входу в Зелені Янголи: ${code}\n\nДійсний 5 хвилин. Нікому не повідомляйте цей код.`
     const html = `
@@ -56,13 +43,20 @@ export class MailService {
     `.trim()
 
     if (!this.isConfigured()) {
-      this.logger.warn(`SMTP не налаштовано — лист не надіслано на ${to}`)
+      this.logger.warn('Resend не налаштовано — OTP лист не надіслано')
       return
     }
 
-    await this.getTransporter().sendMail({
-      from: this.getFromAddress(),
+    const identity = await this.identity.resolve({
+      kind: 'otp',
+      countrySiteCode,
+    })
+    if (!identity) return
+
+    await this.resend.send({
+      from: identity.from,
       to,
+      replyTo: identity.replyTo,
       subject,
       text,
       html,
@@ -75,13 +69,20 @@ export class MailService {
     pdf: Buffer
     locale?: string
     region?: 'ua' | 'sk'
+    countrySiteCode?: CountrySiteCode | null
   }): Promise<void> {
     if (!this.isConfigured()) {
       this.logger.warn(
-        `SMTP не налаштовано — підтвердження замовлення ${input.orderNumber} не надіслано на ${input.to}`,
+        `Resend не налаштовано — підтвердження замовлення ${input.orderNumber} не надіслано`,
       )
       return
     }
+
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) return
 
     const isSk = input.region === 'sk'
     const subject = isSk
@@ -100,9 +101,10 @@ export class MailService {
       <p>У вкладенні — PDF-підтвердження замовлення.</p>
     `.trim()
 
-    await this.getTransporter().sendMail({
-      from: this.getFromAddress(),
+    await this.resend.send({
+      from: identity.from,
       to: input.to,
+      replyTo: identity.replyTo,
       subject,
       text,
       html,
@@ -116,24 +118,24 @@ export class MailService {
     })
   }
 
-  private getShopPublicUrl(): string {
-    const fromEnv = this.config.get<string>('SHOP_PUBLIC_URL')?.trim()
-    if (fromEnv) return fromEnv.replace(/\/$/, '')
-    const cors = this.config.get<string>('CORS_ORIGIN', 'http://localhost:3000').trim()
-    return (cors.split(',')[0]?.trim() || 'http://localhost:3000').replace(/\/$/, '')
-  }
-
   async sendAwaitingPaymentEmail(input: {
     to: string
     orderNumber: string
     resumeUrl: string
+    countrySiteCode?: CountrySiteCode | null
   }): Promise<void> {
     if (!this.isConfigured()) {
       this.logger.warn(
-        `SMTP не налаштовано — лист очікування оплати ${input.orderNumber} не надіслано на ${input.to}`,
+        `Resend не налаштовано — лист очікування оплати ${input.orderNumber} не надіслано`,
       )
       return
     }
+
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) return
 
     const subject = `Очікуємо оплату — замовлення ${input.orderNumber}`
     const text = `Дякуємо за замовлення ${input.orderNumber}.\n\nОплатіть замовлення протягом 30 хвилин:\n${input.resumeUrl}\n\nЯкщо ви вже оплатили — ігноруйте цей лист.`
@@ -144,9 +146,10 @@ export class MailService {
       <p>Якщо ви вже оплатили — ігноруйте цей лист.</p>
     `.trim()
 
-    await this.getTransporter().sendMail({
-      from: this.getFromAddress(),
+    await this.resend.send({
+      from: identity.from,
       to: input.to,
+      replyTo: identity.replyTo,
       subject,
       text,
       html,
@@ -157,13 +160,20 @@ export class MailService {
     to: string
     orderNumber: string
     resumeUrl: string
+    countrySiteCode?: CountrySiteCode | null
   }): Promise<void> {
     if (!this.isConfigured()) {
       this.logger.warn(
-        `SMTP не налаштовано — нагадування про оплату ${input.orderNumber} не надіслано на ${input.to}`,
+        `Resend не налаштовано — нагадування про оплату ${input.orderNumber} не надіслано`,
       )
       return
     }
+
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) return
 
     const subject = `Нагадування: оплатіть замовлення ${input.orderNumber}`
     const text = `Нагадуємо: замовлення ${input.orderNumber} ще очікує оплату.\n\nПродовжити оплату:\n${input.resumeUrl}\n\nНевдовзі неоплачене замовлення буде скасовано.`
@@ -173,9 +183,10 @@ export class MailService {
       <p>Невдовзі неоплачене замовлення буде скасовано.</p>
     `.trim()
 
-    await this.getTransporter().sendMail({
-      from: this.getFromAddress(),
+    await this.resend.send({
+      from: identity.from,
       to: input.to,
+      replyTo: identity.replyTo,
       subject,
       text,
       html,
@@ -186,15 +197,24 @@ export class MailService {
     to: string
     orderNumber: string
     shopUrl?: string
+    countrySiteCode?: CountrySiteCode | null
   }): Promise<void> {
     if (!this.isConfigured()) {
       this.logger.warn(
-        `SMTP не налаштовано — лист про скасування ${input.orderNumber} не надіслано на ${input.to}`,
+        `Resend не налаштовано — лист про скасування ${input.orderNumber} не надіслано`,
       )
       return
     }
 
-    const shopUrl = (input.shopUrl ?? this.getShopPublicUrl()).replace(/\/$/, '')
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) return
+
+    const shopUrl = (
+      input.shopUrl ?? this.getShopPublicUrl(input.countrySiteCode)
+    ).replace(/\/$/, '')
     const subject = `Замовлення ${input.orderNumber} скасовано`
     const text = `Замовлення ${input.orderNumber} скасовано, бо оплату не було завершено вчасно.\n\nВи можете оформити нове замовлення: ${shopUrl}`
     const html = `
@@ -202,9 +222,10 @@ export class MailService {
       <p><a href="${shopUrl}">Перейти до магазину</a></p>
     `.trim()
 
-    await this.getTransporter().sendMail({
-      from: this.getFromAddress(),
+    await this.resend.send({
+      from: identity.from,
       to: input.to,
+      replyTo: identity.replyTo,
       subject,
       text,
       html,
@@ -215,15 +236,24 @@ export class MailService {
     to: string
     orderNumber: string
     shopUrl?: string
+    countrySiteCode?: CountrySiteCode | null
   }): Promise<void> {
     if (!this.isConfigured()) {
       this.logger.warn(
-        `SMTP не налаштовано — лист про повернення ${input.orderNumber} не надіслано на ${input.to}`,
+        `Resend не налаштовано — лист про повернення ${input.orderNumber} не надіслано`,
       )
       return
     }
 
-    const shopUrl = (input.shopUrl ?? this.getShopPublicUrl()).replace(/\/$/, '')
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) return
+
+    const shopUrl = (
+      input.shopUrl ?? this.getShopPublicUrl(input.countrySiteCode)
+    ).replace(/\/$/, '')
     const subject = `Повернення коштів — замовлення ${input.orderNumber}`
     const text = `Оплату за замовленням ${input.orderNumber} отримано після скасування замовлення.\n\nКошти буде повернуто. Замовлення не буде виконано.\n\nМагазин: ${shopUrl}`
     const html = `
@@ -232,9 +262,10 @@ export class MailService {
       <p><a href="${shopUrl}">Перейти до магазину</a></p>
     `.trim()
 
-    await this.getTransporter().sendMail({
-      from: this.getFromAddress(),
+    await this.resend.send({
+      from: identity.from,
       to: input.to,
+      replyTo: identity.replyTo,
       subject,
       text,
       html,
@@ -244,6 +275,7 @@ export class MailService {
   async sendWholesaleInquiryEmail(input: {
     to: string | null
     region: 'ua' | 'sk'
+    countrySiteCode?: CountrySiteCode | null
     inquiry: {
       fullName: string
       companyName: string
@@ -257,12 +289,19 @@ export class MailService {
       locale: string
     }
   }): Promise<void> {
-    const to = input.to?.trim() || this.getFromAddress()
     if (!this.isConfigured()) {
-      this.logger.warn(`SMTP не налаштовано — гуртова заявка від ${input.inquiry.email} не надіслана`)
+      this.logger.warn('Resend не налаштовано — гуртова заявка не надіслана')
       return
     }
 
+    const identity = await this.identity.resolve({
+      kind: 'wholesale',
+      countrySiteCode: input.countrySiteCode,
+      replyToOverride: input.inquiry.email,
+    })
+    if (!identity) return
+
+    const to = input.to?.trim() || identity.from
     const isSk = input.region === 'sk'
     const subject = isSk
       ? `Veľkoobchodný dopyt: ${input.inquiry.companyName}`
@@ -282,17 +321,22 @@ export class MailService {
         : null,
     ].filter(Boolean)
 
-    await this.getTransporter().sendMail({
-      from: this.getFromAddress(),
+    await this.resend.send({
+      from: identity.from,
       to,
-      replyTo: input.inquiry.email,
+      replyTo: identity.replyTo,
       subject,
       text: lines.join('\n'),
     })
   }
 
-  buildLocalizedProductUrl(locale: string, categorySlug: string, productSlug: string): string {
-    const origin = this.getShopPublicUrl()
+  buildLocalizedProductUrl(
+    locale: string,
+    categorySlug: string,
+    productSlug: string,
+    countrySiteCode?: CountrySiteCode | null,
+  ): string {
+    const origin = this.getShopPublicUrl(countrySiteCode)
     const loc = locale.trim() || 'uk'
     return `${origin}/${loc}/${categorySlug}/${productSlug}`
   }
@@ -303,16 +347,24 @@ export class MailService {
     productName: string
     productUrl: string
     locale: string
+    countrySiteCode?: CountrySiteCode | null
   }): Promise<void> {
     if (!this.isConfigured()) {
-      this.logger.warn(`SMTP не налаштовано — сповіщення про наявність не надіслано на ${input.to}`)
+      this.logger.warn('Resend не налаштовано — сповіщення про наявність не надіслано')
       return
     }
 
+    const identity = await this.identity.resolve({
+      kind: 'stock',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) return
+
     const copy = this.stockAvailableCopy(input.locale, input.name, input.productName, input.productUrl)
-    await this.getTransporter().sendMail({
-      from: this.getFromAddress(),
+    await this.resend.send({
+      from: identity.from,
       to: input.to,
+      replyTo: identity.replyTo,
       subject: copy.subject,
       text: copy.text,
       html: copy.html,
