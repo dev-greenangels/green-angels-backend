@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "LegalDocumentType" ADD VALUE 'MARKETING_CONSENT';

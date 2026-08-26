@@ -61,6 +61,12 @@ export class LegalController {
     return this.legal.recordConsent(dto, req.user?.userId)
   }
 
+  /** One-click marketing unsubscribe (no login). Must be registered before `:type`. */
+  @Get('marketing/unsubscribe')
+  unsubscribeMarketing(@Query('token') token?: string) {
+    return this.legal.withdrawMarketingByToken(token?.trim() || '')
+  }
+
   @Get(':type')
   getByType(@Param('type') type: string, @Query() query: LegalLocaleQueryDto) {
     return this.legal.getByType(type, query.locale)

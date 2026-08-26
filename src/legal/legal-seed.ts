@@ -4,7 +4,7 @@ export type LegalSeedSection = {
 }
 
 export type LegalSeedEntry = {
-  type: 'TERMS' | 'PRIVACY' | 'COOKIES' | 'RETURNS'
+  type: 'TERMS' | 'PRIVACY' | 'COOKIES' | 'RETURNS' | 'MARKETING_CONSENT'
   locale: string
   title: string
   intro: string
@@ -429,6 +429,54 @@ export const LEGAL_SEED: LegalSeedEntry[] = [
           'EU consumers generally have 14 days to withdraw from a distance contract. Live plants may be excluded where goods are liable to deteriorate.',
           'Report transport damage or a wrong variety within 24 hours with photos. Send name, address, order number and date of receipt to the Contact e-mail.',
           'Seller: {sellerName}, company ID (IČO) {ico}, tax ID (DIČ) {dic}, VAT ID (IČ DPH) {icDph}, registered office {legalAddress}.',
+        ],
+      },
+    ],
+  },
+  {
+    type: 'MARKETING_CONSENT',
+    locale: 'uk',
+    title: 'Згода на маркетингові повідомлення',
+    intro:
+      'Я хочу отримувати новини, акції та пропозиції магазину електронною поштою. Згоду можна відкликати будь-коли через посилання в листі.',
+    sections: [
+      {
+        heading: 'Що охоплює згода',
+        body: [
+          'Маркетингові листи про товари, акції та новини розсадника. Це окремо від листів про ваші замовлення.',
+          'Згоду можна відкликати одним кліком у кожному маркетинговому листі.',
+        ],
+      },
+    ],
+  },
+  {
+    type: 'MARKETING_CONSENT',
+    locale: 'sk',
+    title: 'Súhlas s marketingovými správami',
+    intro:
+      'Chcem dostávať novinky, akcie a ponuky obchodu e-mailom. Súhlas môžem kedykoľvek odvolať odkazom v e-maile.',
+    sections: [
+      {
+        heading: 'Čo súhlas zahŕňa',
+        body: [
+          'Marketingové e-maily o tovare, akciách a novinkách škôlky. Oddelené od e-mailov o vašich objednávkach.',
+          'Súhlas môžete odvolať jedným kliknutím v každom marketingovom e-maile.',
+        ],
+      },
+    ],
+  },
+  {
+    type: 'MARKETING_CONSENT',
+    locale: 'en',
+    title: 'Marketing email consent',
+    intro:
+      'I want to receive shop news, offers and promotions by email. I can withdraw consent at any time via the link in each message.',
+    sections: [
+      {
+        heading: 'What this covers',
+        body: [
+          'Marketing emails about products, promotions and nursery news. Separate from transactional order emails.',
+          'You can withdraw consent with one click in every marketing email.',
         ],
       },
     ],
