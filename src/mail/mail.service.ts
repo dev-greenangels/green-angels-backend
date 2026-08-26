@@ -4,6 +4,11 @@ import { ConfigService } from '@nestjs/config'
 import type { CountrySiteCode } from '../settings/market.types'
 import { resolveShopPublicOrigin } from './country-hosts'
 import { MailIdentityService } from './mail-identity.service'
+import {
+  fillLifecycleEmailTemplate,
+  getLifecycleEmailLabels,
+  resolveLifecycleEmailLocale,
+} from './order-lifecycle-email-labels'
 import { ResendTransport } from './resend.transport'
 
 @Injectable()
@@ -122,6 +127,7 @@ export class MailService {
     to: string
     orderNumber: string
     resumeUrl: string
+    locale?: string | null
     countrySiteCode?: CountrySiteCode | null
   }): Promise<void> {
     if (!this.isConfigured()) {
@@ -137,14 +143,11 @@ export class MailService {
     })
     if (!identity) return
 
-    const subject = `Очікуємо оплату — замовлення ${input.orderNumber}`
-    const text = `Дякуємо за замовлення ${input.orderNumber}.\n\nОплатіть замовлення протягом 30 хвилин:\n${input.resumeUrl}\n\nЯкщо ви вже оплатили — ігноруйте цей лист.`
-    const html = `
-      <p>Дякуємо за замовлення <strong>${input.orderNumber}</strong>.</p>
-      <p>Оплатіть замовлення протягом <strong>30 хвилин</strong>.</p>
-      <p><a href="${input.resumeUrl}">Продовжити оплату</a></p>
-      <p>Якщо ви вже оплатили — ігноруйте цей лист.</p>
-    `.trim()
+    const copy = getLifecycleEmailLabels(resolveLifecycleEmailLocale(input.locale)).awaitingPayment
+    const vars = { orderNumber: input.orderNumber, resumeUrl: input.resumeUrl }
+    const subject = fillLifecycleEmailTemplate(copy.subject, vars)
+    const text = fillLifecycleEmailTemplate(copy.text, vars)
+    const html = fillLifecycleEmailTemplate(copy.html, vars)
 
     await this.resend.send({
       from: identity.from,
@@ -160,6 +163,7 @@ export class MailService {
     to: string
     orderNumber: string
     resumeUrl: string
+    locale?: string | null
     countrySiteCode?: CountrySiteCode | null
   }): Promise<void> {
     if (!this.isConfigured()) {
@@ -175,13 +179,11 @@ export class MailService {
     })
     if (!identity) return
 
-    const subject = `Нагадування: оплатіть замовлення ${input.orderNumber}`
-    const text = `Нагадуємо: замовлення ${input.orderNumber} ще очікує оплату.\n\nПродовжити оплату:\n${input.resumeUrl}\n\nНевдовзі неоплачене замовлення буде скасовано.`
-    const html = `
-      <p>Нагадуємо: замовлення <strong>${input.orderNumber}</strong> ще очікує оплату.</p>
-      <p><a href="${input.resumeUrl}">Продовжити оплату</a></p>
-      <p>Невдовзі неоплачене замовлення буде скасовано.</p>
-    `.trim()
+    const copy = getLifecycleEmailLabels(resolveLifecycleEmailLocale(input.locale)).paymentReminder
+    const vars = { orderNumber: input.orderNumber, resumeUrl: input.resumeUrl }
+    const subject = fillLifecycleEmailTemplate(copy.subject, vars)
+    const text = fillLifecycleEmailTemplate(copy.text, vars)
+    const html = fillLifecycleEmailTemplate(copy.html, vars)
 
     await this.resend.send({
       from: identity.from,
@@ -197,6 +199,7 @@ export class MailService {
     to: string
     orderNumber: string
     shopUrl?: string
+    locale?: string | null
     countrySiteCode?: CountrySiteCode | null
   }): Promise<void> {
     if (!this.isConfigured()) {
@@ -215,12 +218,11 @@ export class MailService {
     const shopUrl = (
       input.shopUrl ?? this.getShopPublicUrl(input.countrySiteCode)
     ).replace(/\/$/, '')
-    const subject = `Замовлення ${input.orderNumber} скасовано`
-    const text = `Замовлення ${input.orderNumber} скасовано, бо оплату не було завершено вчасно.\n\nВи можете оформити нове замовлення: ${shopUrl}`
-    const html = `
-      <p>Замовлення <strong>${input.orderNumber}</strong> скасовано, бо оплату не було завершено вчасно.</p>
-      <p><a href="${shopUrl}">Перейти до магазину</a></p>
-    `.trim()
+    const copy = getLifecycleEmailLabels(resolveLifecycleEmailLocale(input.locale)).cancelledUnpaid
+    const vars = { orderNumber: input.orderNumber, shopUrl }
+    const subject = fillLifecycleEmailTemplate(copy.subject, vars)
+    const text = fillLifecycleEmailTemplate(copy.text, vars)
+    const html = fillLifecycleEmailTemplate(copy.html, vars)
 
     await this.resend.send({
       from: identity.from,
@@ -236,6 +238,7 @@ export class MailService {
     to: string
     orderNumber: string
     shopUrl?: string
+    locale?: string | null
     countrySiteCode?: CountrySiteCode | null
   }): Promise<void> {
     if (!this.isConfigured()) {
@@ -254,13 +257,11 @@ export class MailService {
     const shopUrl = (
       input.shopUrl ?? this.getShopPublicUrl(input.countrySiteCode)
     ).replace(/\/$/, '')
-    const subject = `Повернення коштів — замовлення ${input.orderNumber}`
-    const text = `Оплату за замовленням ${input.orderNumber} отримано після скасування замовлення.\n\nКошти буде повернуто. Замовлення не буде виконано.\n\nМагазин: ${shopUrl}`
-    const html = `
-      <p>Оплату за замовленням <strong>${input.orderNumber}</strong> отримано після скасування.</p>
-      <p>Кошти буде повернуто. Замовлення не буде виконано.</p>
-      <p><a href="${shopUrl}">Перейти до магазину</a></p>
-    `.trim()
+    const copy = getLifecycleEmailLabels(resolveLifecycleEmailLocale(input.locale)).latePayRefund
+    const vars = { orderNumber: input.orderNumber, shopUrl }
+    const subject = fillLifecycleEmailTemplate(copy.subject, vars)
+    const text = fillLifecycleEmailTemplate(copy.text, vars)
+    const html = fillLifecycleEmailTemplate(copy.html, vars)
 
     await this.resend.send({
       from: identity.from,

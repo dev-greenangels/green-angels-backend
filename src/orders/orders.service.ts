@@ -403,6 +403,7 @@ export class OrdersService {
       bankDetailsSource: cart.bankDetailsSource === 'store' ? 'store' : 'cart',
       orderPdfTitle: cart.orderPdfTitle,
       paymentPurposeTemplate: cart.paymentPurposeTemplate,
+      locale: order.locale ?? undefined,
     })
     return buildOrderDocumentPdf(input)
   }
@@ -2220,6 +2221,8 @@ export class OrdersService {
           paymentStatus: true,
           status: true,
           countrySiteCode: true,
+          companyIco: true,
+          companyVatId: true,
         },
       })
       if (!order) return
@@ -2230,6 +2233,17 @@ export class OrdersService {
         order.paymentStatus !== 'success'
       ) {
         return
+      }
+
+      // Same B2B gate as create(): skip site PDF email when Flexi documentSend says ERP-only.
+      // Download path (buildConfirmationPdf) is intentionally not gated here.
+      if (await this.flexi.isConfigured()) {
+        const flexiCfg = await this.flexiSettings.getSettings()
+        const isB2b = Boolean(order.companyIco?.trim() || order.companyVatId?.trim())
+        const mode = this.flexi.resolveDocumentSendMode(isB2b, flexiCfg.documentSend)
+        if (!this.flexi.shouldSendSiteDocument(mode)) {
+          return
+        }
       }
 
       const formatted = this.formatOrderNumber(order.orderNumber)
