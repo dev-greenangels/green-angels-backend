@@ -134,6 +134,7 @@ export class QueueProcessor extends WorkerHost {
           to,
           orderNumber,
           resumeUrl,
+          locale: order.locale,
           countrySiteCode,
         })
         await this.prisma.order.updateMany({
@@ -150,6 +151,7 @@ export class QueueProcessor extends WorkerHost {
           to,
           orderNumber,
           resumeUrl,
+          locale: order.locale,
           countrySiteCode,
         })
         await this.prisma.order.updateMany({
@@ -165,6 +167,7 @@ export class QueueProcessor extends WorkerHost {
           to,
           orderNumber,
           shopUrl,
+          locale: order.locale,
           countrySiteCode,
         })
         await this.prisma.order.updateMany({
@@ -179,6 +182,7 @@ export class QueueProcessor extends WorkerHost {
           to,
           orderNumber,
           shopUrl,
+          locale: order.locale,
           countrySiteCode,
         })
         await this.prisma.order.updateMany({
