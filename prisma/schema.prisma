@@ -1309,6 +1309,7 @@ enum LegalDocumentType {
   PRIVACY
   COOKIES
   RETURNS
+  MARKETING_CONSENT
 }
 
 enum LegalRevisionStatus {

@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer'
 import {
   IsBoolean,
+  IsEmail,
   IsIn,
   IsObject,
   IsOptional,
@@ -58,4 +59,10 @@ export class RecordConsentDto {
   @IsObject()
   @Type(() => Object)
   metadata?: Record<string, unknown>
+
+  /** Newsletter / marketing signup email when not authenticated. */
+  @IsOptional()
+  @IsEmail()
+  @MaxLength(254)
+  email?: string
 }

@@ -1,6 +1,12 @@
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator'
 
-export const LEGAL_DOCUMENT_TYPES = ['TERMS', 'PRIVACY', 'COOKIES', 'RETURNS'] as const
+export const LEGAL_DOCUMENT_TYPES = [
+  'TERMS',
+  'PRIVACY',
+  'COOKIES',
+  'RETURNS',
+  'MARKETING_CONSENT',
+] as const
 export type LegalDocumentTypeName = (typeof LEGAL_DOCUMENT_TYPES)[number]
 
 export class LegalLocaleQueryDto {

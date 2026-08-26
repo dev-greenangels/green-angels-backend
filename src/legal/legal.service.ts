@@ -41,7 +41,7 @@ const PURPOSE_DOCUMENT: Record<LegalConsentPurpose, LegalDocumentType> = {
   TERMS: LegalDocumentType.TERMS,
   PRIVACY_NOTICE: LegalDocumentType.PRIVACY,
   COOKIES_ANALYTICS: LegalDocumentType.COOKIES,
-  MARKETING: LegalDocumentType.PRIVACY,
+  MARKETING: LegalDocumentType.MARKETING_CONSENT,
 }
 
 export type LegalPublicDocument = {
@@ -246,6 +246,7 @@ export class LegalService {
     const action = dto.action as LegalConsentAction
     const locale = this.normalizeLocale(dto.locale)
     const source = dto.source?.trim() || 'unknown'
+    const email = dto.email?.trim().toLowerCase() || null
     let revision = dto.revisionId
       ? await this.prisma.legalDocumentRevision.findUnique({
           where: { id: dto.revisionId },
@@ -264,9 +265,18 @@ export class LegalService {
       return { recorded: false }
     }
 
+    let resolvedUserId = userId || null
+    if (!resolvedUserId && email) {
+      const byEmail = await this.prisma.user.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' } },
+        select: { id: true },
+      })
+      resolvedUserId = byEmail?.id ?? null
+    }
+
     const event = await this.prisma.legalConsentEvent.create({
       data: {
-        userId: userId || null,
+        userId: resolvedUserId,
         orderId: dto.orderId || null,
         anonymousConsentId: dto.anonymousConsentId?.trim() || null,
         revisionId: revision.id,
@@ -278,10 +288,20 @@ export class LegalService {
         metadata: {
           ...(dto.metadata ?? {}),
           ...(dto.analytics != null ? { analytics: dto.analytics } : {}),
+          ...(email ? { email } : {}),
           seller: await this.getSeller(),
         } as Prisma.InputJsonValue,
       },
     })
+
+    if (purpose === LegalConsentPurpose.MARKETING) {
+      await this.syncMarketingUserFlags({
+        userId: resolvedUserId,
+        email,
+        action,
+      })
+    }
+
     return {
       recorded: true,
       id: event.id,
@@ -296,40 +316,204 @@ export class LegalService {
     userId?: string | null
     locale?: string
     privacyConsent: boolean
+    marketingConsent?: boolean
     termsRevisionId?: string
     privacyRevisionId?: string
+    marketingRevisionId?: string
+    email?: string | null
   }): Promise<void> {
-    if (!params.privacyConsent) return
     const locale = this.normalizeLocale(params.locale)
     try {
-      await this.recordConsent(
-        {
-          purpose: 'PRIVACY_NOTICE',
-          action: 'ACKNOWLEDGED',
-          locale,
-          source: 'CHECKOUT',
-          revisionId: params.privacyRevisionId,
-          orderId: params.orderId,
-        },
-        params.userId ?? undefined,
-      )
-      await this.recordConsent(
-        {
-          purpose: 'TERMS',
-          action: 'ACKNOWLEDGED',
-          locale,
-          source: 'CHECKOUT',
-          revisionId: params.termsRevisionId,
-          orderId: params.orderId,
-        },
-        params.userId ?? undefined,
-      )
+      if (params.privacyConsent) {
+        await this.recordConsent(
+          {
+            purpose: 'PRIVACY_NOTICE',
+            action: 'ACKNOWLEDGED',
+            locale,
+            source: 'CHECKOUT',
+            revisionId: params.privacyRevisionId,
+            orderId: params.orderId,
+          },
+          params.userId ?? undefined,
+        )
+        await this.recordConsent(
+          {
+            purpose: 'TERMS',
+            action: 'ACKNOWLEDGED',
+            locale,
+            source: 'CHECKOUT',
+            revisionId: params.termsRevisionId,
+            orderId: params.orderId,
+          },
+          params.userId ?? undefined,
+        )
+      }
+      if (params.marketingConsent) {
+        await this.recordConsent(
+          {
+            purpose: 'MARKETING',
+            action: 'GRANTED',
+            locale,
+            source: 'CHECKOUT',
+            revisionId: params.marketingRevisionId,
+            orderId: params.orderId,
+            email: params.email?.trim() || undefined,
+          },
+          params.userId ?? undefined,
+        )
+      }
     } catch (error) {
       this.logger.warn(
         `Consent log skipped for order ${params.orderId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       )
+    }
+  }
+
+  /** Latest MARKETING event for user/email must be GRANTED. */
+  async hasActiveMarketingConsent(input: {
+    userId?: string | null
+    email?: string | null
+  }): Promise<boolean> {
+    const userId = input.userId?.trim() || null
+    const email = input.email?.trim().toLowerCase() || null
+    if (!userId && !email) return false
+
+    const latest = await this.prisma.legalConsentEvent.findFirst({
+      where: {
+        purpose: LegalConsentPurpose.MARKETING,
+        OR: [
+          ...(userId ? [{ userId }] : []),
+          ...(email
+            ? [{ metadata: { path: ['email'], equals: email } }]
+            : []),
+        ],
+      },
+      orderBy: { occurredAt: 'desc' },
+      select: { action: true },
+    })
+    return latest?.action === LegalConsentAction.GRANTED
+  }
+
+  async withdrawMarketingByToken(token: string): Promise<{ ok: boolean; message: string }> {
+    const payload = this.verifyUnsubscribeToken(token)
+    if (!payload) {
+      return { ok: false, message: 'Invalid or expired unsubscribe link.' }
+    }
+    await this.ensureSeeded()
+    const result = await this.recordConsent(
+      {
+        purpose: 'MARKETING',
+        action: 'WITHDRAWN',
+        locale: payload.locale || 'en',
+        source: 'UNSUBSCRIBE_LINK',
+        email: payload.email,
+        metadata: { via: 'unsubscribe_link' },
+      },
+      payload.userId,
+    )
+    if (!result.recorded) {
+      return { ok: false, message: 'Could not record withdrawal.' }
+    }
+    return { ok: true, message: 'Marketing consent withdrawn.' }
+  }
+
+  buildMarketingUnsubscribeToken(input: {
+    userId?: string | null
+    email?: string | null
+    locale?: string
+  }): string | null {
+    const userId = input.userId?.trim() || undefined
+    const email = input.email?.trim().toLowerCase() || undefined
+    if (!userId && !email) return null
+    const secret = this.unsubscribeSecret()
+    const body = Buffer.from(
+      JSON.stringify({
+        userId,
+        email,
+        locale: input.locale || 'en',
+        exp: Date.now() + 1000 * 60 * 60 * 24 * 365,
+      }),
+      'utf8',
+    ).toString('base64url')
+    const sig = createHash('sha256').update(`${body}.${secret}`).digest('base64url')
+    return `${body}.${sig}`
+  }
+
+  /**
+   * Absolute unsubscribe URL for marketing emails (one-click, no login).
+   * Callers must also gate sends with `hasActiveMarketingConsent`.
+   */
+  buildMarketingUnsubscribeUrl(input: {
+    shopPublicBaseUrl: string
+    userId?: string | null
+    email?: string | null
+    locale?: string
+  }): string | null {
+    const token = this.buildMarketingUnsubscribeToken(input)
+    if (!token) return null
+    const base = input.shopPublicBaseUrl.replace(/\/$/, '')
+    const locale = (input.locale || 'en').toLowerCase().slice(0, 2)
+    return `${base}/${locale}/marketing/unsubscribe?token=${encodeURIComponent(token)}`
+  }
+
+  private verifyUnsubscribeToken(
+    token: string,
+  ): { userId?: string; email?: string; locale?: string } | null {
+    const [body, sig] = token.split('.')
+    if (!body || !sig) return null
+    const expected = createHash('sha256')
+      .update(`${body}.${this.unsubscribeSecret()}`)
+      .digest('base64url')
+    if (expected !== sig) return null
+    try {
+      const parsed = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as {
+        userId?: string
+        email?: string
+        locale?: string
+        exp?: number
+      }
+      if (parsed.exp && Date.now() > parsed.exp) return null
+      return {
+        userId: parsed.userId,
+        email: parsed.email?.toLowerCase(),
+        locale: parsed.locale,
+      }
+    } catch {
+      return null
+    }
+  }
+
+  private unsubscribeSecret(): string {
+    return (
+      process.env.MARKETING_UNSUBSCRIBE_SECRET?.trim() ||
+      process.env.JWT_SECRET?.trim() ||
+      'dev-marketing-unsubscribe'
+    )
+  }
+
+  private async syncMarketingUserFlags(input: {
+    userId: string | null
+    email: string | null
+    action: LegalConsentAction
+  }) {
+    const granted = input.action === LegalConsentAction.GRANTED
+    const data = granted
+      ? { newsletter: true, optin: true, marketingConsentAt: new Date() }
+      : { newsletter: false, optin: false, marketingConsentAt: null as Date | null }
+
+    if (input.userId) {
+      await this.prisma.user.update({ where: { id: input.userId }, data }).catch(() => null)
+      return
+    }
+    if (input.email) {
+      await this.prisma.user
+        .updateMany({
+          where: { email: { equals: input.email, mode: 'insensitive' } },
+          data,
+        })
+        .catch(() => null)
     }
   }
 
@@ -467,6 +651,7 @@ export class LegalService {
   private async ensureSeeded() {
     if (!this.seedPromise) {
       this.seedPromise = this.seedIfEmpty()
+        .then(() => this.seedMissingDocumentTypes())
         .then(() => this.upgradeSeedPlaceholders())
         .catch((error) => {
           this.seedPromise = null
@@ -515,6 +700,50 @@ export class LegalService {
         return
       }
       throw error
+    }
+  }
+
+  /** Add newly introduced document types (e.g. MARKETING_CONSENT) on existing DBs. */
+  private async seedMissingDocumentTypes() {
+    const now = new Date()
+    const byType = new Map<LegalDocumentType, typeof LEGAL_SEED>()
+    for (const entry of LEGAL_SEED) {
+      const type = entry.type as LegalDocumentType
+      const list = byType.get(type) ?? []
+      list.push(entry)
+      byType.set(type, list)
+    }
+    for (const [type, entries] of byType) {
+      const existing = await this.prisma.legalDocument.findUnique({ where: { type } })
+      if (existing) continue
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          const created = await tx.legalDocument.create({ data: { type } })
+          for (const entry of entries) {
+            const content = JSON.stringify(entry.sections)
+            await tx.legalDocumentRevision.create({
+              data: {
+                documentId: created.id,
+                locale: entry.locale,
+                version: 1,
+                title: entry.title,
+                intro: entry.intro,
+                content,
+                contentHash: this.hashContent(entry.locale, entry.title, entry.intro, content),
+                status: LegalRevisionStatus.PUBLISHED,
+                publishedAt: now,
+                effectiveAt: now,
+              },
+            })
+          }
+        })
+        this.logger.log(`Seeded missing legal document type ${type}.`)
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          continue
+        }
+        throw error
+      }
     }
   }
 

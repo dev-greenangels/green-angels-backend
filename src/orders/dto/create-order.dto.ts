@@ -170,6 +170,11 @@ export class CreateOrderDto {
   @MaxLength(20)
   privacyConsentVersion?: string
 
+  /** Optional marketing opt-in (unchecked by default on storefront). */
+  @IsOptional()
+  @IsBoolean()
+  marketingConsent?: boolean
+
   @IsOptional()
   @IsUUID()
   termsRevisionId?: string
@@ -177,6 +182,10 @@ export class CreateOrderDto {
   @IsOptional()
   @IsUUID()
   privacyRevisionId?: string
+
+  @IsOptional()
+  @IsUUID()
+  marketingRevisionId?: string
 
   @IsOptional()
   @IsString()

@@ -1981,8 +1981,11 @@ export class OrdersService {
         userId,
         locale: dto.locale?.trim() || (marketSettings.region === 'sk' ? 'sk' : 'uk'),
         privacyConsent: hasPrivacyConsent,
+        marketingConsent: dto.marketingConsent === true,
         termsRevisionId: dto.termsRevisionId,
         privacyRevisionId: dto.privacyRevisionId,
+        marketingRevisionId: dto.marketingRevisionId,
+        email: dto.customerEmail?.trim() || null,
       })
       .catch((error) => {
         this.logger.warn(
