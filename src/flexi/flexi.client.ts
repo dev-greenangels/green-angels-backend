@@ -9,6 +9,11 @@ import {
 import { FlexiSettingsService } from './flexi.settings.service'
 import { parseStromLocaleFields } from './flexi-locale-json'
 import { applyWarehouseStock } from './flexi-warehouse-stock'
+import {
+  adresarRowMatchesTaxCandidates,
+  buildAdresarTaxOrFilter,
+  normalizeAdresarEmail,
+} from './flexi-adresar-lookup'
 import type {
   FlexiCenikItem,
   FlexiSettings,
@@ -692,11 +697,28 @@ export class FlexiClient {
     return { nativeId, ref, raw: payload }
   }
 
+  /**
+   * Lookup by external id via path-filter (same class as fetchObjednavkaByExtId).
+   * Never use direct `/{ext}.json` + rows[0], and never accept multi-row dumps
+   * (broken/ignored filter → first company in Adresář).
+   */
   async findAdresarByExtId(extId: string): Promise<Record<string, unknown> | null> {
-    const path = `/adresar/${encodeURIComponent(extId)}.json?detail=custom:id,kod,nazev,ic,dic,email`
+    const trimmed = extId.trim()
+    if (!trimmed) return null
+    const filter = `id='${this.escapeFlexiLiteral(trimmed)}'`
     try {
+      const path =
+        `/adresar/(${encodeURIComponent(filter)}).json` +
+        `?limit=0&detail=${encodeURIComponent(FlexiClient.ADRESAR_TAX_DETAIL)}`
       const payload = await this.request<unknown>('GET', path)
       const rows = this.extractEvidence<Record<string, unknown>>(payload, 'adresar')
+      if (rows.length === 0) return null
+      if (rows.length > 1) {
+        this.logger.warn(
+          `findAdresarByExtId(${trimmed}): got ${rows.length} rows (filter likely ignored) — treating as not found`,
+        )
+        return null
+      }
       return rows[0] ?? null
     } catch {
       return null
@@ -704,65 +726,122 @@ export class FlexiClient {
   }
 
   async findAdresarByIc(ic: string): Promise<Record<string, unknown> | null> {
-    return this.findAdresarByField('ic', ic)
+    return this.findAdresarByTaxCandidates([ic])
   }
 
   async findAdresarByVatId(vatId: string): Promise<Record<string, unknown> | null> {
-    return this.findAdresarByField('vatId', vatId)
+    return this.findAdresarByTaxCandidates([vatId])
   }
 
   async findAdresarByDic(dic: string): Promise<Record<string, unknown> | null> {
-    return this.findAdresarByField('dic', dic)
+    return this.findAdresarByTaxCandidates([dic])
   }
 
+  private static readonly ADRESAR_TAX_DETAIL = 'custom:id,kod,nazev,ic,dic,vatId,email'
+
   /**
-   * Try vatId, then ic, then dic for each candidate string (order preserved).
+   * One path-filter GET with `(vatId|ic|dic = candidate) or …`, then verify tax overlap.
+   * Avoids `?filter=` + `limit=1` false positives (first adresar in company).
+   * Fallback: POST /adresar/query.json with the same filter.
    */
   async findAdresarByTaxCandidates(candidates: string[]): Promise<Record<string, unknown> | null> {
-    for (const raw of candidates) {
-      const value = raw.trim()
-      if (!value) continue
-      const byVat = await this.findAdresarByVatId(value)
-      if (byVat) return byVat
-      const byIc = await this.findAdresarByIc(value)
-      if (byIc) return byIc
-      const byDic = await this.findAdresarByDic(value)
-      if (byDic) return byDic
+    const unique = [...new Set(candidates.map((c) => c.trim()).filter(Boolean))]
+    if (unique.length === 0) return null
+
+    const filter = buildAdresarTaxOrFilter(unique, (v) => this.escapeFlexiLiteral(v))
+    if (!filter) return null
+
+    const pickVerified = (rows: Record<string, unknown>[]) =>
+      rows.find((row) => adresarRowMatchesTaxCandidates(row, unique)) ?? null
+
+    let tryPostQuery = false
+    try {
+      const path =
+        `/adresar/(${encodeURIComponent(filter)}).json` +
+        `?limit=0&detail=${encodeURIComponent(FlexiClient.ADRESAR_TAX_DETAIL)}`
+      const payload = await this.request<unknown>('GET', path)
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'adresar')
+      const matched = pickVerified(rows)
+      if (matched) return matched
+      if (rows.length > 0) {
+        // Filter likely ignored — try POST /query before treating as "not found".
+        this.logger.warn(
+          `findAdresarByTaxCandidates: path-filter returned ${rows.length} unverified row(s); trying POST /query`,
+        )
+        tryPostQuery = true
+      } else {
+        return null
+      }
+    } catch (error) {
+      this.logger.warn(
+        `findAdresarByTaxCandidates path-filter failed, trying POST /query: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+      tryPostQuery = true
     }
-    return null
+
+    if (!tryPostQuery) return null
+
+    try {
+      const body = {
+        winstrom: {
+          '@version': '1.0',
+          detail: FlexiClient.ADRESAR_TAX_DETAIL,
+          filter: `(${filter})`,
+          limit: '0',
+        },
+      }
+      const payload = await this.request<unknown>('POST', '/adresar/query.json', body)
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'adresar')
+      const matched = pickVerified(rows)
+      if (matched) return matched
+      if (rows.length > 0) {
+        this.logger.warn(
+          `findAdresarByTaxCandidates: POST /query returned ${rows.length} row(s) but none matched tax candidates`,
+        )
+      }
+      return null
+    } catch (error) {
+      this.logger.warn(
+        `findAdresarByTaxCandidates POST /query failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+      return null
+    }
   }
 
   async findAdresarByEmail(email: string): Promise<Record<string, unknown> | null> {
-    const trimmed = email.trim().toLowerCase()
+    const trimmed = normalizeAdresarEmail(email)
     if (!trimmed) return null
-    return this.findAdresarByField('email', trimmed)
-  }
-
-  private async findAdresarByField(
-    field: 'ic' | 'vatId' | 'dic' | 'email',
-    value: string,
-  ): Promise<Record<string, unknown> | null> {
-    const trimmed = value.trim()
-    if (!trimmed) return null
-    const filter = encodeURIComponent(`${field}='${this.escapeFlexiLiteral(trimmed)}'`)
-    const path =
-      `/adresar.json?limit=1&detail=custom:id,kod,nazev,ic,dic,vatId,email&filter=${filter}`
+    const filter = `email='${this.escapeFlexiLiteral(trimmed)}'`
     try {
+      const path =
+        `/adresar/(${encodeURIComponent(filter)}).json` +
+        `?limit=0&detail=${encodeURIComponent(FlexiClient.ADRESAR_TAX_DETAIL)}`
       const payload = await this.request<unknown>('GET', path)
       const rows = this.extractEvidence<Record<string, unknown>>(payload, 'adresar')
-      return rows[0] ?? null
+      return (
+        rows.find((row) => normalizeAdresarEmail(String(row.email ?? '')) === trimmed) ?? null
+      )
     } catch {
       return null
     }
   }
 
-  async putAdresar(document: Record<string, unknown>): Promise<unknown> {
-    return this.request('PUT', '/adresar.json', {
+  async putAdresar(document: Record<string, unknown>): Promise<{
+    nativeId: string | null
+    ref: string | null
+    raw: unknown
+  }> {
+    const payload = await this.request<unknown>('PUT', '/adresar.json', {
       winstrom: {
         '@version': '1.0',
         adresar: [document],
       },
     })
+    return this.parseWriteResult(payload)
   }
 
   async putSkladovyPohyb(document: Record<string, unknown>): Promise<{
@@ -997,6 +1076,7 @@ export class FlexiClient {
         poradi: Math.trunc(this.num(row.poradi ?? row.order ?? 0)),
         localeNames: localeFields.localeNames,
         localeDescriptions: localeFields.localeDescriptions,
+        localeKeywords: localeFields.localeKeywords,
         localeTextAbove: localeFields.localeTextAbove,
         localeTextBelow: localeFields.localeTextBelow,
       }

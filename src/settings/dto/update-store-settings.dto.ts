@@ -26,8 +26,8 @@ class StoreContactLineDto {
 }
 
 class StoreContactBlockDto {
+  /** Empty title is allowed — storefront hides the heading when blank. */
   @IsString()
-  @MinLength(1)
   title!: string
 
   @IsArray()

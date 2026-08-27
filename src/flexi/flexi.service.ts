@@ -34,9 +34,11 @@ import { FlexiChangeIntakeService, type FlexiIntakeCollapseGroup } from './flexi
 import { FlexiClient } from './flexi.client'
 import {
   adresarRefFromRow,
+  adresarRowMatchesTaxCandidates,
   buildTaxIdCandidates,
   normalizeAdresarEmail,
   stableCustomerEmailExtId,
+  stableCustomerTaxExtId,
 } from './flexi-adresar-lookup'
 import { FlexiSettingsService } from './flexi.settings.service'
 import type {
@@ -107,10 +109,17 @@ async function upsertProductLocaleContent(
   productId: string,
   mapped: ReturnType<typeof mapStromProductContent>,
 ): Promise<void> {
-  const locales = new Set([...Object.keys(mapped.names), ...Object.keys(mapped.descriptions)])
+  const locales = new Set([
+    ...Object.keys(mapped.names),
+    ...Object.keys(mapped.descriptions),
+    ...Object.keys(mapped.seo),
+  ])
   for (const locale of locales) {
     const name = mapped.names[locale as keyof typeof mapped.names]?.trim()
     const description = mapped.descriptions[locale as keyof typeof mapped.descriptions]
+    const seo = mapped.seo[locale as keyof typeof mapped.seo]
+    const metaTitle = seo?.metaTitle?.trim() || undefined
+    const metaDesc = seo?.metaDesc?.trim() || undefined
     await prisma.productTranslation.upsert({
       where: { productId_locale: { productId, locale } },
       create: {
@@ -118,10 +127,14 @@ async function upsertProductLocaleContent(
         locale,
         name: name || mapped.latinName,
         description: description ?? null,
+        metaTitle: metaTitle ?? null,
+        metaDesc: metaDesc ?? null,
       },
       update: {
         ...(name ? { name } : {}),
         ...(description !== undefined ? { description } : {}),
+        ...(metaTitle !== undefined ? { metaTitle: metaTitle || null } : {}),
+        ...(metaDesc !== undefined ? { metaDesc: metaDesc || null } : {}),
       },
     })
   }
@@ -2160,47 +2173,84 @@ export class FlexiService {
         ? `ext:GA-CUS:${order.userId}`
         : `ext:GA-CUS-ORD:${order.id}`
 
+    const taxCandidates = isB2b
+      ? buildTaxIdCandidates({
+          ico: order.companyIco,
+          vatId: formatEuVatId(order.vatCountryCode, order.companyVatId) ?? order.companyVatId,
+          dic: order.companyDic,
+          countryHint: order.vatCountryCode,
+        })
+      : []
+
+    // Registered customer: stable user ext. Guest ORD ext is unique per order — do not
+    // treat a false-positive Adresar hit as "already exists" when B2B tax is present.
     const existingByExt = await this.client.findAdresarByExtId(cusExt)
     if (existingByExt?.id != null) {
-      return cusExt
+      const taxOk =
+        taxCandidates.length === 0 ||
+        order.userId != null ||
+        adresarRowMatchesTaxCandidates(existingByExt, taxCandidates)
+      if (taxOk) {
+        const ref = adresarRefFromRow(existingByExt)
+        return ref || cusExt
+      }
     }
 
     const email = normalizeAdresarEmail(order.customerEmail)
     if (email) {
       const byEmail = await this.client.findAdresarByEmail(email)
       if (byEmail?.id != null) {
-        const ref = adresarRefFromRow(byEmail)
-        if (ref) return ref
+        const taxOk =
+          !isB2b ||
+          taxCandidates.length === 0 ||
+          adresarRowMatchesTaxCandidates(byEmail, taxCandidates)
+        if (taxOk) {
+          const ref = adresarRefFromRow(byEmail)
+          if (ref) return ref
+        }
       }
       const emailExt = stableCustomerEmailExtId(email)
       const byEmailExt = await this.client.findAdresarByExtId(emailExt)
       if (byEmailExt?.id != null) {
-        return emailExt
+        const taxOk =
+          !isB2b ||
+          taxCandidates.length === 0 ||
+          adresarRowMatchesTaxCandidates(byEmailExt, taxCandidates)
+        if (taxOk) {
+          const ref = adresarRefFromRow(byEmailExt)
+          return ref || emailExt
+        }
       }
     }
 
-    if (isB2b) {
-      const candidates = buildTaxIdCandidates({
-        ico: order.companyIco,
-        vatId: formatEuVatId(order.vatCountryCode, order.companyVatId) ?? order.companyVatId,
-        dic: order.companyDic,
-        countryHint: order.vatCountryCode,
-      })
-      if (candidates.length > 0) {
-        const byTax = await this.client.findAdresarByTaxCandidates(candidates)
-        if (byTax?.id != null) {
-          const ref = adresarRefFromRow(byTax)
-          if (ref) return ref
-        }
+    if (taxCandidates.length > 0) {
+      const byTax = await this.client.findAdresarByTaxCandidates(taxCandidates)
+      if (byTax?.id != null && adresarRowMatchesTaxCandidates(byTax, taxCandidates)) {
+        const ref = adresarRefFromRow(byTax)
+        if (ref) return ref
       }
     }
 
     const createExt =
       order.userId != null
         ? cusExt
-        : email
-          ? stableCustomerEmailExtId(email)
-          : cusExt
+        : taxCandidates.length > 0
+          ? stableCustomerTaxExtId(taxCandidates)
+          : email
+            ? stableCustomerEmailExtId(email)
+            : cusExt
+
+    // Idempotent: same tax/email/user ext → update existing instead of a duplicate.
+    const existingCreateExt = await this.client.findAdresarByExtId(createExt)
+    if (existingCreateExt?.id != null) {
+      const taxOk =
+        taxCandidates.length === 0 ||
+        adresarRowMatchesTaxCandidates(existingCreateExt, taxCandidates)
+      if (taxOk) {
+        const ref = adresarRefFromRow(existingCreateExt)
+        return ref || createExt
+      }
+    }
 
     const adresar: Record<string, unknown> = {
       id: createExt,
@@ -2222,7 +2272,13 @@ export class FlexiService {
     if (postal) adresar.psc = postal
     adresar.stat = order.currency === 'UAH' ? 'code:UA' : 'code:SK'
 
-    await this.client.putAdresar(adresar)
+    const write = await this.client.putAdresar(adresar)
+    const created = await this.client.findAdresarByExtId(createExt)
+    if (created?.id != null) {
+      const ref = adresarRefFromRow(created)
+      if (ref) return ref
+    }
+    if (write.nativeId) return write.nativeId
     return createExt
   }
 

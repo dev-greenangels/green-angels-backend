@@ -55,7 +55,7 @@ function normalizeContactBlocks(raw: LegacyStoreContact): StoreContactBlock[] {
   if (raw.contactBlocks?.length) {
     return raw.contactBlocks
       .map((block) => {
-        const title = block.title?.trim() || 'Контакти'
+        const title = block.title?.trim() ?? ''
         const lines = (block.lines ?? [])
           .map((line) => normalizeContactLine(line))
           .filter((line): line is StoreContactLine => line != null)

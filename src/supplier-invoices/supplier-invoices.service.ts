@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto'
 import { FlexiClient } from '../flexi/flexi.client'
 import {
   adresarRefFromRow,
+  adresarRowMatchesTaxCandidates,
   buildTaxIdCandidates,
   stableSupplierExtId,
 } from '../flexi/flexi-adresar-lookup'
@@ -524,18 +525,33 @@ export class SupplierInvoicesService {
 
     if (candidates.length > 0) {
       const existing = await this.flexiClient.findAdresarByTaxCandidates(candidates)
-      if (existing) {
+      if (existing && adresarRowMatchesTaxCandidates(existing, candidates)) {
         const ref = adresarRefFromRow(existing)
-        if (ref) return ref
+        if (ref) {
+          this.logger.log(
+            `ensureSupplierAdresar: reuse by tax ${ref} nazev=${String(existing.nazev ?? '')}`,
+          )
+          return ref
+        }
       }
     }
 
     const extId = stableSupplierExtId(candidates.length ? candidates : [`${Date.now()}`])
     const existingExt = await this.flexiClient.findAdresarByExtId(extId)
     if (existingExt) {
-      const ref = adresarRefFromRow(existingExt)
-      if (ref) return ref
-      return extId
+      const taxOk =
+        candidates.length === 0 || adresarRowMatchesTaxCandidates(existingExt, candidates)
+      if (taxOk) {
+        const ref = adresarRefFromRow(existingExt)
+        if (ref) {
+          this.logger.log(`ensureSupplierAdresar: reuse by ext ${ref}`)
+          return ref
+        }
+        return extId
+      }
+      this.logger.warn(
+        `ensureSupplierAdresar: ext ${extId} hit nazev=${String(existingExt.nazev ?? '')} but tax mismatch — will create`,
+      )
     }
 
     const digits = candidates.map((c) => c.replace(/\D/g, '')).find((d) => d.length >= 6)
@@ -549,11 +565,25 @@ export class SupplierInvoicesService {
     if (vatPrefixed) adresar.vatId = vatPrefixed.toUpperCase()
     else if (dto.supplierVatId?.trim()) adresar.vatId = dto.supplierVatId.trim()
     if (dto.supplierDic?.trim()) adresar.dic = dto.supplierDic.trim()
+    else if (parsed.supplier.dic?.trim()) adresar.dic = parsed.supplier.dic.trim()
     if (dto.supplierAddress?.trim()) adresar.ulice = dto.supplierAddress.trim()
     if (parsed.supplier.email) adresar.email = parsed.supplier.email
     if (parsed.supplier.phone) adresar.tel = parsed.supplier.phone
 
-    await this.flexiClient.putAdresar(adresar)
+    const write = await this.flexiClient.putAdresar(adresar)
+    this.logger.log(
+      `ensureSupplierAdresar: created ext=${extId} nativeId=${write.nativeId ?? '?'} nazev=${String(adresar.nazev)}`,
+    )
+
+    const created = await this.flexiClient.findAdresarByExtId(extId)
+    if (
+      created &&
+      (candidates.length === 0 || adresarRowMatchesTaxCandidates(created, candidates))
+    ) {
+      const ref = adresarRefFromRow(created)
+      if (ref) return ref
+    }
+    if (write.nativeId) return write.nativeId
     return extId
   }
 }

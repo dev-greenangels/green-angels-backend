@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { parseFlexiLocaleJson, parseStromLocaleFields } from './flexi-locale-json'
+import { parseFlexiLocaleJson, parseFlexiKeywordsJson, parseStromLocaleFields } from './flexi-locale-json'
 import {
   categoryTranslationCreates,
   mapStromCategoryContent,
@@ -49,6 +49,34 @@ describe('parseStromLocaleFields', () => {
     })
     assert.equal(fields.localeNames, null)
     assert.deepEqual(fields.localeTextBelow, { uk: 'footer not a name' })
+  })
+
+  it('maps Key words (klicSlova) JSON to localeKeywords', () => {
+    const fields = parseStromLocaleFields({
+      klicSlova:
+        '{"uk":{"title":"UA title","meta":"UA meta"},"sk":{"title":"SK title","meta":"SK meta"}}',
+    })
+    assert.deepEqual(fields.localeKeywords, {
+      uk: { metaTitle: 'UA title', metaDesc: 'UA meta' },
+      sk: { metaTitle: 'SK title', metaDesc: 'SK meta' },
+    })
+  })
+})
+
+describe('parseFlexiKeywordsJson', () => {
+  it('parses title/meta per locale', () => {
+    assert.deepEqual(
+      parseFlexiKeywordsJson('{"uk":{"title":"T","meta":"M"},"cz":{"title":"C","meta":"D"}}'),
+      {
+        uk: { metaTitle: 'T', metaDesc: 'M' },
+        cs: { metaTitle: 'C', metaDesc: 'D' },
+      },
+    )
+  })
+
+  it('returns null for invalid JSON', () => {
+    assert.equal(parseFlexiKeywordsJson('plain'), null)
+    assert.equal(parseFlexiKeywordsJson('{"uk":{"title":""}}'), null)
   })
 })
 
@@ -99,6 +127,10 @@ describe('mapStromProductContent', () => {
         sk: 'SK description',
         hu: 'HU description',
       },
+      localeKeywords: {
+        uk: { metaTitle: 'UA title', metaDesc: 'UA meta' },
+        sk: { metaTitle: 'SK title', metaDesc: 'SK meta' },
+      },
     })
     assert.equal(mapped.latinName, "Thuja occidentalis 'Smaragd'")
     const byLocale = Object.fromEntries(
@@ -108,16 +140,22 @@ describe('mapStromProductContent', () => {
       locale: 'uk',
       name: 'Туя Смарагд',
       description: 'UA description',
+      metaTitle: 'UA title',
+      metaDesc: 'UA meta',
     })
     assert.deepEqual(byLocale.sk, {
       locale: 'sk',
       name: 'Tuja Smaragd',
       description: 'SK description',
+      metaTitle: 'SK title',
+      metaDesc: 'SK meta',
     })
     assert.deepEqual(byLocale.hu, {
       locale: 'hu',
       name: 'Smaragd tuja',
       description: 'HU description',
+      metaTitle: null,
+      metaDesc: null,
     })
   })
 })

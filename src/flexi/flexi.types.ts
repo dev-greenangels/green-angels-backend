@@ -250,6 +250,8 @@ export type FlexiStromNode = {
   localeNames: Partial<Record<FlexiLocaleCode, string>> | null
   /** Product Description (popis) JSON → ProductTranslation.description */
   localeDescriptions: Partial<Record<FlexiLocaleCode, string>> | null
+  /** Key words (klicSlova) JSON → ProductTranslation.metaTitle + metaDesc */
+  localeKeywords: Partial<Record<FlexiLocaleCode, { metaTitle: string; metaDesc: string }>> | null
   /** Category Text above (txtNad) JSON → CategoryTranslation.description */
   localeTextAbove: Partial<Record<FlexiLocaleCode, string>> | null
   /** Category Text below (txtPod) JSON → CategoryTranslation.footerDescription */

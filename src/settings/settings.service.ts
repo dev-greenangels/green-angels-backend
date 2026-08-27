@@ -304,7 +304,7 @@ export class SettingsService {
       mapsEmbedUrl: dto.mapsEmbedUrl ?? current.mapsEmbedUrl,
       contactBlocks: dto.contactBlocks
         ? dto.contactBlocks.map((block) => ({
-            title: block.title,
+            title: (block.title ?? '').trim(),
             lines: block.lines.map((line) => ({
               type: line.type,
               label: line.label,
