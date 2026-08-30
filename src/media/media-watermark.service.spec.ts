@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import type { ConfigService } from '@nestjs/config'
 import sharp from 'sharp'
 
 import type { MarketRegion } from '../settings/market.types'
@@ -21,10 +20,7 @@ function serviceFor(region: MarketRegion, product = true, fresh = true): MediaWa
     }),
     getMarketSettings: async () => ({ region }),
   } as unknown as SettingsService
-  const config = {
-    get: (key: string) => (key === 'SHOP_PUBLIC_URL' ? 'https://www.landshaft.info' : undefined),
-  } as ConfigService
-  return new MediaWatermarkService(settings, config)
+  return new MediaWatermarkService(settings)
 }
 
 async function blackPng(width: number, height: number): Promise<Buffer> {
@@ -53,7 +49,7 @@ describe('MediaWatermarkService', () => {
     assert.notDeepEqual(ua, sk)
   })
 
-  it('places a readable logo panel with the shop domain without changing dimensions', async () => {
+  it('places the logo only without changing dimensions', async () => {
     const source = await blackPng(1000, 700)
     const output = await serviceFor('ua').applyToNewUpload(source, 'freshPhoto')
     const metadata = await sharp(output).metadata()

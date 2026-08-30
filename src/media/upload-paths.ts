@@ -29,3 +29,10 @@ export function isPendingProductPath(url: string): boolean {
     url.trim(),
   )
 }
+
+export const HOME_HERO_IMAGE_PATH_REGEX =
+  /^\/uploads\/settings\/home-hero\/v\d+\/cover\.webp$/i
+
+export function isValidHomeHeroImagePath(url: string): boolean {
+  return HOME_HERO_IMAGE_PATH_REGEX.test(url.trim())
+}

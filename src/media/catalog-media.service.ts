@@ -75,6 +75,23 @@ export class CatalogMediaService {
     }
   }
 
+  async storeHomeHeroImage(buffer: Buffer): Promise<StoredImagePair> {
+    const { main, thumb } = await processBlogImage(buffer)
+    await this.storage.deletePrefix('uploads/settings/home-hero')
+    const revision = Date.now()
+    const dirKey = `uploads/settings/home-hero/v${revision}`
+    const url = `/uploads/settings/home-hero/v${revision}/${CATEGORY_COVER}`
+    await this.writePair(dirKey, CATEGORY_COVER, CATEGORY_THUMB, main, thumb)
+    return {
+      url,
+      thumbUrl: url.replace(`/${CATEGORY_COVER}`, `/${CATEGORY_THUMB}`),
+    }
+  }
+
+  async deleteHomeHeroImage(): Promise<void> {
+    await this.storage.deletePrefix('uploads/settings/home-hero')
+  }
+
   async storeBlogImage(
     buffer: Buffer,
     options?: { blogPostId?: string },

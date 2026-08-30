@@ -362,7 +362,7 @@ export const DEFAULT_HOME_SETTINGS: HomePageSettings = {
     primaryCtaHref: '/catalog',
     secondaryCtaLabel: 'Хіти продажів',
     secondaryCtaHref: '/#bestsellers',
-    imageUrl: '/images/hero-plants.jpg',
+    imageUrl: '',
     highlights: [
       { title: 'Власне виробництво', description: 'Вирощуємо на розсаднику, не перепродаємо' },
       { title: 'Якість і сортність', description: 'Стабільний посадковий матеріал' },
