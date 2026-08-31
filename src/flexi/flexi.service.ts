@@ -47,6 +47,7 @@ import type {
   FlexiDocumentSendMode,
   FlexiExportOrderResult,
   FlexiImportResult,
+  FlexiImportUpdateFields,
   FlexiStockCheckResult,
   FlexiStockLine,
   FlexiStromCenikLink,
@@ -54,6 +55,7 @@ import type {
   FlexiStromSyncResult,
   FlexiSyncResult,
 } from './flexi.types'
+import { DEFAULT_FLEXI_IMPORT_UPDATE_FIELDS } from './flexi.types'
 
 function slugify(input: string): string {
   return (
@@ -108,7 +110,10 @@ async function upsertProductLocaleContent(
   prisma: PrismaService,
   productId: string,
   mapped: ReturnType<typeof mapStromProductContent>,
+  options?: { fields?: FlexiImportUpdateFields; isUpdate?: boolean },
 ): Promise<void> {
+  const fields = options?.fields ?? DEFAULT_FLEXI_IMPORT_UPDATE_FIELDS
+  const isUpdate = options?.isUpdate ?? false
   const locales = new Set([
     ...Object.keys(mapped.names),
     ...Object.keys(mapped.descriptions),
@@ -131,10 +136,16 @@ async function upsertProductLocaleContent(
         metaDesc: metaDesc ?? null,
       },
       update: {
-        ...(name ? { name } : {}),
-        ...(description !== undefined ? { description } : {}),
-        ...(metaTitle !== undefined ? { metaTitle: metaTitle || null } : {}),
-        ...(metaDesc !== undefined ? { metaDesc: metaDesc || null } : {}),
+        ...(name && (!isUpdate || fields.productNames) ? { name } : {}),
+        ...(description !== undefined && (!isUpdate || fields.productDescriptions)
+          ? { description }
+          : {}),
+        ...(metaTitle !== undefined && (!isUpdate || fields.productSeo)
+          ? { metaTitle: metaTitle || null }
+          : {}),
+        ...(metaDesc !== undefined && (!isUpdate || fields.productSeo)
+          ? { metaDesc: metaDesc || null }
+          : {}),
       },
     })
   }
@@ -144,7 +155,10 @@ async function upsertCategoryLocaleContent(
   prisma: PrismaService,
   categoryId: string,
   mapped: ReturnType<typeof mapStromCategoryContent>,
+  options?: { fields?: FlexiImportUpdateFields; isUpdate?: boolean },
 ): Promise<void> {
+  const fields = options?.fields ?? DEFAULT_FLEXI_IMPORT_UPDATE_FIELDS
+  const isUpdate = options?.isUpdate ?? false
   const locales = new Set([
     ...Object.keys(mapped.names),
     ...Object.keys(mapped.descriptions),
@@ -164,9 +178,13 @@ async function upsertCategoryLocaleContent(
         footerDescription: footerDescription ?? null,
       },
       update: {
-        ...(name ? { name } : {}),
-        ...(description !== undefined ? { description } : {}),
-        ...(footerDescription !== undefined ? { footerDescription } : {}),
+        ...(name && (!isUpdate || fields.categoryNames) ? { name } : {}),
+        ...(description !== undefined && (!isUpdate || fields.categoryDescriptions)
+          ? { description }
+          : {}),
+        ...(footerDescription !== undefined && (!isUpdate || fields.categoryFooters)
+          ? { footerDescription }
+          : {}),
       },
     })
   }
@@ -289,6 +307,8 @@ export class FlexiService {
   }
 
   async applyCenikItem(item: FlexiCenikItem): Promise<'updated' | 'unmatched'> {
+    const settings = await this.settings.getSettings()
+    const fields = settings.importUpdateFields
     const sku = item.kod.trim()
     const variant = await this.prisma.productVariant.findUnique({
       where: { sku },
@@ -308,22 +328,26 @@ export class FlexiService {
     const nextPrice = Math.round(item.price * 100) / 100
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.productVariant.update({
-        where: { id: variant.id },
-        data: {
-          stock: item.stock,
-          ...(item.weight != null && item.weight > 0 ? { weight: item.weight } : {}),
-        },
-      })
+      const variantData: { stock?: number; weight?: number } = {}
+      if (fields.stock) variantData.stock = item.stock
+      if (fields.weight && item.weight != null && item.weight > 0) {
+        variantData.weight = item.weight
+      }
+      if (Object.keys(variantData).length > 0) {
+        await tx.productVariant.update({
+          where: { id: variant.id },
+          data: variantData,
+        })
+      }
 
-      if (item.cnCode) {
+      if (fields.cnCode && item.cnCode) {
         await tx.product.update({
           where: { id: variant.productId },
           data: { cnCode: item.cnCode },
         })
       }
 
-      if (retail) {
+      if (fields.prices && retail) {
         const prev = Number(retail.value)
         // Never wipe a real price with Flexi 0 / missing cenik price.
         if (nextPrice > 0 && prev !== nextPrice) {
@@ -340,7 +364,7 @@ export class FlexiService {
             },
           })
         }
-      } else if (nextPrice > 0) {
+      } else if (fields.prices && !retail && nextPrice > 0) {
         await tx.productPrice.create({
           data: {
             productVariantId: variant.id,
@@ -359,7 +383,7 @@ export class FlexiService {
         })
       }
 
-      if (item.quantityPrices.length > 0) {
+      if (fields.quantityPrices && item.quantityPrices.length > 0) {
         await tx.productVariantQuantityPrice.deleteMany({
           where: { productVariantId: variant.id },
         })
@@ -614,7 +638,8 @@ export class FlexiService {
     }
 
     // One full tree sync per pass — never N× syncStromCatalog for N strom groups.
-    if (stromGroups.length > 0) {
+    const flexiSettings = await this.settings.getSettings()
+    if (stromGroups.length > 0 && flexiSettings.syncCategoriesFromStrom) {
       for (const group of stromGroups) {
         await this.intake.markProcessing(group)
       }
@@ -639,6 +664,11 @@ export class FlexiService {
           failed += 1
         }
         this.logger.warn(`processDurableIntake strom×${stromGroups.length}: ${message}`)
+      }
+    } else if (stromGroups.length > 0) {
+      for (const group of stromGroups) {
+        await this.intake.markGroupSuccess(group)
+        fetched += 1
       }
     }
 
@@ -744,6 +774,7 @@ export class FlexiService {
     }
 
     const settings = await this.settings.getSettings()
+    const fields = settings.importUpdateFields
     const errors: string[] = []
     let categoriesUpserted = 0
     let productsUpserted = 0
@@ -850,16 +881,28 @@ export class FlexiService {
               },
             })
           } else {
-            await this.prisma.category.update({
-              where: { id: existing.id },
-              data: {
-                latinName: content.latinName,
-                position: node.poradi,
-                parentId: parentCategoryId,
-                isCatalogRoot: !parentCategoryId,
-              },
+            const categoryUpdate: {
+              latinName?: string
+              position?: number
+              parentId?: string | null
+              isCatalogRoot?: boolean
+            } = {}
+            if (fields.categoryLatinName) categoryUpdate.latinName = content.latinName
+            if (fields.categoryTree) {
+              categoryUpdate.position = node.poradi
+              categoryUpdate.parentId = parentCategoryId
+              categoryUpdate.isCatalogRoot = !parentCategoryId
+            }
+            if (Object.keys(categoryUpdate).length > 0) {
+              await this.prisma.category.update({
+                where: { id: existing.id },
+                data: categoryUpdate,
+              })
+            }
+            await upsertCategoryLocaleContent(this.prisma, existing.id, content, {
+              fields,
+              isUpdate: true,
             })
-            await upsertCategoryLocaleContent(this.prisma, existing.id, content)
           }
           categoryIdByFlexiNode.set(node.id, existing.id)
           if (node.kod) categoryIdByFlexiNode.set(node.kod, existing.id)
@@ -998,16 +1041,25 @@ export class FlexiService {
               include: { variants: { select: { id: true, sku: true } } },
             })
           } else {
+            const productUpdate: {
+              categoryId?: string
+              latinName?: string
+              legacyId: string
+              cnCode?: string
+            } = {
+              legacyId: productLegacyId,
+            }
+            if (fields.productCategory && categoryId) productUpdate.categoryId = categoryId
+            if (fields.productLatinName) productUpdate.latinName = content.latinName
+            if (fields.cnCode && cnCode) productUpdate.cnCode = cnCode
             await this.prisma.product.update({
               where: { id: product.id },
-              data: {
-                ...(categoryId ? { categoryId } : {}),
-                latinName: content.latinName,
-                legacyId: productLegacyId,
-                ...(cnCode ? { cnCode } : {}),
-              },
+              data: productUpdate,
             })
-            await upsertProductLocaleContent(this.prisma, product.id, content)
+            await upsertProductLocaleContent(this.prisma, product.id, content, {
+              fields,
+              isUpdate: true,
+            })
           }
           productsUpserted += 1
 
@@ -1021,7 +1073,7 @@ export class FlexiService {
             }
 
             // Prefer CN from any variant if product still has none
-            if (item.cnCode && !cnCode) {
+            if (item.cnCode && !cnCode && fields.cnCode) {
               cnCode = item.cnCode
               await this.prisma.product.update({
                 where: { id: product.id },
@@ -1031,7 +1083,7 @@ export class FlexiService {
 
             const sizeLabel = parseSizeLabel(item.kod, item.nazev)
             let attributeValueIds: string[] = []
-            if (sizeAttributeId && sizeLabel) {
+            if (fields.sizeAttributes && sizeAttributeId && sizeLabel) {
               const valueId = await this.ensureSizeAttributeValue(sizeAttributeId, sizeLabel)
               if (valueId) attributeValueIds = [valueId]
             }
@@ -1095,7 +1147,7 @@ export class FlexiService {
 
             await this.applyCenikItem(item)
 
-            if (attributeValueIds.length > 0) {
+            if (fields.sizeAttributes && attributeValueIds.length > 0) {
               const variant = await this.prisma.productVariant.findUnique({
                 where: { sku: item.kod },
                 select: { id: true },

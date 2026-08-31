@@ -13,9 +13,11 @@ import { normalizeDeliveryMethodCodes } from './flexi-order-export-mapping'
 import {
   DEFAULT_FLEXI_SETTINGS,
   type FlexiDocumentSendMode,
+  type FlexiImportUpdateFields,
   type FlexiPublicSettings,
   type FlexiSettings,
   type FlexiWebhookRegistrationStatus,
+  normalizeFlexiImportUpdateFields,
 } from './flexi.types'
 
 const DOCUMENT_SEND_MODES: FlexiDocumentSendMode[] = ['site', 'abra', 'both', 'none']
@@ -105,6 +107,9 @@ export class FlexiSettingsService {
       stromRootCode: (base.stromRootCode ?? 'STR_CEN').trim() || 'STR_CEN',
       stromShopRootCode: (base.stromShopRootCode ?? '').trim(),
       syncCategoriesFromStrom: base.syncCategoriesFromStrom !== false,
+      importUpdateFields: normalizeFlexiImportUpdateFields(
+        raw?.importUpdateFields ?? base.importUpdateFields,
+      ),
       sizeAttributeId: (base.sizeAttributeId ?? '').trim(),
       webhookSecKey: base.webhookSecKey ?? '',
       webhookUrl: (base.webhookUrl ?? '').trim(),
@@ -176,6 +181,7 @@ export class FlexiSettingsService {
       stromRootCode: settings.stromRootCode,
       stromShopRootCode: settings.stromShopRootCode,
       syncCategoriesFromStrom: settings.syncCategoriesFromStrom,
+      importUpdateFields: settings.importUpdateFields,
       sizeAttributeId: settings.sizeAttributeId,
       webhookUrl: settings.webhookUrl,
       hasWebhookSecKey: Boolean(settings.webhookSecKey),
@@ -219,6 +225,12 @@ export class FlexiSettingsService {
       fullSyncSchedule: patch.fullSyncSchedule
         ? normalizeFullSyncSchedule({ ...current.fullSyncSchedule, ...patch.fullSyncSchedule })
         : current.fullSyncSchedule,
+      importUpdateFields: patch.importUpdateFields
+        ? normalizeFlexiImportUpdateFields({
+            ...current.importUpdateFields,
+            ...patch.importUpdateFields,
+          })
+        : current.importUpdateFields,
       password:
         patch.password === undefined || patch.password === ''
           ? current.password

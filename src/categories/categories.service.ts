@@ -29,6 +29,7 @@ export type CategoryTreeNode = {
   metaTitle: string | null
   metaDesc: string | null
   productCount: number
+  isStockDepleted?: boolean
   fallbackName: string
   nameHint: { locale: string; text: string } | null
   descriptionHint: { locale: string; text: string } | null
@@ -44,6 +45,89 @@ export class CategoriesService {
 
   private defaultLocale(locale?: string) {
     return (locale?.trim() || 'uk').toLowerCase()
+  }
+
+  private collatorLocale(locale: string) {
+    const loc = this.defaultLocale(locale)
+    if (loc === 'en') return 'en'
+    if (loc === 'sk') return 'sk'
+    if (loc === 'hu') return 'hu'
+    if (loc === 'de') return 'de'
+    if (loc === 'cs') return 'cs'
+    return 'uk'
+  }
+
+  private compareCategorySiblings(
+    a: CategoryTreeNode,
+    b: CategoryTreeNode,
+    locale: string,
+    applyStockSort: boolean,
+  ) {
+    if (applyStockSort) {
+      const aDepleted = a.isStockDepleted ? 1 : 0
+      const bDepleted = b.isStockDepleted ? 1 : 0
+      if (aDepleted !== bDepleted) return aDepleted - bDepleted
+    }
+
+    if (a.position !== b.position) return a.position - b.position
+
+    const collator = this.collatorLocale(locale)
+    return (a.name || a.fallbackName).localeCompare(b.name || b.fallbackName, collator, {
+      sensitivity: 'base',
+    })
+  }
+
+  private sortCategoryNodes(list: CategoryTreeNode[], locale: string, applyStockSort: boolean) {
+    list.sort((a, b) => this.compareCategorySiblings(a, b, locale, applyStockSort))
+    list.forEach((node) => this.sortCategoryNodes(node.children, locale, applyStockSort))
+  }
+
+  private async buildDirectSellableCategoryIds(categoryIds: string[]): Promise<Set<string>> {
+    if (!categoryIds.length) return new Set()
+
+    const products = await this.prisma.product.findMany({
+      where: {
+        isPublished: true,
+        variants: { some: { stock: { gt: 0 } } },
+        OR: [
+          { categoryId: { in: categoryIds } },
+          { additionalCategories: { some: { categoryId: { in: categoryIds } } } },
+        ],
+      },
+      select: {
+        categoryId: true,
+        additionalCategories: { select: { categoryId: true } },
+      },
+    })
+
+    const sellable = new Set<string>()
+    for (const product of products) {
+      sellable.add(product.categoryId)
+      for (const link of product.additionalCategories) {
+        if (categoryIds.includes(link.categoryId)) {
+          sellable.add(link.categoryId)
+        }
+      }
+    }
+
+    return sellable
+  }
+
+  private applySubtreeStockFlags(
+    nodes: CategoryTreeNode[],
+    directSellable: Set<string>,
+  ): boolean {
+    let subtreeHasSellable = false
+
+    for (const node of nodes) {
+      const childHasSellable = this.applySubtreeStockFlags(node.children, directSellable)
+      const directHasSellable = directSellable.has(node.id)
+      const hasSellable = directHasSellable || childHasSellable
+      node.isStockDepleted = !hasSellable
+      if (hasSellable) subtreeHasSellable = true
+    }
+
+    return subtreeHasSellable
   }
 
   resolveImageUrl(image: string | null | undefined): string {
@@ -168,17 +252,47 @@ export class CategoriesService {
       }
     }
 
-    const sortNodes = (list: CategoryTreeNode[]) => {
-      list.sort(
-        (a, b) =>
-          a.position - b.position ||
-          (a.name || a.fallbackName).localeCompare(b.name || b.fallbackName, 'uk'),
-      )
-      list.forEach((n) => sortNodes(n.children))
+    const applyStockSort = !emptyIfMissing
+    if (applyStockSort) {
+      const categoryIds = rows.map((row) => row.id)
+      const directSellable = await this.buildDirectSellableCategoryIds(categoryIds)
+      this.applySubtreeStockFlags(roots, directSellable)
     }
-    sortNodes(roots)
+
+    this.sortCategoryNodes(roots, loc, applyStockSort)
 
     return roots
+  }
+
+  async reorderSiblings(parentId: string | null | undefined, orderedIds: string[]) {
+    const normalizedParentId = parentId ?? null
+    const siblings = await this.prisma.category.findMany({
+      where: { parentId: normalizedParentId },
+      select: { id: true },
+      orderBy: [{ position: 'asc' }, { slug: 'asc' }],
+    })
+
+    if (orderedIds.length !== siblings.length) {
+      throw new BadRequestException('Список категорій для сортування неповний або містить зайві id.')
+    }
+
+    const siblingIds = new Set(siblings.map((row) => row.id))
+    for (const id of orderedIds) {
+      if (!siblingIds.has(id)) {
+        throw new BadRequestException('Категорія не належить до обраного рівня дерева.')
+      }
+    }
+
+    await this.prisma.$transaction(
+      orderedIds.map((id, index) =>
+        this.prisma.category.update({
+          where: { id },
+          data: { position: index },
+        }),
+      ),
+    )
+
+    return { ok: true as const }
   }
 
   /** Усі id категорії та її нащадків (для фільтра товарів у розділі каталогу). */

@@ -4,6 +4,55 @@ import { DEFAULT_FULL_SYNC_SCHEDULE } from './flexi.schedule'
 
 export type FlexiDocumentSendMode = 'site' | 'abra' | 'both' | 'none'
 
+export type FlexiImportUpdateFields = {
+  stock: boolean
+  prices: boolean
+  quantityPrices: boolean
+  weight: boolean
+  cnCode: boolean
+  sizeAttributes: boolean
+  productNames: boolean
+  productDescriptions: boolean
+  productSeo: boolean
+  productLatinName: boolean
+  productCategory: boolean
+  categoryNames: boolean
+  categoryDescriptions: boolean
+  categoryFooters: boolean
+  categoryLatinName: boolean
+  categoryTree: boolean
+}
+
+export const DEFAULT_FLEXI_IMPORT_UPDATE_FIELDS: FlexiImportUpdateFields = {
+  stock: true,
+  prices: true,
+  quantityPrices: true,
+  weight: true,
+  cnCode: true,
+  sizeAttributes: true,
+  productNames: true,
+  productDescriptions: true,
+  productSeo: true,
+  productLatinName: true,
+  productCategory: true,
+  categoryNames: true,
+  categoryDescriptions: true,
+  categoryFooters: true,
+  categoryLatinName: true,
+  categoryTree: true,
+}
+
+export function normalizeFlexiImportUpdateFields(
+  raw?: Partial<FlexiImportUpdateFields> | null,
+): FlexiImportUpdateFields {
+  const merged = { ...DEFAULT_FLEXI_IMPORT_UPDATE_FIELDS }
+  if (!raw || typeof raw !== 'object') return merged
+  for (const key of Object.keys(merged) as Array<keyof FlexiImportUpdateFields>) {
+    if (typeof raw[key] === 'boolean') merged[key] = raw[key]!
+  }
+  return merged
+}
+
 export type FlexiWebhookRegistrationStatus =
   | 'NOT_REGISTERED'
   | 'REGISTERED'
@@ -52,6 +101,8 @@ export type FlexiSettings = {
   stromShopRootCode: string
   /** Sync branch nodes → Category, leaf → Product */
   syncCategoriesFromStrom: boolean
+  /** Which Flexi fields may overwrite existing shop records (create always imports all). */
+  importUpdateFields: FlexiImportUpdateFields
   /** Optional VariantAttribute UUID for size (P9, C2, …) */
   sizeAttributeId: string
   webhookSecKey: string
@@ -106,6 +157,7 @@ export const DEFAULT_FLEXI_SETTINGS: FlexiSettings = {
   stromRootCode: 'STR_CEN',
   stromShopRootCode: '',
   syncCategoriesFromStrom: true,
+  importUpdateFields: { ...DEFAULT_FLEXI_IMPORT_UPDATE_FIELDS },
   sizeAttributeId: '',
   webhookSecKey: '',
   webhookUrl: '',
@@ -143,6 +195,7 @@ export type FlexiPublicSettings = {
   stromRootCode: string
   stromShopRootCode: string
   syncCategoriesFromStrom: boolean
+  importUpdateFields: FlexiImportUpdateFields
   sizeAttributeId: string
   webhookUrl: string
   hasWebhookSecKey: boolean

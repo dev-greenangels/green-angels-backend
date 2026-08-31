@@ -7,6 +7,7 @@ import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { CategorySearchService } from '../search/category-search.service'
 import { CategoriesService } from './categories.service'
 import { CreateCategoryDto } from './dto/create-category.dto'
+import { ReorderCategoriesDto } from './dto/reorder-categories.dto'
 import { UpdateCategoryDto } from './dto/update-category.dto'
 
 @Controller('categories')
@@ -36,6 +37,13 @@ export class CategoriesController {
   @Roles(Role.ADMIN, Role.MANAGER)
   create(@Body() dto: CreateCategoryDto) {
     return this.categories.create(dto)
+  }
+
+  @Patch('reorder')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  reorder(@Body() dto: ReorderCategoriesDto) {
+    return this.categories.reorderSiblings(dto.parentId, dto.orderedIds)
   }
 
   @Patch(':id')
