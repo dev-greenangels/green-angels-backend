@@ -46,6 +46,7 @@ import { ViesModule } from './vies/vies.module'
 import { TedbModule } from './tedb/tedb.module'
 import { LegalModule } from './legal/legal.module'
 import { WholesaleInquiriesModule } from './wholesale-inquiries/wholesale-inquiries.module'
+import { ContractWithdrawalsModule } from './contract-withdrawals/contract-withdrawals.module'
 import { BackstageJobsModule } from './backstage-jobs/backstage-jobs.module'
 import { SupplierInvoicesModule } from './supplier-invoices/supplier-invoices.module'
 
@@ -109,6 +110,7 @@ import { SupplierInvoicesModule } from './supplier-invoices/supplier-invoices.mo
     TedbModule,
     LegalModule,
     WholesaleInquiriesModule,
+    ContractWithdrawalsModule,
     BackstageJobsModule,
     SupplierInvoicesModule,
     MediaModule,

@@ -7,6 +7,8 @@ import { resolvePackagingKind } from './packaging-kind.util'
 import { AddVariantAttributeValuesDto } from './dto/add-variant-attribute-values.dto'
 import { CreateVariantAttributeDto, CreateVariantAttributeValueDto } from './dto/create-variant-attribute.dto'
 import { UpdateVariantAttributeDto, UpdateVariantAttributeValueDto } from './dto/update-variant-attribute.dto'
+import { PatchTranslationsDto } from '../characteristics/dto/patch-translations.dto'
+import { SUPPORTED_LOCALES } from '../settings/localization.types'
 
 export type VariantAttributeValueNode = {
   id: string
@@ -40,6 +42,7 @@ export type VariantAttributeNode = {
   participatesInLabel: boolean
   showOnProductPage: boolean
   icon: string | null
+  colorDisplayMode: import('@prisma/client').ColorDisplayMode | null
   values: VariantAttributeValueNode[]
 }
 
@@ -223,6 +226,7 @@ export class VariantAttributesService {
       participatesInLabel: boolean
       showOnProductPage: boolean
       icon: string | null
+      colorDisplayMode?: import('@prisma/client').ColorDisplayMode | null
       translations: Array<{ locale?: string; name: string; description: string | null }>
       values: Array<{
         id: string
@@ -271,6 +275,7 @@ export class VariantAttributesService {
       participatesInLabel: row.participatesInLabel,
       showOnProductPage: row.showOnProductPage,
       icon: row.icon,
+      colorDisplayMode: row.colorDisplayMode ?? null,
       values: row.values
         .map((v) => this.toValueNode(v, locale, emptyIfMissing))
         .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, 'uk')),
@@ -321,6 +326,10 @@ export class VariantAttributesService {
         participatesInLabel: dto.participatesInLabel ?? true,
         showOnProductPage: dto.showOnProductPage ?? false,
         icon: dto.showOnProductPage ? dto.icon?.trim() || null : null,
+        colorDisplayMode:
+          dto.valueType === VariantAttributeType.COLOR
+            ? dto.colorDisplayMode ?? 'BOTH'
+            : null,
         translations: {
           create: {
             locale,
@@ -447,6 +456,12 @@ export class VariantAttributesService {
           : {}),
         ...(dto.icon !== undefined || dto.showOnProductPage === false
           ? { icon: dto.showOnProductPage === false ? null : dto.icon?.trim() || null }
+          : {}),
+        ...(dto.colorDisplayMode !== undefined
+          ? { colorDisplayMode: dto.colorDisplayMode }
+          : {}),
+        ...(dto.valueType !== undefined && dto.valueType !== VariantAttributeType.COLOR
+          ? { colorDisplayMode: null }
           : {}),
       }
 
@@ -588,6 +603,109 @@ export class VariantAttributesService {
     const existing = await this.prisma.variantAttribute.findUnique({ where: { id: attributeId } })
     if (!existing) throw new NotFoundException('Атрибут не знайдено.')
     await this.prisma.variantAttribute.delete({ where: { id: attributeId } })
+    return { ok: true }
+  }
+
+  async getNameTranslations(attributeId: string) {
+    const existing = await this.prisma.variantAttribute.findUnique({ where: { id: attributeId } })
+    if (!existing) throw new NotFoundException('Атрибут не знайдено.')
+
+    const rows = await this.prisma.variantAttributeTranslation.findMany({ where: { attributeId } })
+    const translations: Record<string, string> = {}
+    for (const locale of SUPPORTED_LOCALES) translations[locale] = ''
+    for (const row of rows) translations[row.locale] = row.name
+    return { translations }
+  }
+
+  async patchNameTranslations(attributeId: string, dto: PatchTranslationsDto) {
+    const existing = await this.prisma.variantAttribute.findUnique({ where: { id: attributeId } })
+    if (!existing) throw new NotFoundException('Атрибут не знайдено.')
+
+    for (const [locale, raw] of Object.entries(dto.translations)) {
+      if (!(SUPPORTED_LOCALES as readonly string[]).includes(locale)) continue
+      const name = raw.trim()
+      if (!name) continue
+
+      await this.prisma.variantAttributeTranslation.upsert({
+        where: { attributeId_locale: { attributeId, locale } },
+        create: { attributeId, locale, name },
+        update: { name },
+      })
+    }
+
+    return { ok: true }
+  }
+
+  async getDescriptionTranslations(attributeId: string) {
+    const existing = await this.prisma.variantAttribute.findUnique({ where: { id: attributeId } })
+    if (!existing) throw new NotFoundException('Атрибут не знайдено.')
+
+    const rows = await this.prisma.variantAttributeTranslation.findMany({ where: { attributeId } })
+    const translations: Record<string, string> = {}
+    for (const locale of SUPPORTED_LOCALES) translations[locale] = ''
+    for (const row of rows) translations[row.locale] = row.description ?? ''
+    return { translations }
+  }
+
+  async patchDescriptionTranslations(attributeId: string, dto: PatchTranslationsDto) {
+    const existing = await this.prisma.variantAttribute.findUnique({ where: { id: attributeId } })
+    if (!existing) throw new NotFoundException('Атрибут не знайдено.')
+
+    for (const [locale, raw] of Object.entries(dto.translations)) {
+      if (!(SUPPORTED_LOCALES as readonly string[]).includes(locale)) continue
+      const description = raw.trim() || null
+
+      const row = await this.prisma.variantAttributeTranslation.findUnique({
+        where: { attributeId_locale: { attributeId, locale } },
+      })
+      if (!row) {
+        if (!description) continue
+        await this.prisma.variantAttributeTranslation.create({
+          data: { attributeId, locale, name: existing.slug, description },
+        })
+        continue
+      }
+
+      await this.prisma.variantAttributeTranslation.update({
+        where: { id: row.id },
+        data: { description },
+      })
+    }
+
+    return { ok: true }
+  }
+
+  async getValueLabelTranslations(attributeId: string, valueId: string) {
+    const value = await this.prisma.variantAttributeValue.findFirst({
+      where: { id: valueId, attributeId },
+    })
+    if (!value) throw new NotFoundException('Значення не знайдено.')
+
+    const rows = await this.prisma.variantAttributeValueTranslation.findMany({ where: { valueId } })
+    const translations: Record<string, string> = {}
+    for (const locale of SUPPORTED_LOCALES) translations[locale] = ''
+    for (const row of rows) translations[row.locale] = row.label
+    return { translations }
+  }
+
+  async patchValueLabelTranslations(attributeId: string, valueId: string, dto: PatchTranslationsDto) {
+    const value = await this.prisma.variantAttributeValue.findFirst({
+      where: { id: valueId, attributeId },
+    })
+    if (!value) throw new NotFoundException('Значення не знайдено.')
+
+    for (const [locale, raw] of Object.entries(dto.translations)) {
+      if (!(SUPPORTED_LOCALES as readonly string[]).includes(locale)) continue
+      const label = raw.trim()
+      if (!label) continue
+
+      await this.prisma.variantAttributeValueTranslation.upsert({
+        where: { valueId_locale: { valueId, locale } },
+        create: { valueId, locale, label },
+        update: { label },
+      })
+    }
+
     return { ok: true }
   }
 }

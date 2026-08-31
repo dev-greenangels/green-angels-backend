@@ -8,6 +8,7 @@ import { CharacteristicsService } from './characteristics.service'
 import { BulkUpdateBulkMatrixDto } from './dto/bulk-update-bulk-matrix.dto'
 import { BulkUpdateProductMatrixDto } from './dto/bulk-update-product-matrix.dto'
 import { CreateCharacteristicDto } from './dto/create-characteristic.dto'
+import { PatchTranslationsDto } from './dto/patch-translations.dto'
 import { UpdateCharacteristicDto } from './dto/update-characteristic.dto'
 
 @Controller('characteristics')
@@ -75,6 +76,38 @@ export class CharacteristicsController {
   @Roles(Role.ADMIN, Role.MANAGER)
   update(@Param('id') id: string, @Body() dto: UpdateCharacteristicDto) {
     return this.service.update(id, dto)
+  }
+
+  @Get(':id/translations/name')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getNameTranslations(@Param('id') id: string) {
+    return this.service.getNameTranslations(id)
+  }
+
+  @Patch(':id/translations/name')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  patchNameTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
+    return this.service.patchNameTranslations(id, dto)
+  }
+
+  @Get(':id/options/:optionId/translations/label')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getOptionLabelTranslations(@Param('id') id: string, @Param('optionId') optionId: string) {
+    return this.service.getOptionLabelTranslations(id, optionId)
+  }
+
+  @Patch(':id/options/:optionId/translations/label')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  patchOptionLabelTranslations(
+    @Param('id') id: string,
+    @Param('optionId') optionId: string,
+    @Body() dto: PatchTranslationsDto,
+  ) {
+    return this.service.patchOptionLabelTranslations(id, optionId, dto)
   }
 
   @Delete(':id')

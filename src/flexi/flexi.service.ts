@@ -1404,7 +1404,7 @@ export class FlexiService {
       (externalErpId
         ? await this.prisma.order.findFirst({
             where: { externalErpId },
-            select: { id: true, status: true, deliveryMethod: true },
+            select: { id: true, status: true, deliveryMethod: true, deliveredAt: true },
           })
         : null) ?? null
 
@@ -1412,7 +1412,7 @@ export class FlexiService {
       const orderId = externalErpId.slice('ext:GA:'.length)
       order = await this.prisma.order.findUnique({
         where: { id: orderId },
-        select: { id: true, status: true, deliveryMethod: true },
+        select: { id: true, status: true, deliveryMethod: true, deliveredAt: true },
       })
     }
 

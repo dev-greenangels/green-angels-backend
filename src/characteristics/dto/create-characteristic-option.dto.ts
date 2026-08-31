@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Matches, MaxLength, Min, MinLength } from 'class-validator'
+import { IsInt, IsOptional, IsString, Matches, MaxLength, Min, MinLength, ValidateIf } from 'class-validator'
 
 export class CreateCharacteristicOptionDto {
   @IsString()
@@ -13,6 +13,12 @@ export class CreateCharacteristicOptionDto {
     message: 'slug опції: малі латинські літери, цифри, дефіси',
   })
   slug?: string
+
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'colorHex має бути у форматі #RRGGBB' })
+  colorHex?: string | null
 
   @IsOptional()
   @IsInt()

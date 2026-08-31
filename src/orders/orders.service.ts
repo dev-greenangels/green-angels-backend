@@ -114,6 +114,8 @@ export type BackstageOrderDetail = BackstageOrderListItem & {
   npDocumentRef: string | null
   trackingSyncedAt: string | null
   shippedAt: string | null
+  deliveredAt: string | null
+  onlineWithdrawalActionEnabled: boolean
   cancellationReasonId: string | null
   cancellationReasonName: string | null
   cancellationSource: string | null
@@ -668,6 +670,8 @@ export class OrdersService {
       npDocumentRef: order.npDocumentRef,
       trackingSyncedAt: order.trackingSyncedAt?.toISOString() ?? null,
       shippedAt: order.shippedAt?.toISOString() ?? null,
+      deliveredAt: order.deliveredAt?.toISOString() ?? null,
+      onlineWithdrawalActionEnabled: order.onlineWithdrawalActionEnabled,
       cancellationReasonId: order.cancellationReasonId,
       cancellationReasonName: order.cancellationReason?.nameUk ?? null,
       cancellationSource: order.cancellationSource,
@@ -946,6 +950,10 @@ export class OrdersService {
 
     if (dto.npDocumentRef !== undefined) {
       data.npDocumentRef = dto.npDocumentRef?.trim() || null
+    }
+
+    if (dto.onlineWithdrawalActionEnabled !== undefined) {
+      data.onlineWithdrawalActionEnabled = dto.onlineWithdrawalActionEnabled
     }
 
     const updated = await this.prisma.order.update({

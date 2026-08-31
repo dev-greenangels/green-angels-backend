@@ -66,6 +66,7 @@ model User {
   referralAttributionsAsReferee  ReferralAttribution[] @relation("ReferralReferee")
   pointsLedger                   PointsLedgerEntry[]
   legalConsentEvents             LegalConsentEvent[]
+  contractWithdrawals            ContractWithdrawal[]
 
   @@unique([legacySource, legacyId])
   @@index([legacyId])
@@ -213,6 +214,7 @@ enum CharacteristicValueType {
   MULTI_SELECT
   NUMBER
   TEXT
+  COLOR
 }
 
 enum VariantAttributeType {
@@ -230,6 +232,12 @@ enum PackagingKind {
   POT_ROOT_BALL
 }
 
+enum ColorDisplayMode {
+  TEXT
+  SWATCH
+  BOTH
+}
+
 /// Довідник характеристик (створюється в бек-офісі): висота, світло, полив тощо
 model Characteristic {
   id                String                  @id @default(uuid())
@@ -241,6 +249,8 @@ model Characteristic {
   isFilterable      Boolean                 @default(true)
   showOnProductPage Boolean                 @default(false)
   icon              String?
+  /// Для valueType COLOR: що показувати на сторінці товару
+  colorDisplayMode  ColorDisplayMode?
 
   translations  CharacteristicTranslation[]
   options       CharacteristicOption[]
@@ -264,6 +274,7 @@ model CharacteristicOption {
   slug             String
   legacyId         String?        @unique
   sortOrder        Int            @default(0)
+  colorHex         String?
   characteristicId String
   characteristic   Characteristic @relation(fields: [characteristicId], references: [id], onDelete: Cascade)
 
@@ -313,6 +324,8 @@ model VariantAttribute {
   participatesInLabel Boolean              @default(true)
   showOnProductPage   Boolean              @default(false)
   icon                String?
+  /// Для valueType COLOR: що показувати на сторінці товару
+  colorDisplayMode    ColorDisplayMode?
 
   translations VariantAttributeTranslation[]
   values       VariantAttributeValue[]
@@ -851,6 +864,10 @@ model Order {
   npDocumentRef          String?
   trackingSyncedAt       DateTime?
   shippedAt              DateTime?
+  /// Actual customer delivery date when known (not derived from order status or ABRA realization dates).
+  deliveredAt            DateTime?
+  /// Backstage per-order toggle: hides account withdrawal CTA only (public form unaffected).
+  onlineWithdrawalActionEnabled Boolean @default(true)
   cancellationReasonId   String?
   cancellationReason     CancellationReason?  @relation(fields: [cancellationReasonId], references: [id], onDelete: SetNull)
   /// ADMIN | USER | SYSTEM
@@ -895,6 +912,7 @@ model Order {
   referralAttribution    ReferralAttribution?
   pointsLedger           PointsLedgerEntry[]
   legalConsentEvents     LegalConsentEvent[]
+  contractWithdrawals    ContractWithdrawal[]
   viesCheck              OrderViesCheck?
   createdAt              DateTime             @default(now())
 
@@ -911,6 +929,73 @@ model Order {
   @@index([status, createdAt])
   @@index([status, paymentExpiresAt])
   @@index([userId, createdAt])
+  @@index([deliveredAt])
+}
+
+enum ContractWithdrawalScope {
+  ENTIRE_ORDER
+  PARTIAL
+}
+
+enum ContractWithdrawalSource {
+  PUBLIC_FORM
+  ACCOUNT
+}
+
+enum ContractWithdrawalStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  ACCEPTED
+  REJECTED
+  CLOSED
+}
+
+/// Consumer exercise of the right to withdraw from a distance contract (§20a / 108/2024).
+model ContractWithdrawal {
+  id                             String                   @id @default(uuid())
+  referenceNumber                String                   @unique
+  orderId                        String?
+  order                          Order?                   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  submittedOrderNumber           String
+  userId                         String?
+  user                           User?                    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  customerName                   String
+  customerEmail                  String
+  customerPhone                  String?
+  scope                          ContractWithdrawalScope
+  partialItemsText               String?                  @db.Text
+  locale                         String
+  source                         ContractWithdrawalSource
+  status                         ContractWithdrawalStatus @default(SUBMITTED)
+  submittedAt                    DateTime                 @default(now())
+  acknowledgementSentAt          DateTime?
+  acknowledgementLocale          String?
+  acknowledgementSubjectSnapshot String?
+  acknowledgementBodySnapshot    String?                  @db.Text
+  ipHash                         String?
+  lineItems                      ContractWithdrawalLineItem[]
+  createdAt                      DateTime                 @default(now())
+  updatedAt                      DateTime                 @updatedAt
+
+  @@index([orderId])
+  @@index([userId])
+  @@index([customerEmail])
+  @@index([submittedOrderNumber])
+  @@index([status, submittedAt(sort: Desc)])
+  @@index([submittedAt(sort: Desc)])
+}
+
+model ContractWithdrawalLineItem {
+  id               String             @id @default(uuid())
+  withdrawalId     String
+  withdrawal       ContractWithdrawal @relation(fields: [withdrawalId], references: [id], onDelete: Cascade)
+  orderItemId      String?
+  productVariantId String?
+  quantity         Int
+  titleSnapshot    String
+  skuSnapshot      String?
+
+  @@index([withdrawalId])
 }
 
 model OrderPromoCode {

@@ -1,4 +1,4 @@
-import { PackagingKind, VariantAttributeType } from '@prisma/client'
+import { PackagingKind, VariantAttributeType, ColorDisplayMode } from '@prisma/client'
 import { Type } from 'class-transformer'
 import {
   ArrayMinSize,
@@ -130,6 +130,10 @@ export class CreateVariantAttributeDto {
   @IsString()
   @MaxLength(80)
   icon?: string | null
+
+  @IsOptional()
+  @IsEnum(ColorDisplayMode)
+  colorDisplayMode?: ColorDisplayMode
 
   @IsArray()
   @ArrayMinSize(1)

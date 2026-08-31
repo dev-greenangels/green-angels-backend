@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { CharacteristicValueType, Prisma } from '@prisma/client'
+import { CharacteristicValueType, ColorDisplayMode, Prisma } from '@prisma/client'
 
 import { PrismaService } from '../prisma/prisma.service'
 import {
@@ -274,10 +274,12 @@ export class ProductCharacteristicsService {
         sortOrder: number
         showOnProductPage: boolean
         icon: string | null
+        colorDisplayMode?: ColorDisplayMode | null
         translations: Array<{ name: string }>
       }
       option: {
         slug: string
+        colorHex?: string | null
         translations: Array<{ label: string }>
       } | null
     }>,
@@ -295,12 +297,13 @@ export class ProductCharacteristicsService {
 
     for (const charRows of grouped.values()) {
       const characteristic = charRows[0].characteristic
-      const displayValue = this.formatDisplayValue(
+      const resolved = this.resolveDisplayRow(
         charRows,
         characteristic.valueType,
         characteristic.unit,
+        characteristic.colorDisplayMode,
       )
-      if (!displayValue) continue
+      if (!resolved) continue
 
       result.push({
         id: characteristic.id,
@@ -309,7 +312,9 @@ export class ProductCharacteristicsService {
         icon: characteristic.icon,
         unit: characteristic.unit,
         valueType: characteristic.valueType,
-        displayValue,
+        displayValue: resolved.displayValue,
+        colorHex: resolved.colorHex,
+        colorDisplayMode: resolved.colorDisplayMode,
         sortOrder: characteristic.sortOrder,
       })
     }
@@ -319,12 +324,53 @@ export class ProductCharacteristicsService {
     )
   }
 
+  private resolveDisplayRow(
+    rows: Array<{
+      numberValue: number | null
+      textValue: string | null
+      option: {
+        slug: string
+        colorHex?: string | null
+        translations: Array<{ label: string }>
+      } | null
+    }>,
+    valueType: CharacteristicValueType,
+    unit: string | null,
+    colorDisplayMode?: ColorDisplayMode | null,
+  ): {
+    displayValue: string
+    colorHex?: string | null
+    colorDisplayMode?: ColorDisplayMode | null
+  } | null {
+    if (valueType === CharacteristicValueType.COLOR) {
+      const row = rows.find((item) => item.option)
+      const label = row?.option?.translations[0]?.label ?? row?.option?.slug ?? ''
+      const colorHex = row?.option?.colorHex?.trim() || null
+      const mode = colorDisplayMode ?? ColorDisplayMode.BOTH
+      const showText = mode === ColorDisplayMode.TEXT || mode === ColorDisplayMode.BOTH
+      const showSwatch = mode === ColorDisplayMode.SWATCH || mode === ColorDisplayMode.BOTH
+      const displayValue = showText ? label.trim() : ''
+      if ((showText && displayValue) || (showSwatch && colorHex)) {
+        return {
+          displayValue,
+          colorHex: showSwatch ? colorHex : null,
+          colorDisplayMode: mode,
+        }
+      }
+      return null
+    }
+
+    const displayValue = this.formatDisplayValue(rows, valueType, unit)
+    return displayValue ? { displayValue } : null
+  }
+
   private formatDisplayValue(
     rows: Array<{
       numberValue: number | null
       textValue: string | null
       option: {
         slug: string
+        colorHex?: string | null
         translations: Array<{ label: string }>
       } | null
     }>,

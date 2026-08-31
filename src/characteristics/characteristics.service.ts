@@ -8,13 +8,16 @@ import { VariantLabelService } from '../products/variant-label.service'
 import { BulkUpdateBulkMatrixDto } from './dto/bulk-update-bulk-matrix.dto'
 import { BulkUpdateProductMatrixDto } from './dto/bulk-update-product-matrix.dto'
 import { CreateCharacteristicDto } from './dto/create-characteristic.dto'
+import { PatchTranslationsDto } from './dto/patch-translations.dto'
 import { UpdateCharacteristicDto } from './dto/update-characteristic.dto'
+import { SUPPORTED_LOCALES } from '../settings/localization.types'
 
 export type CharacteristicOptionNode = {
   id: string
   slug: string
   label: string
   labelHint?: { locale: string; text: string } | null
+  colorHex?: string | null
   sortOrder: number
 }
 
@@ -28,6 +31,7 @@ export type CharacteristicNode = {
   isFilterable: boolean
   showOnProductPage: boolean
   icon: string | null
+  colorDisplayMode: import('@prisma/client').ColorDisplayMode | null
   sortOrder: number
   options: CharacteristicOptionNode[]
 }
@@ -122,6 +126,7 @@ export class CharacteristicsService {
       id: string
       slug: string
       sortOrder: number
+      colorHex?: string | null
       translations: Array<{ locale?: string; label: string }>
     },
     locale: string,
@@ -138,6 +143,7 @@ export class CharacteristicsService {
             locale,
           )
         : null,
+      colorHex: row.colorHex ?? null,
       sortOrder: row.sortOrder,
     }
   }
@@ -151,12 +157,14 @@ export class CharacteristicsService {
       isFilterable: boolean
       showOnProductPage: boolean
       icon: string | null
+      colorDisplayMode?: import('@prisma/client').ColorDisplayMode | null
       sortOrder: number
       translations: Array<{ locale?: string; name: string }>
       options: Array<{
         id: string
         slug: string
         sortOrder: number
+        colorHex?: string | null
         translations: Array<{ locale?: string; label: string }>
       }>
     },
@@ -181,6 +189,7 @@ export class CharacteristicsService {
       isFilterable: row.isFilterable,
       showOnProductPage: row.showOnProductPage,
       icon: row.icon,
+      colorDisplayMode: row.colorDisplayMode ?? null,
       sortOrder: row.sortOrder,
       options: row.options
         .map((option) => this.toOptionNode(option, locale, emptyIfMissing))
@@ -230,7 +239,15 @@ export class CharacteristicsService {
   private isListType(valueType: CharacteristicValueType) {
     return (
       valueType === CharacteristicValueType.SELECT ||
-      valueType === CharacteristicValueType.MULTI_SELECT
+      valueType === CharacteristicValueType.MULTI_SELECT ||
+      valueType === CharacteristicValueType.COLOR
+    )
+  }
+
+  private isSingleSelectType(valueType: CharacteristicValueType) {
+    return (
+      valueType === CharacteristicValueType.SELECT ||
+      valueType === CharacteristicValueType.COLOR
     )
   }
 
@@ -327,7 +344,7 @@ export class CharacteristicsService {
           continue
         }
 
-        if (to === CharacteristicValueType.SELECT) {
+        if (this.isSingleSelectType(to)) {
           const optionId = slugToId.get(text)
           if (optionId) {
             await tx.productCharacteristic.update({
@@ -402,7 +419,7 @@ export class CharacteristicsService {
       return optionIds.length ? { optionIds } : null
     }
 
-    if (valueType === CharacteristicValueType.SELECT) {
+    if (this.isSingleSelectType(valueType)) {
       const optionId = rows.find((row) => row.optionId)?.optionId
       return optionId ? { optionId } : null
     }
@@ -495,7 +512,7 @@ export class CharacteristicsService {
       return
     }
 
-    if (characteristic.valueType === CharacteristicValueType.SELECT) {
+    if (this.isSingleSelectType(characteristic.valueType)) {
       if (update.optionId) {
         if (!validOptionIds.has(update.optionId)) {
           throw new ConflictException(`Некоректна опція ${update.optionId}.`)
@@ -777,9 +794,7 @@ export class CharacteristicsService {
     const slugTaken = await this.prisma.characteristic.findUnique({ where: { slug } })
     if (slugTaken) throw new ConflictException('Характеристика з таким slug вже існує.')
 
-    const needsOptions =
-      dto.valueType === CharacteristicValueType.SELECT ||
-      dto.valueType === CharacteristicValueType.MULTI_SELECT
+    const needsOptions = this.isListType(dto.valueType)
     if (needsOptions && (!dto.options || dto.options.length === 0)) {
       throw new ConflictException('Додайте хоча б одну опцію для цього типу.')
     }
@@ -792,6 +807,10 @@ export class CharacteristicsService {
         isFilterable: dto.isFilterable ?? true,
         showOnProductPage: dto.showOnProductPage ?? false,
         icon: dto.icon?.trim() || null,
+        colorDisplayMode:
+          dto.valueType === CharacteristicValueType.COLOR
+            ? dto.colorDisplayMode ?? 'BOTH'
+            : null,
         sortOrder: dto.sortOrder ?? 0,
         translations: { create: { locale, name: dto.name.trim() } },
         options: dto.options?.length
@@ -801,6 +820,7 @@ export class CharacteristicsService {
                 return {
                   slug: optionSlug,
                   sortOrder: option.sortOrder ?? index,
+                  colorHex: option.colorHex?.trim() || null,
                   translations: { create: { locale, label: option.label.trim() } },
                 }
               }),
@@ -856,6 +876,12 @@ export class CharacteristicsService {
             ? { showOnProductPage: dto.showOnProductPage }
             : {}),
           ...(dto.icon !== undefined ? { icon: dto.icon?.trim() || null } : {}),
+          ...(dto.colorDisplayMode !== undefined
+            ? { colorDisplayMode: dto.colorDisplayMode }
+            : {}),
+          ...(dto.valueType !== undefined && dto.valueType !== CharacteristicValueType.COLOR
+            ? { colorDisplayMode: null }
+            : {}),
           ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
         },
       })
@@ -883,12 +909,11 @@ export class CharacteristicsService {
         for (let index = 0; index < dto.options.length; index++) {
           const entry = dto.options[index]
           const label = entry.label.trim()
-          const optionSlug = (entry.slug?.trim() || this.slugifyLabel(label)).toLowerCase()
-          if (!optionSlug) throw new ConflictException(`Некоректна назва опції: «${label}».`)
 
           if (entry.id) {
             const row = existingById.get(entry.id)
             if (!row) throw new NotFoundException(`Опцію ${entry.id} не знайдено.`)
+            const optionSlug = (entry.slug?.trim() || row.slug).toLowerCase()
             if (usedSlugs.has(optionSlug) && row.slug !== optionSlug) {
               throw new ConflictException(`Дубль slug «${optionSlug}».`)
             }
@@ -897,23 +922,32 @@ export class CharacteristicsService {
 
             await tx.characteristicOption.update({
               where: { id: entry.id },
-              data: { slug: optionSlug, sortOrder: entry.sortOrder ?? index },
+              data: {
+                slug: optionSlug,
+                sortOrder: entry.sortOrder ?? index,
+                ...(entry.colorHex !== undefined ? { colorHex: entry.colorHex?.trim() || null } : {}),
+              },
             })
 
-            const optionTranslation = (
-              row as unknown as { translations: Array<{ id: string; label?: string }> }
-            ).translations[0]
-            if (optionTranslation) {
-              await tx.characteristicOptionTranslation.update({
-                where: { id: optionTranslation.id },
-                data: { label },
-              })
-            } else {
-              await tx.characteristicOptionTranslation.create({
-                data: { optionId: entry.id, locale, label },
-              })
+            if (label) {
+              const optionTranslation = (
+                row as unknown as { translations: Array<{ id: string; label?: string }> }
+              ).translations[0]
+              if (optionTranslation) {
+                await tx.characteristicOptionTranslation.update({
+                  where: { id: optionTranslation.id },
+                  data: { label },
+                })
+              } else {
+                await tx.characteristicOptionTranslation.create({
+                  data: { optionId: entry.id, locale, label },
+                })
+              }
             }
           } else {
+            if (!label) continue
+            const optionSlug = (entry.slug?.trim() || this.slugifyLabel(label)).toLowerCase()
+            if (!optionSlug) throw new ConflictException(`Некоректна назва опції: «${label}».`)
             if (usedSlugs.has(optionSlug)) {
               throw new ConflictException(`Дубль опції «${label}».`)
             }
@@ -923,6 +957,7 @@ export class CharacteristicsService {
                 characteristicId,
                 slug: optionSlug,
                 sortOrder: entry.sortOrder ?? index,
+                colorHex: entry.colorHex?.trim() || null,
                 translations: { create: { locale, label } },
               },
             })
@@ -946,6 +981,78 @@ export class CharacteristicsService {
       locale,
       refreshed!.slug,
     )
+  }
+
+  async getNameTranslations(characteristicId: string) {
+    const existing = await this.prisma.characteristic.findUnique({ where: { id: characteristicId } })
+    if (!existing) throw new NotFoundException('Характеристику не знайдено.')
+
+    const rows = await this.prisma.characteristicTranslation.findMany({
+      where: { characteristicId },
+    })
+    const translations: Record<string, string> = {}
+    for (const locale of SUPPORTED_LOCALES) translations[locale] = ''
+    for (const row of rows) translations[row.locale] = row.name
+    return { translations }
+  }
+
+  async patchNameTranslations(characteristicId: string, dto: PatchTranslationsDto) {
+    const existing = await this.prisma.characteristic.findUnique({ where: { id: characteristicId } })
+    if (!existing) throw new NotFoundException('Характеристику не знайдено.')
+
+    for (const [locale, raw] of Object.entries(dto.translations)) {
+      if (!(SUPPORTED_LOCALES as readonly string[]).includes(locale)) continue
+      const name = raw.trim()
+      if (!name) continue
+
+      await this.prisma.characteristicTranslation.upsert({
+        where: { characteristicId_locale: { characteristicId, locale } },
+        create: { characteristicId, locale, name },
+        update: { name },
+      })
+    }
+
+    return { ok: true }
+  }
+
+  async getOptionLabelTranslations(characteristicId: string, optionId: string) {
+    const option = await this.prisma.characteristicOption.findFirst({
+      where: { id: optionId, characteristicId },
+    })
+    if (!option) throw new NotFoundException('Опцію не знайдено.')
+
+    const rows = await this.prisma.characteristicOptionTranslation.findMany({
+      where: { optionId },
+    })
+    const translations: Record<string, string> = {}
+    for (const locale of SUPPORTED_LOCALES) translations[locale] = ''
+    for (const row of rows) translations[row.locale] = row.label
+    return { translations }
+  }
+
+  async patchOptionLabelTranslations(
+    characteristicId: string,
+    optionId: string,
+    dto: PatchTranslationsDto,
+  ) {
+    const option = await this.prisma.characteristicOption.findFirst({
+      where: { id: optionId, characteristicId },
+    })
+    if (!option) throw new NotFoundException('Опцію не знайдено.')
+
+    for (const [locale, raw] of Object.entries(dto.translations)) {
+      if (!(SUPPORTED_LOCALES as readonly string[]).includes(locale)) continue
+      const label = raw.trim()
+      if (!label) continue
+
+      await this.prisma.characteristicOptionTranslation.upsert({
+        where: { optionId_locale: { optionId, locale } },
+        create: { optionId, locale, label },
+        update: { label },
+      })
+    }
+
+    return { ok: true }
   }
 
   async remove(characteristicId: string) {

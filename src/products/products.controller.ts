@@ -6,6 +6,7 @@ import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 
 import { BulkProductsDto } from './dto/bulk-products.dto'
+import { PatchTranslationsDto } from '../characteristics/dto/patch-translations.dto'
 import { BulkUpdateProductFieldsDto } from './dto/bulk-update-product-fields.dto'
 import { CreateProductDto } from './dto/create-product.dto'
 import { PatchProductImagesDto } from './dto/patch-product-images.dto'
@@ -143,5 +144,61 @@ export class ProductsController {
   @Roles(Role.ADMIN, Role.MANAGER)
   update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
     return this.products.update(id, dto)
+  }
+
+  @Get(':id/translations/name')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getNameTranslations(@Param('id') id: string) {
+    return this.products.getNameTranslations(id)
+  }
+
+  @Patch(':id/translations/name')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  patchNameTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
+    return this.products.patchNameTranslations(id, dto)
+  }
+
+  @Get(':id/translations/description')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getDescriptionTranslations(@Param('id') id: string) {
+    return this.products.getDescriptionTranslations(id)
+  }
+
+  @Patch(':id/translations/description')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  patchDescriptionTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
+    return this.products.patchDescriptionTranslations(id, dto)
+  }
+
+  @Get(':id/translations/meta-title')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getMetaTitleTranslations(@Param('id') id: string) {
+    return this.products.getMetaTitleTranslations(id)
+  }
+
+  @Patch(':id/translations/meta-title')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  patchMetaTitleTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
+    return this.products.patchMetaTitleTranslations(id, dto)
+  }
+
+  @Get(':id/translations/meta-desc')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getMetaDescTranslations(@Param('id') id: string) {
+    return this.products.getMetaDescTranslations(id)
+  }
+
+  @Patch(':id/translations/meta-desc')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  patchMetaDescTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
+    return this.products.patchMetaDescTranslations(id, dto)
   }
 }

@@ -1,4 +1,4 @@
-import { PackagingKind, VariantAttributeType } from '@prisma/client'
+import { PackagingKind, VariantAttributeType, ColorDisplayMode } from '@prisma/client'
 import { Type } from 'class-transformer'
 import {
   IsArray,
@@ -124,6 +124,10 @@ export class UpdateVariantAttributeDto {
   @IsString()
   @MaxLength(80)
   icon?: string | null
+
+  @IsOptional()
+  @IsEnum(ColorDisplayMode)
+  colorDisplayMode?: ColorDisplayMode | null
 
   @IsOptional()
   @IsEnum(VariantAttributeType)

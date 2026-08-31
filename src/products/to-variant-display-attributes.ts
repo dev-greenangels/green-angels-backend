@@ -1,4 +1,4 @@
-import { VariantAttributeType } from '@prisma/client'
+import { ColorDisplayMode, VariantAttributeType } from '@prisma/client'
 
 import { pickLocalizedName } from '../i18n/pick-localized-name'
 import type { ProductDisplayCharacteristic } from './dto/product-characteristics.dto'
@@ -6,6 +6,7 @@ import type { ProductDisplayCharacteristic } from './dto/product-characteristics
 export type VariantDisplayAttributeLink = {
   value: {
     slug?: string
+    colorHex?: string | null
     translations: Array<{ locale?: string; label: string }>
     attribute?: {
       id?: string
@@ -15,6 +16,7 @@ export type VariantDisplayAttributeLink = {
       icon?: string | null
       unit?: string | null
       valueType?: VariantAttributeType
+      colorDisplayMode?: ColorDisplayMode | null
       translations?: Array<{ locale?: string; name: string }>
     }
   }
@@ -40,6 +42,24 @@ function pickDisplayLabel(
   return any || slugFallback
 }
 
+function resolveColorDisplay(
+  label: string,
+  colorHex: string | null,
+  mode: ColorDisplayMode,
+): { displayValue: string; colorHex?: string | null; colorDisplayMode: ColorDisplayMode } | null {
+  const showText = mode === ColorDisplayMode.TEXT || mode === ColorDisplayMode.BOTH
+  const showSwatch = mode === ColorDisplayMode.SWATCH || mode === ColorDisplayMode.BOTH
+  const displayValue = showText ? label.trim() : ''
+  if ((showText && displayValue) || (showSwatch && colorHex)) {
+    return {
+      displayValue,
+      colorHex: showSwatch ? colorHex : null,
+      colorDisplayMode: mode,
+    }
+  }
+  return null
+}
+
 /** PDP rows for attributes with showOnProductPage. Storefront falls back (locale → en → any). */
 export function toVariantDisplayAttributes(
   links: VariantDisplayAttributeLink[],
@@ -55,6 +75,27 @@ export function toVariantDisplayAttributes(
       locale,
       link.value.slug?.trim() || '',
     )
+    const valueType = attr.valueType ?? VariantAttributeType.UNIVERSAL
+
+    if (valueType === VariantAttributeType.COLOR) {
+      const mode = attr.colorDisplayMode ?? ColorDisplayMode.BOTH
+      const resolved = resolveColorDisplay(displayValue, link.value.colorHex?.trim() || null, mode)
+      if (!resolved) continue
+      items.push({
+        id: attr.id ?? slug,
+        slug,
+        name: pickLocalizedName(attr.translations ?? [], locale, slug),
+        icon: attr.icon ?? null,
+        unit: attr.unit ?? null,
+        valueType,
+        displayValue: resolved.displayValue,
+        colorHex: resolved.colorHex,
+        colorDisplayMode: resolved.colorDisplayMode,
+        sortOrder: attr.sortOrder,
+      })
+      continue
+    }
+
     if (!displayValue) continue
     items.push({
       id: attr.id ?? slug,
@@ -62,7 +103,7 @@ export function toVariantDisplayAttributes(
       name: pickLocalizedName(attr.translations ?? [], locale, slug),
       icon: attr.icon ?? null,
       unit: attr.unit ?? null,
-      valueType: attr.valueType ?? 'UNIVERSAL',
+      valueType,
       displayValue,
       sortOrder: attr.sortOrder,
     })

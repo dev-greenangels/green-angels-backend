@@ -7,6 +7,7 @@ import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { CategorySearchService } from '../search/category-search.service'
 import { CategoriesService } from './categories.service'
 import { CreateCategoryDto } from './dto/create-category.dto'
+import { PatchTranslationsDto } from '../characteristics/dto/patch-translations.dto'
 import { ReorderCategoriesDto } from './dto/reorder-categories.dto'
 import { UpdateCategoryDto } from './dto/update-category.dto'
 
@@ -58,5 +59,75 @@ export class CategoriesController {
   @Roles(Role.ADMIN, Role.MANAGER)
   remove(@Param('id') id: string) {
     return this.categories.remove(id)
+  }
+
+  @Get(':id/translations/name')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getNameTranslations(@Param('id') id: string) {
+    return this.categories.getNameTranslations(id)
+  }
+
+  @Patch(':id/translations/name')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  patchNameTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
+    return this.categories.patchNameTranslations(id, dto)
+  }
+
+  @Get(':id/translations/description')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getDescriptionTranslations(@Param('id') id: string) {
+    return this.categories.getDescriptionTranslations(id)
+  }
+
+  @Patch(':id/translations/description')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  patchDescriptionTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
+    return this.categories.patchDescriptionTranslations(id, dto)
+  }
+
+  @Get(':id/translations/footer-description')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getFooterDescriptionTranslations(@Param('id') id: string) {
+    return this.categories.getFooterDescriptionTranslations(id)
+  }
+
+  @Patch(':id/translations/footer-description')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  patchFooterDescriptionTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
+    return this.categories.patchFooterDescriptionTranslations(id, dto)
+  }
+
+  @Get(':id/translations/meta-title')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getMetaTitleTranslations(@Param('id') id: string) {
+    return this.categories.getMetaTitleTranslations(id)
+  }
+
+  @Patch(':id/translations/meta-title')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  patchMetaTitleTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
+    return this.categories.patchMetaTitleTranslations(id, dto)
+  }
+
+  @Get(':id/translations/meta-desc')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getMetaDescTranslations(@Param('id') id: string) {
+    return this.categories.getMetaDescTranslations(id)
+  }
+
+  @Patch(':id/translations/meta-desc')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  patchMetaDescTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
+    return this.categories.patchMetaDescTranslations(id, dto)
   }
 }

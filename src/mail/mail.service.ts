@@ -331,6 +331,34 @@ export class MailService {
     })
   }
 
+  async sendContractWithdrawalAcknowledgement(input: {
+    to: string
+    subject: string
+    text: string
+    html: string
+    countrySiteCode?: CountrySiteCode | null
+  }): Promise<void> {
+    if (!this.isConfigured()) {
+      this.logger.warn('Resend не налаштовано — potvrdenie odstúpenia neodoslané')
+      return
+    }
+
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) return
+
+    await this.resend.send({
+      from: identity.from,
+      to: input.to,
+      replyTo: identity.replyTo,
+      subject: input.subject,
+      text: input.text,
+      html: input.html,
+    })
+  }
+
   buildLocalizedProductUrl(
     locale: string,
     categorySlug: string,

@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common'
 
 import { pickLocalizedName, pickTranslationHint } from '../i18n/pick-localized-name'
+import { PatchTranslationsDto } from '../characteristics/dto/patch-translations.dto'
+import { SUPPORTED_LOCALES } from '../settings/localization.types'
 import { PrismaService } from '../prisma/prisma.service'
 import { isValidCategoryImagePath } from '../media/upload-paths'
 import { CATEGORY_DEFAULT_IMAGE } from './category.constants'
@@ -541,5 +543,117 @@ export class CategoriesService {
     }
 
     return false
+  }
+
+  private async assertCategoryExists(categoryId: string) {
+    const existing = await this.prisma.category.findUnique({ where: { id: categoryId } })
+    if (!existing) throw new NotFoundException('Категорію не знайдено.')
+    return existing
+  }
+
+  private async getCategoryFieldTranslations(
+    categoryId: string,
+    field: 'name' | 'description' | 'footerDescription' | 'metaTitle' | 'metaDesc',
+  ) {
+    await this.assertCategoryExists(categoryId)
+    const rows = await this.prisma.categoryTranslation.findMany({ where: { categoryId } })
+    const translations: Record<string, string> = {}
+    for (const locale of SUPPORTED_LOCALES) translations[locale] = ''
+    for (const row of rows) {
+      translations[row.locale] = row[field] ?? ''
+    }
+    return { translations }
+  }
+
+  private async patchCategoryFieldTranslations(
+    categoryId: string,
+    field: 'name' | 'description' | 'footerDescription' | 'metaTitle' | 'metaDesc',
+    dto: PatchTranslationsDto,
+  ) {
+    const category = await this.prisma.category.findUnique({
+      where: { id: categoryId },
+      select: {
+        slug: true,
+        translations: { select: { locale: true, name: true } },
+      },
+    })
+    if (!category) throw new NotFoundException('Категорію не знайдено.')
+
+    for (const [locale, raw] of Object.entries(dto.translations)) {
+      if (!(SUPPORTED_LOCALES as readonly string[]).includes(locale)) continue
+      const value = raw.trim()
+      if (!value) continue
+
+      if (field === 'name') {
+        await this.prisma.categoryTranslation.upsert({
+          where: { categoryId_locale: { categoryId, locale } },
+          create: { categoryId, locale, name: value },
+          update: { name: value },
+        })
+        continue
+      }
+
+      const data =
+        field === 'description'
+          ? { description: value }
+          : field === 'footerDescription'
+            ? { footerDescription: value }
+            : field === 'metaTitle'
+              ? { metaTitle: value }
+              : { metaDesc: value }
+
+      const localeName =
+        category.translations.find((row) => row.locale === locale)?.name?.trim() ||
+        category.translations.find((row) => row.name.trim())?.name?.trim() ||
+        category.slug
+
+      await this.prisma.categoryTranslation.upsert({
+        where: { categoryId_locale: { categoryId, locale } },
+        create: { categoryId, locale, name: localeName, ...data },
+        update: data,
+      })
+    }
+
+    return { ok: true }
+  }
+
+  getNameTranslations(categoryId: string) {
+    return this.getCategoryFieldTranslations(categoryId, 'name')
+  }
+
+  patchNameTranslations(categoryId: string, dto: PatchTranslationsDto) {
+    return this.patchCategoryFieldTranslations(categoryId, 'name', dto)
+  }
+
+  getDescriptionTranslations(categoryId: string) {
+    return this.getCategoryFieldTranslations(categoryId, 'description')
+  }
+
+  patchDescriptionTranslations(categoryId: string, dto: PatchTranslationsDto) {
+    return this.patchCategoryFieldTranslations(categoryId, 'description', dto)
+  }
+
+  getFooterDescriptionTranslations(categoryId: string) {
+    return this.getCategoryFieldTranslations(categoryId, 'footerDescription')
+  }
+
+  patchFooterDescriptionTranslations(categoryId: string, dto: PatchTranslationsDto) {
+    return this.patchCategoryFieldTranslations(categoryId, 'footerDescription', dto)
+  }
+
+  getMetaTitleTranslations(categoryId: string) {
+    return this.getCategoryFieldTranslations(categoryId, 'metaTitle')
+  }
+
+  patchMetaTitleTranslations(categoryId: string, dto: PatchTranslationsDto) {
+    return this.patchCategoryFieldTranslations(categoryId, 'metaTitle', dto)
+  }
+
+  getMetaDescTranslations(categoryId: string) {
+    return this.getCategoryFieldTranslations(categoryId, 'metaDesc')
+  }
+
+  patchMetaDescTranslations(categoryId: string, dto: PatchTranslationsDto) {
+    return this.patchCategoryFieldTranslations(categoryId, 'metaDesc', dto)
   }
 }

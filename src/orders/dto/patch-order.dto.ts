@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer'
 import {
+  IsBoolean,
   IsIn,
   IsOptional,
   IsString,
@@ -37,6 +38,10 @@ export class PatchOrderDto {
   @IsString()
   @MaxLength(64)
   npDocumentRef?: string | null
+
+  @IsOptional()
+  @IsBoolean()
+  onlineWithdrawalActionEnabled?: boolean
 }
 
 /** Kept for backward-compatible clients that only send { status } */

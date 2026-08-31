@@ -1,4 +1,4 @@
-import { CharacteristicValueType } from '@prisma/client'
+import { CharacteristicValueType, ColorDisplayMode } from '@prisma/client'
 import { Type } from 'class-transformer'
 import {
   IsArray,
@@ -50,6 +50,10 @@ export class UpdateCharacteristicDto {
   @IsString()
   @MaxLength(40)
   icon?: string | null
+
+  @IsOptional()
+  @IsEnum(ColorDisplayMode)
+  colorDisplayMode?: ColorDisplayMode | null
 
   @IsOptional()
   @IsInt()

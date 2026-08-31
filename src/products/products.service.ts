@@ -22,6 +22,8 @@ import { CategoriesService } from '../categories/categories.service'
 import { normalizeCatalogNameLetter, sortCatalogNameLetters } from '../catalog/locale-alphabet'
 import { normalizeSearchQuery } from '../search/normalize-search-query'
 import { ProductSearchService } from '../search/product-search.service'
+import { PatchTranslationsDto } from '../characteristics/dto/patch-translations.dto'
+import { SUPPORTED_LOCALES } from '../settings/localization.types'
 import { CreateProductDto } from './dto/create-product.dto'
 import { BulkProductAction, BulkProductsDto } from './dto/bulk-products.dto'
 import { BulkUpdateProductFieldsDto } from './dto/bulk-update-product-fields.dto'
@@ -588,6 +590,7 @@ export class ProductsService {
                       showOnProductPage: true,
                       icon: true,
                       unit: true,
+                      colorDisplayMode: true,
                       translations: { select: { locale: true, name: true } },
                     },
                   },
@@ -2623,5 +2626,107 @@ export class ProductsService {
     })
 
     return this.findOne(id, locale, true)
+  }
+
+  private async assertProductExists(productId: string) {
+    const existing = await this.prisma.product.findUnique({ where: { id: productId } })
+    if (!existing) throw new NotFoundException('Товар не знайдено.')
+    return existing
+  }
+
+  private async getProductFieldTranslations(
+    productId: string,
+    field: 'name' | 'description' | 'metaTitle' | 'metaDesc',
+  ) {
+    await this.assertProductExists(productId)
+    const rows = await this.prisma.productTranslation.findMany({ where: { productId } })
+    const translations: Record<string, string> = {}
+    for (const locale of SUPPORTED_LOCALES) translations[locale] = ''
+    for (const row of rows) {
+      translations[row.locale] = row[field] ?? ''
+    }
+    return { translations }
+  }
+
+  private async patchProductFieldTranslations(
+    productId: string,
+    field: 'name' | 'description' | 'metaTitle' | 'metaDesc',
+    dto: PatchTranslationsDto,
+  ) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: {
+        slug: true,
+        translations: { select: { locale: true, name: true } },
+      },
+    })
+    if (!product) throw new NotFoundException('Товар не знайдено.')
+
+    for (const [locale, raw] of Object.entries(dto.translations)) {
+      if (!(SUPPORTED_LOCALES as readonly string[]).includes(locale)) continue
+      const value = raw.trim()
+      if (!value) continue
+
+      if (field === 'name') {
+        await this.prisma.productTranslation.upsert({
+          where: { productId_locale: { productId, locale } },
+          create: { productId, locale, name: value },
+          update: { name: value },
+        })
+        continue
+      }
+
+      const data =
+        field === 'description'
+          ? { description: value }
+          : field === 'metaTitle'
+            ? { metaTitle: value }
+            : { metaDesc: value }
+
+      const localeName =
+        product.translations.find((row) => row.locale === locale)?.name?.trim() ||
+        product.translations.find((row) => row.name.trim())?.name?.trim() ||
+        product.slug
+
+      await this.prisma.productTranslation.upsert({
+        where: { productId_locale: { productId, locale } },
+        create: { productId, locale, name: localeName, ...data },
+        update: data,
+      })
+    }
+
+    return { ok: true }
+  }
+
+  getNameTranslations(productId: string) {
+    return this.getProductFieldTranslations(productId, 'name')
+  }
+
+  patchNameTranslations(productId: string, dto: PatchTranslationsDto) {
+    return this.patchProductFieldTranslations(productId, 'name', dto)
+  }
+
+  getDescriptionTranslations(productId: string) {
+    return this.getProductFieldTranslations(productId, 'description')
+  }
+
+  patchDescriptionTranslations(productId: string, dto: PatchTranslationsDto) {
+    return this.patchProductFieldTranslations(productId, 'description', dto)
+  }
+
+  getMetaTitleTranslations(productId: string) {
+    return this.getProductFieldTranslations(productId, 'metaTitle')
+  }
+
+  patchMetaTitleTranslations(productId: string, dto: PatchTranslationsDto) {
+    return this.patchProductFieldTranslations(productId, 'metaTitle', dto)
+  }
+
+  getMetaDescTranslations(productId: string) {
+    return this.getProductFieldTranslations(productId, 'metaDesc')
+  }
+
+  patchMetaDescTranslations(productId: string, dto: PatchTranslationsDto) {
+    return this.patchProductFieldTranslations(productId, 'metaDesc', dto)
   }
 }

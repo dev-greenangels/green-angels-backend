@@ -24,6 +24,7 @@ export const SETTINGS_KEYS = {
   MEDIA_WATERMARK: 'media.watermark',
   WHOLESALE_PAGE: 'page.wholesale',
   ABOUT_PAGE: 'page.about',
+  WITHDRAWAL: 'commerce.withdrawal',
 } as const
 
 export type {

@@ -21,6 +21,7 @@ import { UpdatePrestaImportSettingsDto } from './dto/update-presta-import-settin
 import { UpdateMediaWatermarkSettingsDto } from './dto/update-media-watermark-settings.dto'
 import { UpdateWholesalePageSettingsDto } from './dto/update-wholesale-page-settings.dto'
 import { UpdateAboutPageSettingsDto } from './dto/update-about-page-settings.dto'
+import { UpdateWithdrawalSettingsDto } from './dto/update-withdrawal-settings.dto'
 import { SettingsService } from './settings.service'
 import type { VariantLabelSettings } from './settings.constants'
 import type { NavigationSettings } from './navigation.types'
@@ -105,6 +106,13 @@ export class SettingsController {
   @Roles(Role.ADMIN, Role.MANAGER)
   updateAbout(@Body() dto: UpdateAboutPageSettingsDto) {
     return this.settings.updateAboutPage(dto)
+  }
+
+  @Patch('withdrawal')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  updateWithdrawal(@Body() dto: UpdateWithdrawalSettingsDto) {
+    return this.settings.updateWithdrawalSettings(dto as Partial<import('./withdrawal.types').WithdrawalSettings>)
   }
 
   @Patch('cart-checkout')

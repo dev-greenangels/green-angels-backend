@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common'
 import { AuthProvider, Prisma, ReviewStatus } from '@prisma/client'
 
+import { isAccountWithdrawalActionVisible } from '../contract-withdrawals/contract-withdrawal-eligibility'
 import { normalizePhoneE164 } from '../auth/auth.utils'
 import { validatePhoneForPolicy } from '../auth/market-phone.util'
 import { OtpService } from '../auth/otp.service'
@@ -97,6 +98,8 @@ export type AccountOrderDetail = AccountOrderListItem & {
   paymentStatus: string | null
   comment: string | null
   shippedAt: string | null
+  deliveredAt: string | null
+  withdrawalActionVisible: boolean
   cancelledAt: string | null
   items: AccountOrderDetailItem[]
 }
@@ -615,6 +618,17 @@ export class AccountService {
       where: { code: status },
       select: { nameUk: true },
     })
+    const withdrawalSettings = await this.settings.getWithdrawalSettings()
+    const withdrawalActionVisible = isAccountWithdrawalActionVisible(
+      {
+        onlineWithdrawalActionEnabled: order.onlineWithdrawalActionEnabled,
+        deliveredAt: order.deliveredAt,
+        status: order.status,
+        cancelledAt: order.cancelledAt,
+        buyerType: order.buyerType,
+      },
+      withdrawalSettings,
+    )
 
     const items: AccountOrderDetailItem[] = order.items.map((item) => {
       const lineTotal = Math.round(Number(item.priceAtPurchase) * item.quantity * 100) / 100
@@ -664,6 +678,8 @@ export class AccountService {
       paymentStatus: order.paymentStatus,
       comment: order.comment,
       shippedAt: order.shippedAt?.toISOString() ?? null,
+      deliveredAt: order.deliveredAt?.toISOString() ?? null,
+      withdrawalActionVisible,
       cancelledAt: order.cancelledAt?.toISOString() ?? null,
       items,
     }

@@ -59,6 +59,11 @@ import {
   type AboutPageSettings,
 } from './about-page.types'
 import type { AppLocale } from './localization.types'
+import { normalizeWithdrawalSettings } from './withdrawal.normalize'
+import {
+  DEFAULT_WITHDRAWAL_SETTINGS,
+  type WithdrawalSettings,
+} from './withdrawal.types'
 
 export type PublicSiteSettings = {
   store: StoreContactSettings
@@ -72,12 +77,17 @@ export type PublicSiteSettings = {
   wholesale: PublicWholesalePageSettings
   about: AboutPageSettings
   dispatchCalendar: { enabled: boolean }
+  withdrawal: Pick<
+    WithdrawalSettings,
+    'returnAddressMode' | 'customReturnAddress' | 'accountWithdrawalWindowDays'
+  >
 }
 
 export type BackstageSiteSettings = Omit<PublicSiteSettings, 'wholesale'> & {
   wholesale: WholesalePageSettings
   prestaImport: PrestaImportSettings
   mediaWatermark: MediaWatermarkSettings
+  withdrawalFull: WithdrawalSettings
 }
 @Injectable()
 export class SettingsService {
@@ -240,6 +250,7 @@ export class SettingsService {
       {} as WholesalePageSettings,
     )
     const aboutRaw = await this.readSetting(SETTINGS_KEYS.ABOUT_PAGE, {} as AboutPageSettings)
+    const withdrawal = await this.getWithdrawalSettings()
     return {
       store,
       home,
@@ -254,17 +265,35 @@ export class SettingsService {
       ),
       about: normalizeAboutPageSettings(aboutRaw, market.region),
       dispatchCalendar: { enabled: dispatch.enabled },
+      withdrawal: {
+        returnAddressMode: withdrawal.returnAddressMode,
+        customReturnAddress: withdrawal.customReturnAddress,
+        accountWithdrawalWindowDays: withdrawal.accountWithdrawalWindowDays,
+      },
     }
   }
 
+  async getWithdrawalSettings(): Promise<WithdrawalSettings> {
+    const raw = await this.readSetting(SETTINGS_KEYS.WITHDRAWAL, DEFAULT_WITHDRAWAL_SETTINGS)
+    return normalizeWithdrawalSettings(raw)
+  }
+
+  async updateWithdrawalSettings(patch: Partial<WithdrawalSettings>): Promise<WithdrawalSettings> {
+    const current = await this.getWithdrawalSettings()
+    const next = normalizeWithdrawalSettings({ ...current, ...patch })
+    return this.writeSetting(SETTINGS_KEYS.WITHDRAWAL, next)
+  }
+
   async getBackstageSettings(): Promise<BackstageSiteSettings> {
-    const [publicSettings, prestaImport, mediaWatermark, wholesale] = await Promise.all([
-      this.getPublicSettings(),
-      this.getPrestaImportSettings(),
-      this.getMediaWatermarkSettings(),
-      this.getWholesalePageSettings(),
-    ])
-    return { ...publicSettings, wholesale, prestaImport, mediaWatermark }
+    const [publicSettings, prestaImport, mediaWatermark, wholesale, withdrawalFull] =
+      await Promise.all([
+        this.getPublicSettings(),
+        this.getPrestaImportSettings(),
+        this.getMediaWatermarkSettings(),
+        this.getWholesalePageSettings(),
+        this.getWithdrawalSettings(),
+      ])
+    return { ...publicSettings, wholesale, prestaImport, mediaWatermark, withdrawalFull }
   }
 
   async getMediaWatermarkSettings(): Promise<MediaWatermarkSettings> {
