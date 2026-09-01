@@ -42,30 +42,21 @@ function pickDisplayLabel(
   return any || slugFallback
 }
 
-function resolveColorDisplay(
-  label: string,
-  colorHex: string | null,
-  mode: ColorDisplayMode,
-): { displayValue: string; colorHex?: string | null; colorDisplayMode: ColorDisplayMode } | null {
-  const showText = mode === ColorDisplayMode.TEXT || mode === ColorDisplayMode.BOTH
-  const showSwatch = mode === ColorDisplayMode.SWATCH || mode === ColorDisplayMode.BOTH
-  const displayValue = showText ? label.trim() : ''
-  if ((showText && displayValue) || (showSwatch && colorHex)) {
-    return {
-      displayValue,
-      colorHex: showSwatch ? colorHex : null,
-      colorDisplayMode: mode,
-    }
-  }
-  return null
-}
-
 /** PDP rows for attributes with showOnProductPage. Storefront falls back (locale → en → any). */
 export function toVariantDisplayAttributes(
   links: VariantDisplayAttributeLink[],
   locale = 'uk',
 ): ProductDisplayCharacteristic[] {
+  const colorGroups = new Map<
+    string,
+    {
+      attr: NonNullable<VariantDisplayAttributeLink['value']['attribute']>
+      labels: string[]
+      hexes: Array<string | null>
+    }
+  >()
   const items: ProductDisplayCharacteristic[] = []
+
   for (const link of links) {
     const attr = link.value.attribute
     if (!attr?.showOnProductPage) continue
@@ -78,21 +69,11 @@ export function toVariantDisplayAttributes(
     const valueType = attr.valueType ?? VariantAttributeType.UNIVERSAL
 
     if (valueType === VariantAttributeType.COLOR) {
-      const mode = attr.colorDisplayMode ?? ColorDisplayMode.BOTH
-      const resolved = resolveColorDisplay(displayValue, link.value.colorHex?.trim() || null, mode)
-      if (!resolved) continue
-      items.push({
-        id: attr.id ?? slug,
-        slug,
-        name: pickLocalizedName(attr.translations ?? [], locale, slug),
-        icon: attr.icon ?? null,
-        unit: attr.unit ?? null,
-        valueType,
-        displayValue: resolved.displayValue,
-        colorHex: resolved.colorHex,
-        colorDisplayMode: resolved.colorDisplayMode,
-        sortOrder: attr.sortOrder,
-      })
+      const key = attr.id ?? slug
+      const group = colorGroups.get(key) ?? { attr, labels: [], hexes: [] }
+      group.labels.push(displayValue)
+      group.hexes.push(link.value.colorHex?.trim() || null)
+      colorGroups.set(key, group)
       continue
     }
 
@@ -108,5 +89,36 @@ export function toVariantDisplayAttributes(
       sortOrder: attr.sortOrder,
     })
   }
+
+  for (const [key, group] of colorGroups) {
+    const attr = group.attr
+    const slug = attr.slug ?? attr.id ?? key
+    const mode = attr.colorDisplayMode ?? ColorDisplayMode.BOTH
+    const showText = mode === ColorDisplayMode.TEXT || mode === ColorDisplayMode.BOTH
+    const showSwatch = mode === ColorDisplayMode.SWATCH || mode === ColorDisplayMode.BOTH
+    const colorOptions = group.labels.map((label, index) => ({
+      displayValue: label,
+      colorHex: showSwatch ? group.hexes[index] ?? null : null,
+    }))
+    const joinedLabel = group.labels.filter(Boolean).join(', ')
+    const displayValue = showText ? joinedLabel : ''
+    const hasSwatch = colorOptions.some((item) => item.colorHex)
+    if (!(displayValue || hasSwatch)) continue
+
+    items.push({
+      id: attr.id ?? slug,
+      slug,
+      name: pickLocalizedName(attr.translations ?? [], locale, slug),
+      icon: attr.icon ?? null,
+      unit: attr.unit ?? null,
+      valueType: VariantAttributeType.COLOR,
+      displayValue,
+      colorHex: colorOptions.length === 1 ? colorOptions[0]?.colorHex ?? null : null,
+      colorOptions: colorOptions.length > 1 ? colorOptions : undefined,
+      colorDisplayMode: mode,
+      sortOrder: attr.sortOrder,
+    })
+  }
+
   return items.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'uk'))
 }

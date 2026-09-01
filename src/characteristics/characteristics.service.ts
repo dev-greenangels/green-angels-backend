@@ -245,10 +245,7 @@ export class CharacteristicsService {
   }
 
   private isSingleSelectType(valueType: CharacteristicValueType) {
-    return (
-      valueType === CharacteristicValueType.SELECT ||
-      valueType === CharacteristicValueType.COLOR
-    )
+    return valueType === CharacteristicValueType.SELECT
   }
 
   private async migrateValuesOnTypeChange(
@@ -414,7 +411,10 @@ export class CharacteristicsService {
     }>,
     valueType: CharacteristicValueType,
   ): CharacteristicCellValue {
-    if (valueType === CharacteristicValueType.MULTI_SELECT) {
+    if (
+      valueType === CharacteristicValueType.MULTI_SELECT ||
+      valueType === CharacteristicValueType.COLOR
+    ) {
       const optionIds = rows.map((row) => row.optionId).filter((id): id is string => Boolean(id))
       return optionIds.length ? { optionIds } : null
     }
@@ -498,7 +498,10 @@ export class CharacteristicsService {
 
     if (update.clear) return
 
-    if (characteristic.valueType === CharacteristicValueType.MULTI_SELECT) {
+    if (
+      characteristic.valueType === CharacteristicValueType.MULTI_SELECT ||
+      characteristic.valueType === CharacteristicValueType.COLOR
+    ) {
       const optionIds = update.optionIds ?? (update.optionId ? [update.optionId] : [])
       const uniqueIds = [...new Set(optionIds)]
       for (const optionId of uniqueIds) {

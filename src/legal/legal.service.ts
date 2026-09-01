@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import ExcelJS from 'exceljs'
 import {
   BadRequestException,
   Injectable,
@@ -15,11 +16,27 @@ import {
 } from '@prisma/client'
 
 import type { SessionJwtPayload } from '../auth/auth.constants'
+import { resolveShopPublicOrigin } from '../mail/country-hosts'
 import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
 import { CreateLegalRevisionDto, UpdateLegalRevisionDto } from './dto/create-revision.dto'
+import type { MarketingSubscribersExportQueryDto } from './dto/marketing-subscribers-query.dto'
+import type { MarketingSubscribersQueryDto } from './dto/marketing-subscribers-query.dto'
 import { RecordConsentDto } from './dto/record-consent.dto'
-import { LEGAL_SEED, type LegalSeedSection } from './legal-seed'
+import {
+  MARKETING_SUBSCRIBERS_BASE_SQL,
+  mapMarketingSubscriberRow,
+  resolveMarketingSubscribersSort,
+  type MarketingConsentSummary,
+  type MarketingSubscriberPage,
+} from './marketing-subscribers.types'
+import { getLegalSeedForMarket, type LegalSeedSection } from './legal-seed'
+import {
+  resolveDeployMarketFromEnv,
+  resolveDeployMarketFromRegion,
+} from './legal-market'
+import type { LegalSeedEntry } from './legal-seed.types'
+import type { MarketRegion } from '../settings/market.types'
 import {
   EMPTY_SELLER,
   interpolateLegalText,
@@ -63,6 +80,7 @@ export type LegalPublicDocument = {
 export class LegalService {
   private readonly logger = new Logger(LegalService.name)
   private seedPromise: Promise<void> | null = null
+  private marketSeedPromise: Promise<LegalSeedEntry[]> | null = null
 
   constructor(
     private readonly prisma: PrismaService,
@@ -371,6 +389,318 @@ export class LegalService {
     }
   }
 
+  async listMarketingSubscribersBackstage(
+    query: MarketingSubscribersQueryDto,
+  ): Promise<MarketingSubscriberPage> {
+    const page = query.page && query.page > 0 ? query.page : 1
+    const pageSize = Math.min(query.pageSize ?? 20, 50)
+    const { whereSql, params } = this.buildMarketingSubscribersFilters(query)
+    const orderBy = resolveMarketingSubscribersSort(query.sortBy, query.sortDir)
+
+    const countRows = await this.prisma.$queryRawUnsafe<{ total: bigint }[]>(
+      `${MARKETING_SUBSCRIBERS_BASE_SQL}
+SELECT COUNT(*)::bigint AS total
+FROM subscribers
+${whereSql}`,
+      ...params,
+    )
+    const total = Number(countRows[0]?.total ?? 0)
+    const totalPages = Math.max(1, Math.ceil(total / pageSize))
+    const offset = (page - 1) * pageSize
+
+    const rows = await this.prisma.$queryRawUnsafe<
+      Array<{
+        subscriber_key: string
+        userId: string | null
+        email: string | null
+        firstName: string | null
+        lastName: string | null
+        source: string | null
+        status: string
+        subscribedAt: Date | null
+        unsubscribedAt: Date | null
+        isRegistered: boolean
+      }>
+    >(
+      `${MARKETING_SUBSCRIBERS_BASE_SQL}
+SELECT *
+FROM subscribers
+${whereSql}
+ORDER BY ${orderBy}
+LIMIT $${params.length + 1}
+OFFSET $${params.length + 2}`,
+      ...params,
+      pageSize,
+      offset,
+    )
+
+    return {
+      items: rows.map(mapMarketingSubscriberRow),
+      total,
+      page,
+      pageSize,
+      totalPages,
+    }
+  }
+
+  async exportMarketingSubscribersBackstage(
+    query: MarketingSubscribersExportQueryDto,
+  ): Promise<{ buffer: Buffer; contentType: string; filename: string }> {
+    const format = query.format === 'xlsx' ? 'xlsx' : 'csv'
+    const { whereSql, params } = this.buildMarketingSubscribersFilters(query)
+    const orderBy = resolveMarketingSubscribersSort(query.sortBy, query.sortDir)
+
+    const rows = await this.prisma.$queryRawUnsafe<
+      Array<{
+        subscriber_key: string
+        userId: string | null
+        email: string | null
+        firstName: string | null
+        lastName: string | null
+        source: string | null
+        status: string
+        subscribedAt: Date | null
+        unsubscribedAt: Date | null
+        isRegistered: boolean
+      }>
+    >(
+      `${MARKETING_SUBSCRIBERS_BASE_SQL}
+SELECT *
+FROM subscribers
+${whereSql}
+ORDER BY ${orderBy}
+LIMIT 50000`,
+      ...params,
+    )
+
+    const items = rows.map(mapMarketingSubscriberRow)
+    const exportRows = await this.attachMarketingUnsubscribeUrls(items)
+    const stamp = new Date().toISOString().slice(0, 10)
+
+    if (format === 'xlsx') {
+      const workbook = new ExcelJS.Workbook()
+      const sheet = workbook.addWorksheet('Subscribers')
+      sheet.columns = [
+        { header: 'Email', key: 'email', width: 32 },
+        { header: 'First name', key: 'firstName', width: 18 },
+        { header: 'Last name', key: 'lastName', width: 18 },
+        { header: 'Source', key: 'source', width: 20 },
+        { header: 'Status', key: 'status', width: 12 },
+        { header: 'Subscribed at', key: 'subscribedAt', width: 22 },
+        { header: 'Unsubscribed at', key: 'unsubscribedAt', width: 22 },
+        { header: 'Registered client', key: 'isRegistered', width: 18 },
+        { header: 'Unsubscribe URL', key: 'unsubscribeUrl', width: 72 },
+      ]
+      for (const row of exportRows) {
+        sheet.addRow({
+          email: row.email ?? '',
+          firstName: row.firstName ?? '',
+          lastName: row.lastName ?? '',
+          source: row.source ?? '',
+          status: row.status,
+          subscribedAt: row.subscribedAt ?? '',
+          unsubscribedAt: row.unsubscribedAt ?? '',
+          isRegistered: row.isRegistered ? 'yes' : 'no',
+          unsubscribeUrl: row.unsubscribeUrl,
+        })
+      }
+      const raw = await workbook.xlsx.writeBuffer()
+      return {
+        buffer: Buffer.from(raw),
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        filename: `marketing-subscribers-${stamp}.xlsx`,
+      }
+    }
+
+    const header = [
+      'email',
+      'firstName',
+      'lastName',
+      'source',
+      'status',
+      'subscribedAt',
+      'unsubscribedAt',
+      'isRegistered',
+      'unsubscribeUrl',
+    ]
+    const lines = [
+      header.join(';'),
+      ...exportRows.map((row) =>
+        [
+          this.csvCell(row.email),
+          this.csvCell(row.firstName),
+          this.csvCell(row.lastName),
+          this.csvCell(row.source),
+          this.csvCell(row.status),
+          this.csvCell(row.subscribedAt),
+          this.csvCell(row.unsubscribedAt),
+          row.isRegistered ? 'yes' : 'no',
+          this.csvCell(row.unsubscribeUrl),
+        ].join(';'),
+      ),
+    ]
+
+    return {
+      buffer: Buffer.from(`\uFEFF${lines.join('\n')}`, 'utf8'),
+      contentType: 'text/csv; charset=utf-8',
+      filename: `marketing-subscribers-${stamp}.csv`,
+    }
+  }
+
+  async getMarketingConsentSummary(input: {
+    userId?: string | null
+    email?: string | null
+  }): Promise<MarketingConsentSummary> {
+    const userId = input.userId?.trim() || null
+    const email = input.email?.trim().toLowerCase() || null
+    if (!userId && !email) {
+      return {
+        subscribed: false,
+        source: null,
+        subscribedAt: null,
+        unsubscribedAt: null,
+      }
+    }
+
+    const or: Prisma.LegalConsentEventWhereInput[] = []
+    if (userId) or.push({ userId })
+    if (email) or.push({ metadata: { path: ['email'], equals: email } })
+
+    const latest = await this.prisma.legalConsentEvent.findFirst({
+      where: { purpose: LegalConsentPurpose.MARKETING, OR: or },
+      orderBy: { occurredAt: 'desc' },
+      select: { action: true, occurredAt: true },
+    })
+
+    const latestGranted = await this.prisma.legalConsentEvent.findFirst({
+      where: {
+        purpose: LegalConsentPurpose.MARKETING,
+        action: LegalConsentAction.GRANTED,
+        OR: or,
+      },
+      orderBy: { occurredAt: 'desc' },
+      select: { source: true, occurredAt: true },
+    })
+
+    const latestWithdrawn = await this.prisma.legalConsentEvent.findFirst({
+      where: {
+        purpose: LegalConsentPurpose.MARKETING,
+        action: LegalConsentAction.WITHDRAWN,
+        OR: or,
+      },
+      orderBy: { occurredAt: 'desc' },
+      select: { occurredAt: true },
+    })
+
+    const subscribed = latest?.action === LegalConsentAction.GRANTED
+
+    return {
+      subscribed,
+      source: latestGranted?.source ?? null,
+      subscribedAt: latestGranted?.occurredAt.toISOString() ?? null,
+      unsubscribedAt:
+        latest?.action === LegalConsentAction.WITHDRAWN
+          ? latestWithdrawn?.occurredAt.toISOString() ?? latest.occurredAt.toISOString()
+          : null,
+    }
+  }
+
+  private resolveShopPublicBaseUrl(): string {
+    return resolveShopPublicOrigin({
+      countrySiteCode: null,
+      countryHostsEnv: process.env.GA_COUNTRY_HOSTS,
+      shopPublicUrl: process.env.SHOP_PUBLIC_URL,
+      corsOrigin: process.env.CORS_ORIGIN,
+    })
+  }
+
+  private async resolveMarketingExportLocale(): Promise<string> {
+    try {
+      const market = await this.settings.getMarketSettings()
+      return market.region === 'sk' ? 'sk' : 'uk'
+    } catch {
+      return 'uk'
+    }
+  }
+
+  private async attachMarketingUnsubscribeUrls(
+    items: Array<{
+      userId: string | null
+      email: string | null
+      firstName: string | null
+      lastName: string | null
+      source: string | null
+      status: string
+      subscribedAt: string | null
+      unsubscribedAt: string | null
+      isRegistered: boolean
+      subscriberKey: string
+    }>,
+  ): Promise<
+    Array<{
+      userId: string | null
+      email: string | null
+      firstName: string | null
+      lastName: string | null
+      source: string | null
+      status: string
+      subscribedAt: string | null
+      unsubscribedAt: string | null
+      isRegistered: boolean
+      subscriberKey: string
+      unsubscribeUrl: string
+    }>
+  > {
+    const shopPublicBaseUrl = this.resolveShopPublicBaseUrl()
+    const locale = await this.resolveMarketingExportLocale()
+
+    return items.map((row) => ({
+      ...row,
+      unsubscribeUrl:
+        this.buildMarketingUnsubscribeUrl({
+          shopPublicBaseUrl,
+          userId: row.userId,
+          email: row.email,
+          locale,
+        }) ?? '',
+    }))
+  }
+
+  private buildMarketingSubscribersFilters(query: MarketingSubscribersQueryDto): {
+    whereSql: string
+    params: unknown[]
+  } {
+    const params: unknown[] = []
+    const clauses: string[] = []
+
+    const status = query.status?.trim().toLowerCase()
+    if (status === 'active') {
+      clauses.push(`status = 'active'`)
+    } else if (status === 'withdrawn') {
+      clauses.push(`status = 'withdrawn'`)
+    }
+
+    const q = query.q?.trim()
+    if (q) {
+      params.push(`%${q}%`)
+      const idx = params.length
+      clauses.push(
+        `(email ILIKE $${idx} OR "firstName" ILIKE $${idx} OR "lastName" ILIKE $${idx})`,
+      )
+    }
+
+    const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
+    return { whereSql, params }
+  }
+
+  private csvCell(value: string | null | undefined): string {
+    const raw = value ?? ''
+    if (/[;"\n\r]/.test(raw)) {
+      return `"${raw.replace(/"/g, '""')}"`
+    }
+    return raw
+  }
+
   /** Latest MARKETING event for user/email must be GRANTED. */
   async hasActiveMarketingConsent(input: {
     userId?: string | null
@@ -648,11 +978,34 @@ export class LegalService {
     return upper as LegalDocumentType
   }
 
+  private async resolveDeployMarket(): Promise<MarketRegion> {
+    const fromEnv = resolveDeployMarketFromEnv()
+    if (fromEnv) return fromEnv
+    try {
+      const market = await this.settings.getMarketSettings()
+      return resolveDeployMarketFromRegion(market.region)
+    } catch {
+      return 'ua'
+    }
+  }
+
+  private async getMarketLegalSeed(): Promise<LegalSeedEntry[]> {
+    if (!this.marketSeedPromise) {
+      this.marketSeedPromise = this.resolveDeployMarket().then((market) => {
+        const seed = getLegalSeedForMarket(market)
+        this.logger.log(`Legal CMS seed profile: ${market.toUpperCase()} (${seed.length} revisions).`)
+        return seed
+      })
+    }
+    return this.marketSeedPromise
+  }
+
   private async ensureSeeded() {
     if (!this.seedPromise) {
       this.seedPromise = this.seedIfEmpty()
         .then(() => this.seedMissingDocumentTypes())
         .then(() => this.upgradeSeedPlaceholders())
+        .then(() => this.syncMarketLegalPageSeed())
         .catch((error) => {
           this.seedPromise = null
           throw error
@@ -665,8 +1018,9 @@ export class LegalService {
     const existing = await this.prisma.legalDocument.count()
     if (existing > 0) return
 
+    const legalSeed = await this.getMarketLegalSeed()
     const now = new Date()
-    const types = [...new Set(LEGAL_SEED.map((entry) => entry.type))] as LegalDocumentType[]
+    const types = [...new Set(legalSeed.map((entry) => entry.type))] as LegalDocumentType[]
     try {
       await this.prisma.$transaction(async (tx) => {
         const documents = new Map<LegalDocumentType, string>()
@@ -674,7 +1028,7 @@ export class LegalService {
           const created = await tx.legalDocument.create({ data: { type } })
           documents.set(type, created.id)
         }
-        for (const entry of LEGAL_SEED) {
+        for (const entry of legalSeed) {
           const documentId = documents.get(entry.type as LegalDocumentType)
           if (!documentId) continue
           const content = JSON.stringify(entry.sections)
@@ -705,9 +1059,10 @@ export class LegalService {
 
   /** Add newly introduced document types (e.g. MARKETING_CONSENT) on existing DBs. */
   private async seedMissingDocumentTypes() {
+    const legalSeed = await this.getMarketLegalSeed()
     const now = new Date()
-    const byType = new Map<LegalDocumentType, typeof LEGAL_SEED>()
-    for (const entry of LEGAL_SEED) {
+    const byType = new Map<LegalDocumentType, LegalSeedEntry[]>()
+    for (const entry of legalSeed) {
       const type = entry.type as LegalDocumentType
       const list = byType.get(type) ?? []
       list.push(entry)
@@ -749,8 +1104,9 @@ export class LegalService {
 
   /** One-time: replace early v1 templates that had no {ico} placeholders. */
   private async upgradeSeedPlaceholders() {
+    const legalSeed = await this.getMarketLegalSeed()
     const now = new Date()
-    for (const entry of LEGAL_SEED) {
+    for (const entry of legalSeed) {
       const usesPlaceholders =
         entry.intro.includes('{ico}') || JSON.stringify(entry.sections).includes('{ico}')
       if (!usesPlaceholders) continue
@@ -791,6 +1147,63 @@ export class LegalService {
         })
       })
       this.logger.log(`Upgraded ${entry.type}/${entry.locale} legal seed to v2 with seller placeholders.`)
+    }
+  }
+
+  /** Overwrite v1 (or create missing locales) with deploy-market legal page copy. */
+  private async syncMarketLegalPageSeed() {
+    const legalSeed = await this.getMarketLegalSeed()
+    const now = new Date()
+
+    for (const entry of legalSeed) {
+      const type = entry.type as LegalDocumentType
+      const document = await this.prisma.legalDocument.findUnique({ where: { type } })
+      if (!document) continue
+
+      const content = JSON.stringify(entry.sections)
+      const contentHash = this.hashContent(entry.locale, entry.title, entry.intro, content)
+
+      const existing = await this.prisma.legalDocumentRevision.findFirst({
+        where: {
+          documentId: document.id,
+          locale: entry.locale,
+          version: 1,
+        },
+      })
+
+      if (existing) {
+        if (existing.contentHash === contentHash) continue
+        await this.prisma.legalDocumentRevision.update({
+          where: { id: existing.id },
+          data: {
+            title: entry.title,
+            intro: entry.intro,
+            content,
+            contentHash,
+            status: LegalRevisionStatus.PUBLISHED,
+            publishedAt: existing.publishedAt ?? now,
+            effectiveAt: existing.effectiveAt ?? now,
+          },
+        })
+        this.logger.log(`Synced ${entry.type}/${entry.locale} v1 page content.`)
+        continue
+      }
+
+      await this.prisma.legalDocumentRevision.create({
+        data: {
+          documentId: document.id,
+          locale: entry.locale,
+          version: 1,
+          title: entry.title,
+          intro: entry.intro,
+          content,
+          contentHash,
+          status: LegalRevisionStatus.PUBLISHED,
+          publishedAt: now,
+          effectiveAt: now,
+        },
+      })
+      this.logger.log(`Created ${entry.type}/${entry.locale} v1 page content.`)
     }
   }
 }

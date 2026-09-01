@@ -315,6 +315,7 @@ export class ProductCharacteristicsService {
         displayValue: resolved.displayValue,
         colorHex: resolved.colorHex,
         colorDisplayMode: resolved.colorDisplayMode,
+        colorOptions: resolved.colorOptions,
         sortOrder: characteristic.sortOrder,
       })
     }
@@ -341,19 +342,33 @@ export class ProductCharacteristicsService {
     displayValue: string
     colorHex?: string | null
     colorDisplayMode?: ColorDisplayMode | null
+    colorOptions?: Array<{ displayValue: string; colorHex: string | null }>
   } | null {
     if (valueType === CharacteristicValueType.COLOR) {
-      const row = rows.find((item) => item.option)
-      const label = row?.option?.translations[0]?.label ?? row?.option?.slug ?? ''
-      const colorHex = row?.option?.colorHex?.trim() || null
+      const optionRows = rows.filter((item) => item.option)
+      if (!optionRows.length) return null
+
       const mode = colorDisplayMode ?? ColorDisplayMode.BOTH
       const showText = mode === ColorDisplayMode.TEXT || mode === ColorDisplayMode.BOTH
       const showSwatch = mode === ColorDisplayMode.SWATCH || mode === ColorDisplayMode.BOTH
-      const displayValue = showText ? label.trim() : ''
-      if ((showText && displayValue) || (showSwatch && colorHex)) {
+
+      const colorOptions = optionRows.map((row) => ({
+        displayValue: row.option?.translations[0]?.label?.trim() ?? row.option?.slug ?? '',
+        colorHex: showSwatch ? row.option?.colorHex?.trim() || null : null,
+      }))
+
+      const labels = colorOptions
+        .map((item) => item.displayValue)
+        .filter((label) => Boolean(label.trim()))
+
+      const displayValue = showText ? labels.join(', ') : ''
+      const hasSwatch = colorOptions.some((item) => item.colorHex)
+
+      if ((showText && displayValue) || (showSwatch && hasSwatch)) {
         return {
           displayValue,
-          colorHex: showSwatch ? colorHex : null,
+          colorHex: colorOptions.length === 1 ? colorOptions[0]?.colorHex ?? null : null,
+          colorOptions: colorOptions.length > 1 ? colorOptions : undefined,
           colorDisplayMode: mode,
         }
       }

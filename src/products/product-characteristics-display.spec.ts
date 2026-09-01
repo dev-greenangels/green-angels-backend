@@ -76,4 +76,23 @@ describe('ProductCharacteristicsService.toDisplayCharacteristics', () => {
 
     expect(items).toHaveLength(0)
   })
+
+  it('aggregates multiple COLOR options into one row with colorOptions', () => {
+    const items = service.toDisplayCharacteristics([
+      colorRow({ label: 'Зелений', colorHex: '#2E7D32' }),
+      {
+        ...colorRow({ label: 'Жовтий', colorHex: '#FBC02D' }),
+      },
+    ])
+
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      displayValue: 'Зелений, Жовтий',
+      colorHex: null,
+      colorOptions: [
+        { displayValue: 'Зелений', colorHex: '#2E7D32' },
+        { displayValue: 'Жовтий', colorHex: '#FBC02D' },
+      ],
+    })
+  })
 })

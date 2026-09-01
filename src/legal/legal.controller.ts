@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common'
 import { Role } from '@prisma/client'
-import type { Request } from 'express'
+import type { Request, Response } from 'express'
 
 import type { SessionJwtPayload } from '../auth/auth.constants'
 import { Roles } from '../auth/decorators/roles.decorator'
@@ -9,6 +9,10 @@ import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard'
 import { CreateLegalRevisionDto, UpdateLegalRevisionDto } from './dto/create-revision.dto'
 import { LegalLocaleQueryDto } from './dto/legal-query.dto'
+import {
+  MarketingSubscribersExportQueryDto,
+  MarketingSubscribersQueryDto,
+} from './dto/marketing-subscribers-query.dto'
 import { RecordConsentDto } from './dto/record-consent.dto'
 import { LegalService } from './legal.service'
 
@@ -50,6 +54,28 @@ export class LegalController {
   @Roles(Role.ADMIN, Role.MANAGER)
   publish(@Param('id') id: string) {
     return this.legal.publish(id)
+  }
+
+  @Get('admin/marketing-subscribers')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  listMarketingSubscribers(@Query() query: MarketingSubscribersQueryDto) {
+    return this.legal.listMarketingSubscribersBackstage(query)
+  }
+
+  @Get('admin/marketing-subscribers/export')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  async exportMarketingSubscribers(
+    @Query() query: MarketingSubscribersExportQueryDto,
+    @Res() res: Response,
+  ) {
+    const { buffer, contentType, filename } =
+      await this.legal.exportMarketingSubscribersBackstage(query)
+    res.setHeader('Content-Type', contentType)
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    res.setHeader('Content-Length', String(buffer.length))
+    res.send(buffer)
   }
 
   @Post('consents')

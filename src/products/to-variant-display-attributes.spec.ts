@@ -1,3 +1,4 @@
+import { ColorDisplayMode } from '@prisma/client'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
@@ -50,5 +51,37 @@ describe('toVariantDisplayAttributes', () => {
     const items = toVariantDisplayAttributes([link({ locale: 'uk', label: 'C2' })], 'sk')
     assert.equal(items.length, 1)
     assert.equal(items[0]?.displayValue, 'C2')
+  })
+
+  it('groups multiple COLOR values on one variant into colorOptions', () => {
+    const colorLink = (label: string, colorHex: string): VariantDisplayAttributeLink => ({
+      value: {
+        slug: label,
+        colorHex,
+        translations: [{ locale: 'uk', label }],
+        attribute: {
+          id: 'attr-color',
+          slug: 'color',
+          sortOrder: 2,
+          showOnProductPage: true,
+          valueType: 'COLOR',
+          colorDisplayMode: ColorDisplayMode.BOTH,
+          translations: [{ locale: 'uk', name: 'Колір' }],
+        },
+      },
+    })
+
+    const items = toVariantDisplayAttributes(
+      [colorLink('Зелений', '#2E7D32'), colorLink('Жовтий', '#FBC02D')],
+      'uk',
+    )
+
+    assert.equal(items.length, 1)
+    assert.equal(items[0]?.displayValue, 'Зелений, Жовтий')
+    assert.equal(items[0]?.colorHex, null)
+    assert.deepEqual(items[0]?.colorOptions, [
+      { displayValue: 'Зелений', colorHex: '#2E7D32' },
+      { displayValue: 'Жовтий', colorHex: '#FBC02D' },
+    ])
   })
 })

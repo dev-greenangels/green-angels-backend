@@ -2,13 +2,16 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common'
 import { AuthProvider, Prisma, Role } from '@prisma/client'
 import * as bcrypt from 'bcrypt'
 
 import { normalizePhoneE164 } from '../auth/auth.utils'
+import { LegalService } from '../legal/legal.service'
 import { CreateStaffDto } from './dto/create-staff.dto'
 import { UpdateUserDto } from './dto/update-user.dto'
 import { UpdateUserGroupsDto } from './dto/update-user-groups.dto'
@@ -44,6 +47,8 @@ export type BackstageUserListItem = {
   role: Role
   orderCount: number
   createdAt: string
+  marketingSubscribed: boolean
+  marketingSubscribedAt: string | null
 }
 
 export type BackstageUserOrderItem = {
@@ -79,6 +84,8 @@ export type BackstageUserOrderSummary = {
 export type BackstageUserDetail = BackstageUserListItem & {
   orders: BackstageUserOrderSummary[]
   groupIds: string[]
+  marketingSource: string | null
+  marketingUnsubscribedAt: string | null
 }
 
 const CUSTOMER_ROLES: Role[] = [Role.USER, Role.WHOLESALER, Role.GUEST]
@@ -88,7 +95,11 @@ const DEFAULT_LOCALE = 'uk'
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => LegalService))
+    private readonly legal: LegalService,
+  ) {}
 
   private formatOrderNumber(orderNumber: number): string {
     return `ZY-${String(orderNumber).padStart(8, '0')}`
@@ -119,6 +130,22 @@ export class UsersService {
       include: { _count: { select: { orders: true } } },
     })
 
+    return this.mapBackstageUserListItem(user)
+  }
+
+  private mapBackstageUserListItem(user: {
+    id: string
+    firstName: string | null
+    lastName: string | null
+    patronymic: string | null
+    phone: string | null
+    email: string | null
+    role: Role
+    createdAt: Date
+    newsletter: boolean
+    marketingConsentAt: Date | null
+    _count: { orders: number }
+  }): BackstageUserListItem {
     return {
       id: user.id,
       firstName: user.firstName,
@@ -129,6 +156,8 @@ export class UsersService {
       role: user.role,
       orderCount: user._count.orders,
       createdAt: user.createdAt.toISOString(),
+      marketingSubscribed: user.newsletter,
+      marketingSubscribedAt: user.marketingConsentAt?.toISOString() ?? null,
     }
   }
 
@@ -200,17 +229,7 @@ export class UsersService {
       include: { _count: { select: { orders: true } } },
     })
 
-    return users.map((user) => ({
-      id: user.id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      patronymic: user.patronymic,
-      phone: user.phone,
-      email: user.email,
-      role: user.role,
-      orderCount: user._count.orders,
-      createdAt: user.createdAt.toISOString(),
-    }))
+    return users.map((user) => this.mapBackstageUserListItem(user))
   }
 
   private isStaffRole(role: Role): boolean {
@@ -382,16 +401,25 @@ export class UsersService {
       throw new NotFoundException('Користувача не знайдено.')
     }
 
-    return {
-      id: user.id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      patronymic: user.patronymic,
-      phone: user.phone,
+    const marketing = await this.legal.getMarketingConsentSummary({
+      userId: user.id,
       email: user.email,
-      role: user.role,
-      orderCount: user._count.orders,
-      createdAt: user.createdAt.toISOString(),
+    })
+
+    const base = this.mapBackstageUserListItem({
+      ...user,
+      newsletter: marketing.subscribed,
+      marketingConsentAt: marketing.subscribedAt
+        ? new Date(marketing.subscribedAt)
+        : null,
+    })
+
+    return {
+      ...base,
+      marketingSubscribed: marketing.subscribed,
+      marketingSubscribedAt: marketing.subscribedAt,
+      marketingSource: marketing.source,
+      marketingUnsubscribedAt: marketing.unsubscribedAt,
       groupIds: user.customerGroups.map((row) => row.groupId),
       orders: user.orders.map((order) => ({
         id: order.id,
