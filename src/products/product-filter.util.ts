@@ -20,6 +20,23 @@ export function serializeSlugFilterPairs(pairs: Array<[string, string]>): string
   return pairs.map(([key, value]) => `${key}=${value}`).join(',')
 }
 
+/** Remove one filter group (by slug) from serialized slug=value pairs. */
+export function excludeSlugFilterGroup(input: string | undefined, slugToExclude: string): string | undefined {
+  if (!input?.trim() || !slugToExclude.trim()) return input?.trim() || undefined
+
+  const groups = groupSlugFilterPairs(input)
+  groups.delete(slugToExclude.trim())
+  if (!groups.size) return undefined
+
+  const pairs: Array<[string, string]> = []
+  for (const [key, values] of groups) {
+    for (const value of values) {
+      pairs.push([key, value])
+    }
+  }
+  return serializeSlugFilterPairs(pairs)
+}
+
 /** Групує пари slug=value за ключем; кілька значень одного фільтра — OR, різні фільтри — AND. */
 export function groupSlugFilterPairs(input?: string): Map<string, string[]> {
   const groups = new Map<string, string[]>()

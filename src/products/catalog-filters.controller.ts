@@ -3,6 +3,7 @@ import { Controller, Get, Query } from '@nestjs/common'
 import { CharacteristicsService } from '../characteristics/characteristics.service'
 import { VariantAttributesService } from '../variant-attributes/variant-attributes.service'
 import {
+  excludeSlugFilterGroup,
   filterCharacteristicsByFacets,
   filterVariantAttributesByFacets,
 } from './product-filter.util'
@@ -27,7 +28,7 @@ export class CatalogFiltersController {
     @Query('priceMin') priceMin?: string,
     @Query('priceMax') priceMax?: string,
   ) {
-    const scopeWhere = await this.products.resolveCatalogScopeProductWhere({
+    const scopeParams = {
       locale,
       categoryId,
       categorySlug,
@@ -36,9 +37,9 @@ export class CatalogFiltersController {
       variantAttributes,
       priceMin,
       priceMax,
-    })
+    }
 
-    const [allCharacteristics, allVariantAttributes, price, facets] = await Promise.all([
+    const [allCharacteristics, allVariantAttributes, price] = await Promise.all([
       this.characteristics.findAll(locale, true),
       this.variantAttributes.findAll(locale, true),
       this.products.getCatalogPriceBounds({
@@ -47,8 +48,35 @@ export class CatalogFiltersController {
         categorySlug,
         search,
       }),
-      this.products.getCatalogAvailableFacets(scopeWhere),
     ])
+
+    const [characteristicFacetEntries, attributeFacetEntries] = await Promise.all([
+      Promise.all(
+        allCharacteristics.map(async (characteristic) => {
+          const scopeWhere = await this.products.resolveCatalogScopeProductWhere({
+            ...scopeParams,
+            characteristics: excludeSlugFilterGroup(characteristics, characteristic.slug),
+          })
+          const facets = await this.products.getCatalogAvailableFacets(scopeWhere)
+          return [characteristic.id, facets.optionIdsByCharacteristic[characteristic.id] ?? []] as const
+        }),
+      ),
+      Promise.all(
+        allVariantAttributes.map(async (attribute) => {
+          const scopeWhere = await this.products.resolveCatalogScopeProductWhere({
+            ...scopeParams,
+            variantAttributes: excludeSlugFilterGroup(variantAttributes, attribute.slug),
+          })
+          const facets = await this.products.getCatalogAvailableFacets(scopeWhere)
+          return [attribute.id, facets.valueIdsByAttribute[attribute.id] ?? []] as const
+        }),
+      ),
+    ])
+
+    const facets = {
+      optionIdsByCharacteristic: Object.fromEntries(characteristicFacetEntries),
+      valueIdsByAttribute: Object.fromEntries(attributeFacetEntries),
+    }
 
     return {
       characteristics: filterCharacteristicsByFacets(
