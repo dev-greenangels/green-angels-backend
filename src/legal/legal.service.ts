@@ -24,6 +24,10 @@ import type { MarketingSubscribersExportQueryDto } from './dto/marketing-subscri
 import type { MarketingSubscribersQueryDto } from './dto/marketing-subscribers-query.dto'
 import { RecordConsentDto } from './dto/record-consent.dto'
 import {
+  planCookieConsentAuditEvents,
+  shouldExpandCookieCategoryConsent,
+} from './cookie-consent-audit'
+import {
   MARKETING_SUBSCRIBERS_BASE_SQL,
   mapMarketingSubscriberRow,
   resolveMarketingSubscribersSort,
@@ -59,6 +63,7 @@ const PURPOSE_DOCUMENT: Record<LegalConsentPurpose, LegalDocumentType> = {
   TERMS: LegalDocumentType.TERMS,
   PRIVACY_NOTICE: LegalDocumentType.PRIVACY,
   COOKIES_ANALYTICS: LegalDocumentType.COOKIES,
+  COOKIES_MARKETING: LegalDocumentType.COOKIES,
   MARKETING: LegalDocumentType.MARKETING_CONSENT,
 }
 
@@ -266,6 +271,82 @@ export class LegalService {
     const locale = this.normalizeLocale(dto.locale)
     const source = dto.source?.trim() || 'unknown'
     const email = dto.email?.trim().toLowerCase() || null
+
+    let resolvedUserId = userId || null
+    if (!resolvedUserId && email) {
+      const byEmail = await this.prisma.user.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' } },
+        select: { id: true },
+      })
+      resolvedUserId = byEmail?.id ?? null
+    }
+
+    /** Cookie banner: one HTTP request → independent COOKIES_ANALYTICS + COOKIES_MARKETING rows. */
+    if (
+      shouldExpandCookieCategoryConsent({
+        purpose: dto.purpose,
+        analytics: dto.analytics,
+        marketing: dto.marketing,
+      })
+    ) {
+      const cookiesRevision = await this.resolveConsentRevision(
+        LegalConsentPurpose.COOKIES_ANALYTICS,
+        locale,
+        dto.revisionId,
+      )
+      if (!cookiesRevision) {
+        return { recorded: false }
+      }
+
+      const seller = await this.getSeller()
+      const sharedMetadata = {
+        ...(dto.metadata ?? {}),
+        analytics: dto.analytics === true,
+        marketing: dto.marketing === true,
+        ...(email ? { email } : {}),
+        seller,
+      } as Prisma.InputJsonValue
+
+      const plans = planCookieConsentAuditEvents({
+        analytics: dto.analytics === true,
+        marketing: dto.marketing === true,
+      })
+
+      const events = []
+      for (const plan of plans) {
+        const event = await this.prisma.legalConsentEvent.create({
+          data: {
+            userId: resolvedUserId,
+            orderId: dto.orderId || null,
+            anonymousConsentId: dto.anonymousConsentId?.trim() || null,
+            revisionId: cookiesRevision.id,
+            purpose: plan.purpose as LegalConsentPurpose,
+            action: plan.action as LegalConsentAction,
+            locale: cookiesRevision.locale,
+            source: source.slice(0, 40),
+            documentHash: cookiesRevision.contentHash,
+            metadata: sharedMetadata,
+          },
+        })
+        events.push(event)
+      }
+
+      const primary = events[0]!
+      return {
+        recorded: true,
+        id: primary.id,
+        revisionId: cookiesRevision.id,
+        version: cookiesRevision.version,
+        occurredAt: primary.occurredAt.toISOString(),
+        events: events.map((event) => ({
+          id: event.id,
+          purpose: event.purpose,
+          action: event.action,
+          occurredAt: event.occurredAt.toISOString(),
+        })),
+      }
+    }
+
     let revision = dto.revisionId
       ? await this.prisma.legalDocumentRevision.findUnique({
           where: { id: dto.revisionId },
@@ -284,15 +365,6 @@ export class LegalService {
       return { recorded: false }
     }
 
-    let resolvedUserId = userId || null
-    if (!resolvedUserId && email) {
-      const byEmail = await this.prisma.user.findFirst({
-        where: { email: { equals: email, mode: 'insensitive' } },
-        select: { id: true },
-      })
-      resolvedUserId = byEmail?.id ?? null
-    }
-
     const event = await this.prisma.legalConsentEvent.create({
       data: {
         userId: resolvedUserId,
@@ -307,6 +379,7 @@ export class LegalService {
         metadata: {
           ...(dto.metadata ?? {}),
           ...(dto.analytics != null ? { analytics: dto.analytics } : {}),
+          ...(dto.marketing != null ? { marketing: dto.marketing } : {}),
           ...(email ? { email } : {}),
           seller: await this.getSeller(),
         } as Prisma.InputJsonValue,
@@ -328,6 +401,27 @@ export class LegalService {
       version: revision.version,
       occurredAt: event.occurredAt.toISOString(),
     }
+  }
+
+  private async resolveConsentRevision(
+    purpose: LegalConsentPurpose,
+    locale: string,
+    revisionId?: string,
+  ) {
+    let revision = revisionId
+      ? await this.prisma.legalDocumentRevision.findUnique({
+          where: { id: revisionId },
+          include: { document: true },
+        })
+      : null
+
+    if (revision && revision.document.type !== PURPOSE_DOCUMENT[purpose]) {
+      revision = null
+    }
+    if (!revision) {
+      revision = await this.findPublishedRow(PURPOSE_DOCUMENT[purpose], locale)
+    }
+    return revision
   }
 
   async recordCheckoutConsents(params: {

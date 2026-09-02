@@ -181,15 +181,18 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
       {
         heading: '5. Marketing a cookies',
         body: [
-          'Obchodné oznámenia posielame len so súhlasom alebo v rozsahu, ktorý dovoľuje zákon o elektronických komunikáciách, s možnosťou kedykoľvek odhlásiť odber.',
-          'Nevyhnutné cookies (košík, relácia, jazyk, súhlas s cookies) fungujú bez súhlasu. Analytické cookies spúšťame len po vašom súhlase; súhlas môžete odvolať v [[cookies|Politike cookies]].',
+          'Obchodné oznámenia e-mailom posielame len so súhlasom alebo v rozsahu, ktorý dovoľuje zákon o elektronických komunikáciách, s možnosťou kedykoľvek odhlásiť odber.',
+          'Na webe používame nevyhnutné cookies bez samostatného súhlasu. Voliteľné analytické a marketingové technológie spúšťame len po vašom súhlase; podrobnosti a správa súhlasu sú v [[cookies|Politike cookies]].',
+          'Na správu meracích a marketingových značiek používame Google Tag Manager. Samotný Tag Manager nie je reklama; ďalšie služby merania alebo reklamy (napr. Google Analytics 4 alebo Google Ads) spúšťame len ak sú zapnuté a len podľa vášho súhlasu. Momentálne nie sú aktívne Google Analytics 4 ani Google Ads.',
+          'Technické údaje môžu zahŕňať informácie o zariadení/prehliadači, interakcie so stránkou a stav súhlasu. Prostredníctvom Tag Managera a dataLayer neposielame meno, e-mail, telefón ani adresu.',
+          'Súhlas s analytickými alebo marketingovými technológiami môžete kedykoľvek zmeniť alebo odvolať na stránke cookies. Vašu voľbu zaznamenávame na účely súladu a auditu.',
         ],
       },
       {
         heading: '6. Vaše práva podľa GDPR',
         body: [
           'Máte právo na prístup, opravu, vymazanie, obmedzenie spracúvania, prenosnosť údajov a namietať proti spracúvaniu na základe oprávneného záujmu.',
-          'Súhlas so spracúvaním na marketing alebo analytické cookies môžete kedykoľvek odvolať (odkaz v e-mailoch alebo na stránke cookies).',
+          'Súhlas so spracúvaním na e-mailový marketing, analytické cookies alebo marketingové/reklamné technológie môžete kedykoľvek odvolať (odkaz v e-mailoch alebo na stránke cookies).',
           'E-mail pre uplatnenie práv (GDPR): {supportEmail}',
           'Sťažnosť môžete podať Úradu na ochranu osobných údajov SR: https://dataprotection.gov.sk/uoou/',
           'Práva si uplatníte e-mailom alebo poštou na kontakt prevádzkovateľa. Táto revízia je tá, ktorú ste videli v čase súhlasu alebo objednávky.',
@@ -215,7 +218,9 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
         heading: '2. Recipients, cookies and rights',
         body: [
           'Carriers, payment providers, IT/hosting processors and professional advisers receive only what is needed to deliver the service. We do not sell personal data.',
-          'Necessary cookies keep the cart and session working. Analytics cookies run only with consent and can be withdrawn on the Cookie policy page.',
+          'Necessary cookies keep the cart, session and your cookie choice working. Optional analytics technologies (currently including Vercel Analytics) and marketing/advertising technologies run only with your consent and can be changed on the Cookie policy page.',
+          'We use Google Tag Manager to manage approved measurement and marketing tags. Tag Manager itself is not advertising. Google Analytics 4 and Google Ads are not currently active; if enabled later, they will follow your consent choices.',
+          'Technical data may include device/browser information, page interactions and consent state. We do not send name, email, phone or address through Tag Manager / dataLayer.',
           'GDPR requests: {supportEmail}. You may complain to the supervisory authority (Slovakia: https://dataprotection.gov.sk/uoou/).',
         ],
       },
@@ -231,21 +236,24 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
       {
         heading: 'Kategórie cookies',
         body: [
-          'Nevyhnutné cookies: košík, prihlásenie, jazyk, uloženie voľby súhlasu. Túto kategóriu nemožno vypnúť.',
-          'Analytické cookies spúšťame len s predchádzajúcim súhlasom (opt-in). Reklamné cookies v súčasnosti nepoužívame, kým ich v e-shope nezapneme a nepožiadame o súhlas.',
+          'Nevyhnutné cookies: potrebné na základné fungovanie webu (napr. košík, prihlásenie/relácia, jazyk a uloženie vašej voľby súhlasu). Túto kategóriu nie je možné vypnúť v nastaveniach súhlasu.',
+          'Analytické cookies/technológie: voliteľné. Pomáhajú nám pochopiť, ako návštevníci používajú web (momentálne vrátane Vercel Analytics). Spúšťajú sa len po súhlase s kategóriou Analytické. Google Analytics 4 momentálne nie je aktívny.',
+          'Marketingové cookies/technológie: voliteľné. Môžu slúžiť na meranie reklamy, konverzií a súvisiace reklamné funkcie, keď sú zapnuté. Spúšťajú sa len po súhlase s kategóriou Marketingové. Google Ads a Google Ads konverzie momentálne nie sú implementované a aktívne nezbierajú údaje.',
+          'Google Tag Manager používame ako nástroj na správu značiek (tag management). Samotný Tag Manager nie je reklamná služba; umožňuje spúšťať schválené meracie a marketingové značky podľa vášho súhlasu.',
         ],
       },
       {
         heading: 'Správa súhlasu',
         body: [
-          'Súhlas udelíte bannerom alebo nastaveniami na tejto stránke. Predvolene sú aktívne len nevyhnutné cookies.',
-          'Platnosť voľby je približne 180 dní, kým ju nezmeníte. Odvolanie súhlasu zapíšeme ako novú udalosť.',
+          'Pred vašou voľbou sú analytické aj marketingové technológie vypnuté; aktívne zostávajú len nevyhnutné cookies.',
+          'Pri prvej návšteve môžete prijať všetko, ponechať len nevyhnutné, alebo samostatne zapnúť/vypnúť Analytické a Marketingové.',
+          'Voľbu môžete kedykoľvek zmeniť na tejto stránke. Uložená voľba súhlasu (súbor ga-cookie-consent) platí približne 180 dní, kým ju nezmeníte. Zmeny súhlasu zaznamenávame na účely súladu a auditu.',
         ],
       },
       {
         heading: 'Práva dotknutej osoby',
         body: [
-          'Máte právo na prístup k údajom z cookies, ich opravu, vymazanie a odvolanie súhlasu so spracúvaním analytických cookies.',
+          'Máte právo na prístup k údajom súvisiacim s cookies, ich opravu, vymazanie a odvolanie súhlasu so spracúvaním analytických alebo marketingových technológií.',
           'Podrobnosti o spracúvaní osobných údajov sú v [[privacy|Podmienkach ochrany osobných údajov]].',
           'Sťažnosť môžete podať Úradu na ochranu osobných údajov SR: https://dataprotection.gov.sk/uoou/',
         ],
@@ -253,7 +261,7 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
       {
         heading: 'Kontakt pre odvolanie súhlasu',
         body: [
-          'Súhlas s analytickými cookies môžete kedykoľvek odvolať na tejto stránke alebo e-mailom na {supportEmail}.',
+          'Súhlas s analytickými alebo marketingovými technológiami môžete kedykoľvek odvolať na tejto stránke alebo e-mailom na {supportEmail}.',
         ],
       },
     ],
@@ -262,14 +270,31 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
     type: 'COOKIES',
     locale: 'en',
     title: 'Cookie policy',
-    intro: 'This page describes the cookies we use and how you can manage consent.',
+    intro:
+      'Cookies are small text files. This policy explains which categories we use and how you can manage consent under ePrivacy rules.',
     sections: [
       {
-        heading: 'Categories and choice',
+        heading: 'Cookie categories',
         body: [
-          'Necessary cookies run the cart, sign-in, language and the storage of your cookie choice.',
-          'Analytics cookies start only after consent (opt-in). You can change your choice at any time on this page.',
-          'To withdraw consent or exercise GDPR rights, contact {supportEmail}.',
+          'Necessary cookies: required for core site functions (for example cart, sign-in/session, language and storing your cookie choice). This category cannot be switched off in the consent controls.',
+          'Analytics cookies/technologies: optional. They help us understand how visitors use the site (currently including Vercel Analytics). They run only after Analytics consent. Google Analytics 4 is not currently active.',
+          'Marketing cookies/technologies: optional. They may be used for advertising measurement, conversion measurement and related advertising features when enabled. They run only after Marketing consent. Google Ads and Google Ads conversions are not currently implemented and are not actively collecting data.',
+          'We use Google Tag Manager as a tag-management tool. Tag Manager itself is not an advertising service; it helps load approved measurement and marketing tags according to your consent.',
+        ],
+      },
+      {
+        heading: 'Managing consent',
+        body: [
+          'Before you choose, Analytics and Marketing stay off; only Necessary cookies remain active.',
+          'On your first visit you can accept all, keep Necessary only, or turn Analytics and Marketing on or off independently.',
+          'You can change your choice at any time on this page. The stored consent preference cookie (ga-cookie-consent) lasts about 180 days unless you change it. We record consent choices for compliance and audit purposes.',
+        ],
+      },
+      {
+        heading: 'Your rights and contact',
+        body: [
+          'You may withdraw Analytics or Marketing consent at any time on this page. Details of personal-data processing are in the [[privacy|Privacy policy]].',
+          'To exercise GDPR rights or ask questions, contact {supportEmail}.',
         ],
       },
     ],

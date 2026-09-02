@@ -81,20 +81,21 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
           "body": [
             "Profildaten: Vorname, Nachname, Vatersname, Telefon, E-Mail, Lieferadresse.",
             "Bestelldaten: Bestellinhalt, Lieferart und -adresse, Zahlungsart, Statusverlauf.",
-            "Technische Daten: Cookies, Nutzungsdaten der Website (nur bei Einwilligung zu Analyse-Cookies)."
+            "Technische Daten: Cookies sowie optionale Analyse- und Marketing-/Werbetechnologien (nur nach Ihrer Einwilligung). Dazu können Geräte-/Browserinformationen, Seiteninteraktionen und der Einwilligungsstatus gehören. Über Tag Manager / dataLayer senden wir keine Namen, E-Mails, Telefonnummern oder Adressen."
           ]
         },
         {
           "heading": "3. Zweck und Rechtsgrundlage",
           "body": [
             "Kundendaten werden zur Aufgabe und Abwicklung von Bestellungen sowie zur Kommunikation über Lieferung und Support verarbeitet — auf Basis der Vertragserfüllung und Nutzereinwilligung.",
-            "Analyse-Cookies werden nur mit separater Einwilligung verwendet, die Sie jederzeit auf der Cookie-Richtlinien-Seite widerrufen können."
+            "Optionale Analyse- und Marketing-/Werbetechnologien werden nur mit separater Einwilligung verwendet. Wir nutzen Google Tag Manager zur Steuerung freigegebener Tags; Google Analytics 4 und Google Ads sind derzeit nicht aktiv. Einwilligungen können Sie jederzeit auf der Cookie-Richtlinien-Seite ändern oder widerrufen."
           ]
         },
         {
           "heading": "4. Wer die Daten erhält",
           "body": [
             "Daten können an Versanddienstleister, Zahlungsanbieter und E-Mail-/SMS-Benachrichtigungsdienste weitergegeben werden — nur in dem Umfang, der zur Bestellabwicklung erforderlich ist.",
+            "Technische IT-/Hosting-Anbieter können Vercel (Hosting und Vercel Analytics, sofern Analytics-Einwilligung vorliegt) sowie Google Tag Manager als Tag-Infrastruktur umfassen — ohne dass dadurch Google Ads oder GA4 aktiv werden.",
             "Wir verkaufen keine personenbezogenen Daten an Dritte."
           ]
         },
@@ -131,22 +132,25 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
         {
           "heading": "Wie wir Cookies verwenden",
           "body": [
-            "Notwendige Cookies ermöglichen Warenkorb, Anmeldung und gespeicherte Sprach-/Regionseinstellungen — ohne sie funktioniert die Website nicht korrekt.",
-            "Analyse-Cookies (Vercel Analytics) helfen uns zu verstehen, welche Seiten beliebt sind und wie wir die Website verbessern können. Sie werden nur nach Ihrer Einwilligung aktiviert."
+            "Notwendige Cookies: erforderlich für Kernfunktionen (z. B. Warenkorb, Anmeldung/Sitzung, Sprache und Speicherung Ihrer Cookie-Wahl). Diese Kategorie kann in den Einwilligungseinstellungen nicht deaktiviert werden.",
+            "Analyse-Cookies/Technologien: optional. Sie helfen uns zu verstehen, wie Besucher die Website nutzen (derzeit einschließlich Vercel Analytics). Sie werden erst nach Einwilligung zur Kategorie Analyse aktiv. Google Analytics 4 ist derzeit nicht aktiv.",
+            "Marketing-Cookies/Technologien: optional. Sie können für Werbemessung, Conversion-Messung und verwandte Werbefunktionen genutzt werden, wenn sie aktiviert sind. Sie werden erst nach Einwilligung zur Kategorie Marketing aktiv. Google Ads und Google-Ads-Conversions sind derzeit nicht implementiert und erheben keine Daten.",
+            "Wir nutzen Google Tag Manager als Tag-Management-Werkzeug. Tag Manager selbst ist keine Werbedienstleistung; er steuert freigegebene Mess- und Marketing-Tags gemäß Ihrer Einwilligung."
           ]
         },
         {
           "heading": "Ihre Wahl",
           "body": [
-            "Beim ersten Besuch sehen Sie ein Banner, in dem Sie alle Cookies akzeptieren, nur notwendige behalten oder Kategorien einzeln anpassen können.",
-            "Sie können Ihre Wahl jederzeit unten auf dieser Seite ändern."
+            "Vor Ihrer Entscheidung bleiben Analyse und Marketing ausgeschaltet; nur notwendige Cookies sind aktiv.",
+            "Beim ersten Besuch können Sie alles akzeptieren, nur Notwendige behalten oder Analyse und Marketing unabhängig ein- oder ausschalten.",
+            "Sie können Ihre Wahl jederzeit unten auf dieser Seite ändern. Die gespeicherte Einwilligung (Cookie ga-cookie-consent) gilt etwa 180 Tage, sofern Sie sie nicht ändern. Wir speichern Einwilligungsentscheidungen zu Compliance- und Audit-Zwecken."
           ]
         }
 ,
       {
         heading: "Ihre Rechte",
         body: [
-                  "Sie können Ihre Einwilligung zu Analyse-Cookies jederzeit widerrufen. Details in der [[privacy|Datenschutzerklärung]]."
+                  "Sie können Ihre Einwilligung zu Analyse- oder Marketing-Technologien jederzeit widerrufen. Details in der [[privacy|Datenschutzerklärung]]."
         ],
       },
       {
@@ -250,20 +254,21 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
           "body": [
             "Profiladatok: keresztnév, vezetéknév, apai név, telefon, e-mail, szállítási cím.",
             "Rendelési adatok: rendelés tartalma, szállítási mód és cím, fizetési mód, állapotelőzmények.",
-            "Technikai adatok: sütik, oldalhasználati adatok (csak ha hozzájárult az analitikai sütikhez)."
+            "Technikai adatok: sütik, valamint opcionális analitikai és marketing/hirdetési technológiák (csak hozzájárulás után). Ide tartozhatnak eszköz-/böngészőadatok, oldalinterakciók és a hozzájárulás állapota. A Tag Manager / dataLayer révén nem küldünk nevet, e-mailt, telefont vagy címet."
           ]
         },
         {
           "heading": "3. Cél és jogalap",
           "body": [
             "Az ügyféladatokat rendelések leadásához és teljesítéséhez, valamint a szállításról és támogatásról való kommunikációhoz kezeljük — szerződés teljesítése és felhasználói hozzájárulás alapján.",
-            "Az analitikai sütiket csak külön hozzájárulással használjuk, amelyet bármikor visszavonhat a Süti szabályzat oldalon."
+            "Az opcionális analitikai és marketing/hirdetési technológiákat csak külön hozzájárulással használjuk. A Google Tag Managert a jóváhagyott címkék vezérlésére használjuk; a Google Analytics 4 és a Google Ads jelenleg nem aktív. A hozzájárulást bármikor módosíthatja vagy visszavonhatja a Süti szabályzat oldalon."
           ]
         },
         {
           "heading": "4. Kinek adjuk át az adatokat",
           "body": [
             "Az adatokat megoszthatjuk szállítási fuvarozókkal, fizetési szolgáltatókkal és e-mail/SMS értesítési szolgáltatókkal — csak a rendelés teljesítéséhez szükséges mértékben.",
+            "A technikai IT-/hosting szolgáltatók közé tartozhat a Vercel (hosting és Vercel Analytics, ha van analitikai hozzájárulás), valamint a Google Tag Manager címkeinfrastruktúraként — ez önmagában nem aktiválja a Google Ads vagy a GA4 szolgáltatást.",
             "Személyes adatokat harmadik feleknek nem értékesítünk."
           ]
         },
@@ -300,22 +305,25 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
         {
           "heading": "Hogyan használjuk a sütiket",
           "body": [
-            "A szükséges sütik működtetik a kosarat, a bejelentkezést és a mentett nyelvi/régiós beállításokat — ezek nélkül az oldal nem működik megfelelően.",
-            "Az analitikai sütik (Vercel Analytics) segítenek megérteni, mely oldalak népszerűek, és hogyan javíthatjuk az oldalt. Csak hozzájárulás után aktiválódnak."
+            "Szükséges sütik: az oldal alapműködéséhez kellenek (pl. kosár, bejelentkezés/munkamenet, nyelv és a sütihozzájárulás mentése). Ezt a kategóriát a hozzájárulás-kezelőben nem lehet kikapcsolni.",
+            "Analitikai sütik/technológiák: opcionálisak. Segítenek megérteni, hogyan használják a látogatók az oldalt (jelenleg beleértve a Vercel Analytics szolgáltatást). Csak az Analitika hozzájárulás után aktívak. A Google Analytics 4 jelenleg nem aktív.",
+            "Marketing sütik/technológiák: opcionálisak. Hirdetésmérésre, konverziómérésre és kapcsolódó hirdetési funkciókra használhatók, ha be vannak kapcsolva. Csak a Marketing hozzájárulás után aktívak. A Google Ads és a Google Ads konverziók jelenleg nincsenek implementálva, és nem gyűjtenek adatokat.",
+            "A Google Tag Managert címkekezelő eszközként használjuk. Maga a Tag Manager nem hirdetési szolgáltatás; a jóváhagyott mérési és marketing címkéket a hozzájárulása szerint vezérli."
           ]
         },
         {
           "heading": "Az Ön választása",
           "body": [
-            "Az első látogatáskor egy sáv jelenik meg, ahol elfogadhatja az összes sütit, megtarthatja csak a szükségeseket, vagy egyenként testreszabhatja a kategóriákat.",
-            "Választását bármikor módosíthatja az alábbiakban ezen az oldalon."
+            "Döntése előtt az Analitika és a Marketing ki van kapcsolva; csak a szükséges sütik maradnak aktívak.",
+            "Az első látogatáskor elfogadhatja az összeset, megtarthatja csak a szükségeseket, vagy külön be-/kikapcsolhatja az Analitikát és a Marketinget.",
+            "Választását bármikor módosíthatja ezen az oldalon. A mentett hozzájárulás (ga-cookie-consent süti) körülbelül 180 napig érvényes, amíg nem változtatja meg. A hozzájárulási döntéseket megfelelőségi és audit célból rögzítjük."
           ]
         }
 ,
       {
         heading: "Az Ön jogai",
         body: [
-                  "Az analitikai sütikhez adott hozzájárulást bármikor visszavonhatja. Részletek: [[privacy|Adatvédelmi irányelvek]]."
+                  "Az analitikai vagy marketing technológiákhoz adott hozzájárulást bármikor visszavonhatja. Részletek: [[privacy|Adatvédelmi irányelvek]]."
         ],
       },
       {
@@ -419,21 +427,22 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
           "body": [
             "Profile data: first name, last name, patronymic, phone, email, delivery address.",
             "Order data: order contents, delivery method and address, payment method, status history.",
-            "Technical data: cookies, site usage data (only if you consented to analytics cookies)."
+            "Technická data: cookies a volitelné analytické a marketingové/reklamní technologie (pouze po vašem souhlasu). Mohou zahrnovat informace o zařízení/prohlížeči, interakce se stránkou a stav souhlasu. Prostřednictvím Tag Manageru / dataLayer neodesíláme jméno, e-mail, telefon ani adresu."
           ]
         },
         {
           "heading": "3. Purpose and legal basis",
           "body": [
             "Customer data is processed to place and fulfil orders and to communicate about delivery and support — based on contract performance and user consent.",
-            "Analytics cookies are used only with a separate consent, which you can withdraw at any time on the Cookie policy page."
+            "Volitelné analytické a marketingové/reklamní technologie používáme jen se samostatným souhlasem. Google Tag Manager používáme ke správě schválených značek; Google Analytics 4 a Google Ads momentálně nejsou aktivní. Souhlas můžete kdykoli změnit nebo odvolat na stránce Zásady cookies."
           ]
         },
         {
           "heading": "4. Who receives the data",
           "body": [
-            "Data may be shared with delivery carriers, payment providers and email/SMS notification providers — only to the extent needed to fulfil an order.",
-            "We do not sell personal data to third parties."
+            "Údaje mohou být sdíleny s dopravci, poskytovateli plateb a e-mailových/SMS notifikací — pouze v rozsahu potřebném k vyřízení objednávky.",
+            "Techničtí poskytovatelé IT/hostingu mohou zahrnovat Vercel (hosting a Vercel Analytics při souhlasu s analytikou) a Google Tag Manager jako infrastrukturu značek — to samo o sobě neaktivuje Google Ads ani GA4.",
+            "Osobní údaje třetím stranám neprodáváme."
           ]
         },
         {
@@ -467,24 +476,27 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
           ]
         },
         {
-          "heading": "How we use cookies",
+          "heading": "Jak cookies používáme",
           "body": [
-            "Necessary cookies power the cart, sign-in and saved language/region preferences — without them the site will not work correctly.",
-            "Analytics cookies (Vercel Analytics) help us understand which pages are popular and how to improve the site. They only activate after you consent."
+            "Nezbytné cookies: nutné pro základní fungování webu (např. košík, přihlášení/relace, jazyk a uložení volby souhlasu). Tuto kategorii nelze ve správě souhlasu vypnout.",
+            "Analytické cookies/technologie: volitelné. Pomáhají nám pochopit, jak návštěvníci web používají (aktuálně včetně Vercel Analytics). Spouštějí se až po souhlasu s kategorií Analytické. Google Analytics 4 momentálně není aktivní.",
+            "Marketingové cookies/technologie: volitelné. Mohou sloužit k měření reklamy, konverzí a souvisejícím reklamním funkcím, pokud jsou zapnuté. Spouštějí se až po souhlasu s kategorií Marketingové. Google Ads a Google Ads konverze momentálně nejsou implementovány a aktivně nesbírají údaje.",
+            "Google Tag Manager používáme jako nástroj pro správu značek. Samotný Tag Manager není reklamní služba; řídí schválené měřicí a marketingové značky podle vašeho souhlasu."
           ]
         },
         {
-          "heading": "Your choice",
+          "heading": "Vaše volba",
           "body": [
-            "On your first visit you see a banner where you can accept all cookies, keep only necessary ones, or customize categories individually.",
-            "You can change your choice at any time below on this page."
+            "Před vaší volbou zůstávají analytické i marketingové technologie vypnuté; aktivní zůstávají jen nezbytné cookies.",
+            "Při první návštěvě můžete přijmout vše, ponechat jen nezbytné, nebo samostatně zapnout/vypnout Analytické a Marketingové.",
+            "Volbu můžete kdykoli změnit na této stránce. Uložená volba souhlasu (soubor ga-cookie-consent) platí přibližně 180 dní, dokud ji nezměníte. Volby souhlasu zaznamenáváme pro účely souladu a auditu."
           ]
         }
 ,
       {
         heading: "Vaše práva",
         body: [
-                  "Souhlas s analytickými cookies můžete kdykoli odvolat. Podrobnosti v [[privacy|Zásadách ochrany osobních údajů]]."
+                  "Souhlas s analytickými nebo marketingovými technologiemi můžete kdykoli odvolat. Podrobnosti v [[privacy|Zásadách ochrany osobních údajů]]."
         ],
       },
       {
@@ -588,20 +600,21 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
           "body": [
             "Дані профілю: ім'я, прізвище, по батькові, телефон, email, адреса доставки.",
             "Дані замовлень: склад замовлення, спосіб та адреса доставки, спосіб оплати, історія статусів.",
-            "Технічні дані: cookie, дані про використання сайту (за наявності згоди на аналітичні cookie)."
+            "Технічні дані: cookie, а також необов’язкові аналітичні та маркетингові/рекламні технології (лише після вашої згоди). Можуть включати дані про пристрій/браузер, взаємодії зі сторінкою та стан згоди. Через Tag Manager / dataLayer ми не надсилаємо ім’я, email, телефон чи адресу."
           ]
         },
         {
           "heading": "3. Мета та правові підстави обробки",
           "body": [
             "Обробка даних клієнтів здійснюється для оформлення та виконання замовлень, зв'язку щодо доставки та підтримки — на підставі виконання договору та згоди користувача.",
-            "Аналітичні cookie використовуються лише за окремою згодою, яку можна відкликати в будь-який час у Політиці Cookie."
+            "Необов’язкові аналітичні та маркетингові/рекламні технології використовуються лише за окремою згодою. Google Tag Manager використовуємо для керування схваленими тегами; Google Analytics 4 і Google Ads наразі не активні. Згоду можна будь-коли змінити або відкликати в Політиці Cookie."
           ]
         },
         {
           "heading": "4. Кому передаються дані",
           "body": [
             "Дані можуть передаватися службам доставки, платіжним провайдерам та постачальникам email/SMS-сповіщень — виключно в обсязі, необхідному для виконання замовлення.",
+            "Технічні ІТ/хостинг-провайдери можуть включати Vercel (хостинг і Vercel Analytics за згоди на аналітику) та Google Tag Manager як інфраструктуру тегів — це саме по собі не активує Google Ads чи GA4.",
             "Ми не продаємо персональні дані третім особам."
           ]
         },
@@ -638,15 +651,18 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
         {
           "heading": "Як ми використовуємо cookie",
           "body": [
-            "Необхідні cookie використовуються для роботи кошика, входу в акаунт та збереження мовних і регіональних налаштувань — без них сайт не працюватиме коректно.",
-            "Аналітичні cookie (Vercel Analytics) допомагають розуміти, які сторінки популярні та як покращити сайт. Вони активуються лише після вашої згоди."
+            "Необхідні cookie: потрібні для базової роботи сайту (наприклад кошик, вхід/сесія, мова та збереження вибору щодо cookie). Цю категорію не можна вимкнути в налаштуваннях згоди.",
+            "Аналітичні cookie/технології: необов’язкові. Допомагають розуміти, як відвідувачі користуються сайтом (наразі зокрема Vercel Analytics). Активуються лише після згоди на категорію «Аналітичні». Google Analytics 4 наразі не активний.",
+            "Маркетингові cookie/технології: необов’язкові. Можуть використовуватися для вимірювання реклами, конверсій і пов’язаних рекламних функцій, коли їх увімкнено. Активуються лише після згоди на категорію «Маркетингові». Google Ads і конверсії Google Ads наразі не впроваджені і активно дані не збирають.",
+            "Google Tag Manager використовуємо як інструмент керування тегами. Сам Tag Manager не є рекламною послугою; він запускає схвалені вимірювальні та маркетингові теги згідно з вашою згодою."
           ]
         },
         {
           "heading": "Ваш вибір",
           "body": [
-            "Під час першого відвідування сайту ви бачите банер з вибором: прийняти всі cookie, залишити лише необхідні або налаштувати категорії окремо.",
-            "Свій вибір можна змінити в будь-який момент нижче на цій сторінці."
+            "До вашого вибору аналітика й маркетинг вимкнені; активними залишаються лише необхідні cookie.",
+            "Під час першого візиту можна прийняти все, залишити лише необхідні або окремо увімкнути/вимкнути «Аналітичні» та «Маркетингові».",
+            "Вибір можна змінити будь-коли на цій сторінці. Збережена згода (cookie ga-cookie-consent) діє приблизно 180 днів, доки ви її не зміните. Рішення щодо згоди фіксуємо для відповідності та аудиту."
           ]
         }
       ],

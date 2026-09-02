@@ -15,6 +15,7 @@ export const LEGAL_CONSENT_PURPOSES = [
   'TERMS',
   'PRIVACY_NOTICE',
   'COOKIES_ANALYTICS',
+  'COOKIES_MARKETING',
   'MARKETING',
 ] as const
 
@@ -54,6 +55,11 @@ export class RecordConsentDto {
   @IsOptional()
   @IsBoolean()
   analytics?: boolean
+
+  /** Cookie marketing / advertising category (Consent Mode ad_*). Not email MARKETING. */
+  @IsOptional()
+  @IsBoolean()
+  marketing?: boolean
 
   @IsOptional()
   @IsObject()

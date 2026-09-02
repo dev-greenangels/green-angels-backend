@@ -129,8 +129,10 @@ export const UA_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
         {
           "heading": "How we use cookies",
           "body": [
-            "Necessary cookies power the cart, sign-in and saved language/region preferences — without them the site will not work correctly.",
-            "Analytics cookies (Vercel Analytics) help us understand which pages are popular and how to improve the site. They only activate after you consent."
+            "Necessary cookies power the cart, sign-in/session, language and storing your cookie choice — without them the site will not work correctly. This category cannot be switched off.",
+            "Analytics cookies/technologies are optional (currently including Vercel Analytics) and run only after Analytics consent. Google Analytics 4 is not currently active.",
+            "Marketing cookies/technologies are optional and may support advertising or conversion measurement when enabled; they run only after Marketing consent. Google Ads is not currently implemented or collecting data.",
+            "Google Tag Manager is used as tag management; it is not itself an advertising service."
           ]
         },
         {
@@ -285,7 +287,7 @@ export const UA_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
           "heading": "Ako používame cookies",
           "body": [
             "Nevyhnutné cookies zabezpečujú fungovanie košíka, prihlásenia a uložených jazykových/regionálnych nastavení — bez nich stránka nebude fungovať správne.",
-            "Analytické cookies (Vercel Analytics) nám pomáhajú pochopiť, ktoré stránky sú populárne a ako stránku vylepšiť. Aktivujú sa len po vašom súhlase."
+            "Analytické cookies/technológie sú voliteľné (momentálne vrátane Vercel Analytics) a spúšťajú sa len po súhlase. Google Analytics 4 momentálne nie je aktívny. Marketingové technológie sú voliteľné a spúšťajú sa len po marketingovom súhlase; Google Ads momentálne nie je implementovaný. Google Tag Manager používame na správu značiek, nie ako reklamu."
           ]
         },
         {
@@ -438,8 +440,10 @@ export const UA_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
         {
           "heading": "Wie wir Cookies verwenden",
           "body": [
-            "Notwendige Cookies ermöglichen Warenkorb, Anmeldung und gespeicherte Sprach-/Regionseinstellungen — ohne sie funktioniert die Website nicht korrekt.",
-            "Analyse-Cookies (Vercel Analytics) helfen uns zu verstehen, welche Seiten beliebt sind und wie wir die Website verbessern können. Sie werden nur nach Ihrer Einwilligung aktiviert."
+            "Notwendige Cookies ermöglichen Warenkorb, Anmeldung/Sitzung, Sprache und Speicherung Ihrer Cookie-Wahl — ohne sie funktioniert die Website nicht korrekt. Diese Kategorie kann nicht deaktiviert werden.",
+            "Analyse-Cookies/Technologien sind optional (derzeit einschließlich Vercel Analytics) und werden erst nach Analyse-Einwilligung aktiv. Google Analytics 4 ist derzeit nicht aktiv.",
+            "Marketing-Cookies/Technologien sind optional und können Werbemessung oder Conversions unterstützen, wenn aktiviert; sie werden erst nach Marketing-Einwilligung aktiv. Google Ads ist derzeit nicht implementiert und erhebt keine Daten.",
+            "Google Tag Manager dient dem Tag-Management und ist selbst keine Werbedienstleistung."
           ]
         },
         {
@@ -592,8 +596,10 @@ export const UA_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
         {
           "heading": "Hogyan használjuk a sütiket",
           "body": [
-            "A szükséges sütik működtetik a kosarat, a bejelentkezést és a mentett nyelvi/régiós beállításokat — ezek nélkül az oldal nem működik megfelelően.",
-            "Az analitikai sütik (Vercel Analytics) segítenek megérteni, mely oldalak népszerűek, és hogyan javíthatjuk az oldalt. Csak hozzájárulás után aktiválódnak."
+            "A szükséges sütik működtetik a kosarat, a bejelentkezést/munkamenetet, a nyelvet és a sütihozzájárulás mentését — ezek nélkül az oldal nem működik megfelelően. Ezt a kategóriát nem lehet kikapcsolni.",
+            "Az analitikai sütik/technológiák opcionálisak (jelenleg beleértve a Vercel Analytics szolgáltatást), és csak Analitika hozzájárulás után aktívak. A Google Analytics 4 jelenleg nem aktív.",
+            "A marketing sütik/technológiák opcionálisak, és hirdetés- vagy konverziómérést támogathatnak, ha be vannak kapcsolva; csak Marketing hozzájárulás után aktívak. A Google Ads jelenleg nincs implementálva, és nem gyűjt adatokat.",
+            "A Google Tag Managert címkekezelésre használjuk; önmagában nem hirdetési szolgáltatás."
           ]
         },
         {
@@ -746,8 +752,10 @@ export const UA_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
         {
           "heading": "How we use cookies",
           "body": [
-            "Necessary cookies power the cart, sign-in and saved language/region preferences — without them the site will not work correctly.",
-            "Analytics cookies (Vercel Analytics) help us understand which pages are popular and how to improve the site. They only activate after you consent."
+            "Necessary cookies power the cart, sign-in/session, language and storing your cookie choice — without them the site will not work correctly. This category cannot be switched off.",
+            "Analytics cookies/technologies are optional (currently including Vercel Analytics) and run only after Analytics consent. Google Analytics 4 is not currently active.",
+            "Marketing cookies/technologies are optional and may support advertising or conversion measurement when enabled; they run only after Marketing consent. Google Ads is not currently implemented or collecting data.",
+            "Google Tag Manager is used as tag management; it is not itself an advertising service."
           ]
         },
         {

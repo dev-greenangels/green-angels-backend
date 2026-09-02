@@ -1409,6 +1409,8 @@ enum LegalConsentPurpose {
   TERMS
   PRIVACY_NOTICE
   COOKIES_ANALYTICS
+  /// Cookie advertising / Consent Mode ad_* — not email newsletter MARKETING.
+  COOKIES_MARKETING
   MARKETING
 }
 
