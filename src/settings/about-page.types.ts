@@ -80,13 +80,6 @@ export const EMPTY_ABOUT_CMS: AboutPageCmsCopy = {
   deliveryCtaLabel: '',
 }
 
-const CMS_BASE = 'https://landshaft.info/img/cms'
-const FOUNDERS = `${CMS_BASE}/${encodeURIComponent('зеленіянголи Андріанна та Ярослав.jpg')}`
-const CUTTINGS = `${CMS_BASE}/1_5.jpg`
-const P9 = `${CMS_BASE}/4_2.jpg`
-const CONTAINERS = `${CMS_BASE}/3_2.jpg`
-const LARGE = `${CMS_BASE}/2_3.jpg`
-const DELIVERY = `${CMS_BASE}/${encodeURIComponent('Дизайн без назви.jpg')}`
 const VIDEO = 'https://www.youtube.com/embed/0cLivRZ4xeM'
 
 const CMS_UK: AboutPageCmsCopy = {
@@ -97,7 +90,7 @@ const CMS_UK: AboutPageCmsCopy = {
   introHtml: `<p>Зелені янголи — це рослини. Вони укривають нас від спеки, утримують воду, очищують повітря, заспокоюють та дарують красу. Вони оберігають наш дім, наше довкілля, наше майбутнє.</p>
 <p>Засновник та власник розсадника «Зелені Янголи» Ярослав Недолуженко — біолог за фахом та фермер у душі. У 2000 році почав розвиватися в зеленому бізнесі як молодий ландшафтний дизайнер, а в 2006 році разом із дружиною Андріанною відкрили свій перший садовий центр. Ярослав завжди мріяв працювати на землі та вирощувати рослини. Його девіз — «Хотіти, ставити цілі, діяти!» — і завдяки цьому кредо за 5 років на занедбаній території виріс один із провідних розсадників Західної України.</p>
 <p>Раніше компанія була відома під назвою «Ландшафт Центр Ужгород», а влітку 2016 року народилися назва та бренд «Зелені Янголи». У вересні 2016 року новостворений бренд «вистрілив» на «Садовому фестивалі» та виграв перше місце за кращий стенд. Того ж року була зареєстрована торгова марка «Зелені Янголи»™ та логотип «Крила».</p>`,
-  foundersImageUrl: FOUNDERS,
+  foundersImageUrl: '',
   foundersImageAlt: 'Андріанна та Ярослав Недолуженко — засновники розсадника «Зелені Янголи»',
   foundersImageStyle: 'rounded',
   statsTitle: 'Розсадник у цифрах',
@@ -159,28 +152,28 @@ const CMS_UK: AboutPageCmsCopy = {
       title: 'Вкорінені живці в мультикасеті',
       description:
         'Хвойні та листяні рослини в мультикасеті (мультипалета) або в перліті (голий корінь). Можна купити з наявності або замовити наперед. Європейська якість від українського виробника — без імпорту, логістики через кордон і карантинних сертифікатів.',
-      imageUrl: CUTTINGS,
+      imageUrl: '',
       imageAlt: 'Вкорінені живці в мультикасеті',
     },
     {
       title: 'Рослини в контейнері P9',
       description:
         'Молоді саджанці 1–2 років, адаптовані до українського клімату. Широкий вибір для альпійських гірок, декоративних трав і грунтопокривних. Компактне пакування в коробці чи на палеті — вигідна доставка для професіоналів і садівників.',
-      imageUrl: P9,
+      imageUrl: '',
       imageAlt: 'Саджанці в горщику P9',
     },
     {
       title: 'Саджанці в контейнері C2–C35',
       description:
         'Рослини у горщику від 2 до 35 літрів із закритою кореневою системою — пересадка у будь-який час року. Популярний матеріал для садових центрів, живих огорож, групових посадок і міського озеленення.',
-      imageUrl: CONTAINERS,
+      imageUrl: '',
       imageAlt: 'Саджанці в контейнері C2–C35',
     },
     {
       title: 'Крупноміри та рослини з комом',
       description:
         'Туї, ялівці, сосни, ялинки від 1 метра; привиті та стрижені форми; листяні дерева з кореневим комом. Професійне викопування, ком за стандартами, упаковка в мішковину та сітку (ЮТА), відправлення по всій Україні.',
-      imageUrl: LARGE,
+      imageUrl: '',
       imageAlt: 'Крупноміри та рослини з кореневим комом',
     },
   ],
@@ -201,7 +194,7 @@ const CMS_UK: AboutPageCmsCopy = {
     'Чернівці',
     'та інші міста України',
   ],
-  deliveryImageUrl: DELIVERY,
+  deliveryImageUrl: '',
   deliveryImageAlt: 'Доставка рослин по Україні',
   deliveryCtaLabel: 'Умови оплати та доставки',
 }
@@ -215,7 +208,7 @@ const CMS_SK: AboutPageCmsCopy = {
   introHtml: `<p>Green Angels je škôlka s vlastnou produkciou listnatých a ihličnatých drevín. Pestujeme rastliny od odrezku a semenáčika až po väčšie veľkosti — s dôrazom na kvalitu koreňového systému, adaptáciu a spoľahlivé dodávky pre záhradkárov, krajinárov aj záhradné centrá.</p>
 <p>Partneri na Slovensku a v EÚ oceňujú predvídateľnú kvalitu, široký sortiment a férovú spoluprácu. Rastliny sú pripravené na stredoeurópske podmienky a bežnú logistiku v rámci EÚ.</p>
 <p>Značka Green Angels spája skúsenosti rodinného pestovania s moderným e‑shopom: transparentný katalóg, jasné veľkosti a podpora pri výbere sortimentu pre váš projekt alebo predajňu.</p>`,
-  foundersImageUrl: FOUNDERS,
+  foundersImageUrl: '',
   foundersImageAlt: 'Tím škôlky Green Angels',
   foundersImageStyle: 'rounded',
   statsTitle: 'Škôlka v číslach',
@@ -277,34 +270,34 @@ const CMS_SK: AboutPageCmsCopy = {
       title: 'Zakorenené odrezky v multicell',
       description:
         'Ihličnany a listnáče v multicell / multipalete alebo v perlite. Dostupné zo skladu alebo na objednávku — vhodné pre ďalšie dopestovanie.',
-      imageUrl: CUTTINGS,
+      imageUrl: '',
       imageAlt: 'Zakorenené odrezky v multicell',
     },
     {
       title: 'Rastliny v kontajneri P9',
       description:
         'Mladé sadenice 1–2 roky, praktické na ďalšie pestovanie a menšie výsadby. Kompaktné balenie výhodné pre dopravu.',
-      imageUrl: P9,
+      imageUrl: '',
       imageAlt: 'Sadenice v kvetináči P9',
     },
     {
       title: 'Sadenice v kontajneri C2–C35',
       description:
         'Rastliny v kvetináči 2–35 l so zatvoreným koreňovým systémom — výsadba počas celej sezóny. Obľúbené pre záhradné centrá a krajinárske projekty.',
-      imageUrl: CONTAINERS,
+      imageUrl: '',
       imageAlt: 'Sadenice v kontajneri C2–C35',
     },
     {
       title: 'Väčšie výpestky a rastliny s balom',
       description:
         'Tuje, borievky, borovice, smreky od 1 m; tvarované formy; listnaté stromy s koreňovým balom. Profesionálne balenie a príprava na prepravu.',
-      imageUrl: LARGE,
+      imageUrl: '',
       imageAlt: 'Väčšie výpestky a rastliny s koreňovým balom',
     },
   ],
-  videoTitle: 'Krátko o škôlke Green Angels',
-  videoSubtitle: 'Video o produkcii, poliach a tíme',
-  videoEmbedUrl: VIDEO,
+  videoTitle: '',
+  videoSubtitle: '',
+  videoEmbedUrl: '',
   deliveryTitle: 'Dodávka rastlín',
   deliveryHtml: `<p>Pripravujeme rastliny na spoľahlivú prepravu — starostlivé balenie a spolupráca s overenými dopravcami. Dodávame maloobchodné aj väčšie partnerské objednávky.</p>
 <p>Pre Slovensko a EÚ nastavujeme logistiku podľa typu tovaru (kontajnery, väčšie výpestky) a dohody s partnerom.</p>`,
@@ -318,7 +311,7 @@ const CMS_SK: AboutPageCmsCopy = {
     'Prešov',
     'a ďalšie mestá SR / EÚ',
   ],
-  deliveryImageUrl: DELIVERY,
+  deliveryImageUrl: '',
   deliveryImageAlt: 'Dodávka rastlín',
   deliveryCtaLabel: 'Podmienky platby a dopravy',
 }
@@ -403,33 +396,31 @@ const CMS_EN_SK: AboutPageCmsCopy = {
       title: 'Rooted cuttings in multicell',
       description:
         'Conifers and deciduous plants in multicell / multipallet or perlite. Available from stock or to order — suitable for further growing-on.',
-      imageUrl: CUTTINGS,
+      imageUrl: '',
       imageAlt: 'Rooted cuttings in multicell',
     },
     {
       title: 'Plants in P9 pots',
       description:
         'Young plants 1–2 years, practical for further growing and smaller plantings. Compact packing favourable for transport.',
-      imageUrl: P9,
+      imageUrl: '',
       imageAlt: 'Plants in P9 pots',
     },
     {
       title: 'Container plants C2–C35',
       description:
         'Plants in 2–35 L pots with a closed root system — plant throughout the season. Popular with garden centres and landscape projects.',
-      imageUrl: CONTAINERS,
+      imageUrl: '',
       imageAlt: 'Container plants C2–C35',
     },
     {
       title: 'Larger stock and balled plants',
       description:
         'Thuja, junipers, pines, spruces from 1 m; shaped forms; deciduous trees with root balls. Professional packing and prep for transport.',
-      imageUrl: LARGE,
+      imageUrl: '',
       imageAlt: 'Larger stock and balled plants',
     },
   ],
-  videoTitle: 'Green Angels nursery in brief',
-  videoSubtitle: 'Video about production, fields and the team',
   deliveryTitle: 'Plant delivery',
   deliveryHtml: `<p>We prepare plants for reliable transport — careful packing and verified carriers. We deliver retail and larger partner orders.</p>
 <p>For Slovakia and the EU we set logistics by goods type (containers, larger stock) and agreement with the partner.</p>`,

@@ -832,17 +832,7 @@ export class ProductsService {
   }): Promise<Prisma.ProductWhereInput> {
     const locale = this.defaultLocale(params.locale)
     const currency = await this.commerce.getDefaultCurrencyCode()
-    const hasFacetFilters = this.hasCatalogFacetFilters({
-      characteristics: params.characteristics,
-      variantAttributes: params.variantAttributes,
-      priceMin: params.priceMin,
-      priceMax: params.priceMax,
-    })
     const and: Prisma.ProductWhereInput[] = [{ isPublished: true }]
-
-    if (hasFacetFilters) {
-      and.push({ variants: { some: { stock: { gt: 0 } } } })
-    }
 
     const normalizedSearch = params.search ? normalizeSearchQuery(params.search) : ''
     if (normalizedSearch) {
@@ -853,7 +843,6 @@ export class ProductsService {
           categoryId: params.categoryId,
           categorySlug: params.categorySlug,
           published: 'true',
-          ...(hasFacetFilters ? { stock: 'in_stock' as const } : {}),
         },
         1,
         10_000,
@@ -921,7 +910,6 @@ export class ProductsService {
       this.prisma.productVariantAttributeValue.findMany({
         where: {
           variant: {
-            stock: { gt: 0 },
             product: productWhere,
           },
         },
@@ -1010,7 +998,6 @@ export class ProductsService {
       and.push({
         variants: {
           some: {
-            stock: { gt: 0 },
             attributeValues: {
               some: {
                 value: {
@@ -1034,7 +1021,6 @@ export class ProductsService {
       and.push({
         variants: {
           some: {
-            stock: { gt: 0 },
             prices: {
               some: {
                 ...this.retailPriceFilter(currency),

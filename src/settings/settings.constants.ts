@@ -418,10 +418,10 @@ export const DEFAULT_HOME_SETTINGS: HomePageSettings = {
     title: 'Наш розсадник',
     subtitle: 'Поля, теплиці, вирощування та пакування — усе під нашим контролем',
     images: [
-      { url: '/images/nursery/field.jpg', caption: 'Поля розсадника' },
-      { url: '/images/nursery/greenhouse.jpg', caption: 'Теплиці вирощування' },
-      { url: '/images/nursery/warehouse.jpg', caption: 'Склад з горщиками' },
-      { url: '/images/nursery/packing.jpg', caption: 'Пакування для відправлення' },
+      { url: '', caption: 'Поля розсадника' },
+      { url: '', caption: 'Теплиці вирощування' },
+      { url: '', caption: 'Склад з горщиками' },
+      { url: '', caption: 'Пакування для відправлення' },
     ],
   },
   freshPlantPhotos: {

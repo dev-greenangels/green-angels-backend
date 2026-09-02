@@ -9,6 +9,7 @@ import {
   type AboutProductLine,
   type AboutStatItem,
 } from './about-page.types'
+import { sanitizeCmsImageUrl } from './cms-image-url'
 
 const MAX_SHORT = 320
 const MAX_TITLE = 240
@@ -62,7 +63,7 @@ function asProductLines(value: unknown): AboutProductLine[] {
       const next: AboutProductLine = {
         title: asTrimmed(item.title, MAX_TITLE),
         description: asTrimmed(item.description, 4000),
-        imageUrl: asTrimmed(item.imageUrl, MAX_URL),
+        imageUrl: sanitizeCmsImageUrl(asTrimmed(item.imageUrl, MAX_URL)),
         imageAlt: asTrimmed(item.imageAlt, MAX_TITLE),
       }
       if (!next.title && !next.imageUrl) return null
@@ -90,7 +91,7 @@ export function normalizeAboutCmsCopy(raw: unknown): AboutPageCmsCopy {
     seoDescription: asTrimmed(source.seoDescription, MAX_SHORT),
     heroTitle: asTrimmed(source.heroTitle, MAX_TITLE),
     introHtml: asTrimmed(source.introHtml, MAX_HTML),
-    foundersImageUrl: asTrimmed(source.foundersImageUrl, MAX_URL),
+    foundersImageUrl: sanitizeCmsImageUrl(asTrimmed(source.foundersImageUrl, MAX_URL)),
     foundersImageAlt: asTrimmed(source.foundersImageAlt, MAX_TITLE),
     foundersImageStyle: asStyle(source.foundersImageStyle),
     statsTitle: asTrimmed(source.statsTitle, MAX_TITLE),
@@ -110,7 +111,7 @@ export function normalizeAboutCmsCopy(raw: unknown): AboutPageCmsCopy {
     deliveryTitle: asTrimmed(source.deliveryTitle, MAX_TITLE),
     deliveryHtml: asTrimmed(source.deliveryHtml, MAX_HTML),
     deliveryCities: asStringList(source.deliveryCities, MAX_LIST, 120),
-    deliveryImageUrl: asTrimmed(source.deliveryImageUrl, MAX_URL),
+    deliveryImageUrl: sanitizeCmsImageUrl(asTrimmed(source.deliveryImageUrl, MAX_URL)),
     deliveryImageAlt: asTrimmed(source.deliveryImageAlt, MAX_TITLE),
     deliveryCtaLabel: asTrimmed(source.deliveryCtaLabel, 120),
   }
@@ -123,7 +124,7 @@ function fillCmsGaps(copy: AboutPageCmsCopy, fallback: AboutPageCmsCopy): AboutP
     seoDescription: copy.seoDescription || fallback.seoDescription,
     heroTitle: copy.heroTitle || fallback.heroTitle,
     introHtml: copy.introHtml || fallback.introHtml,
-    foundersImageUrl: copy.foundersImageUrl || fallback.foundersImageUrl,
+    foundersImageUrl: sanitizeCmsImageUrl(copy.foundersImageUrl || fallback.foundersImageUrl),
     foundersImageAlt: copy.foundersImageAlt || fallback.foundersImageAlt,
     foundersImageStyle: copy.foundersImageStyle || fallback.foundersImageStyle,
     statsTitle: copy.statsTitle || fallback.statsTitle,
@@ -147,10 +148,14 @@ function fillCmsGaps(copy: AboutPageCmsCopy, fallback: AboutPageCmsCopy): AboutP
     deliveryCities: copy.deliveryCities.length
       ? copy.deliveryCities
       : [...fallback.deliveryCities],
-    deliveryImageUrl: copy.deliveryImageUrl || fallback.deliveryImageUrl,
+    deliveryImageUrl: sanitizeCmsImageUrl(copy.deliveryImageUrl || fallback.deliveryImageUrl),
     deliveryImageAlt: copy.deliveryImageAlt || fallback.deliveryImageAlt,
     deliveryCtaLabel: copy.deliveryCtaLabel || fallback.deliveryCtaLabel,
   }
+}
+
+function clearAboutVideo(copy: AboutPageCmsCopy): AboutPageCmsCopy {
+  return { ...copy, videoTitle: '', videoSubtitle: '', videoEmbedUrl: '' }
 }
 
 export function normalizeAboutPageSettings(
@@ -172,7 +177,8 @@ export function normalizeAboutPageSettings(
       const copy = normalizeAboutCmsCopy(rawByLocale[locale])
       if (!isBlankAboutCms(copy)) {
         const fallback = defaults.byLocale[locale] ?? EMPTY_ABOUT_CMS
-        byLocale[locale] = fillCmsGaps(copy, fallback)
+        const merged = fillCmsGaps(copy, fallback)
+        byLocale[locale] = region === 'sk' ? clearAboutVideo(merged) : merged
       }
     }
   }
