@@ -6,6 +6,8 @@ export type LocalizationMessageOverrides = Partial<Record<AppLocale, Record<stri
 
 export type LocalizationSettings = {
   showLanguageSwitcher: boolean
+  /** Link to /faq in the footer «Information» column */
+  showFaqInFooter: boolean
   availableLocales: AppLocale[]
   messageOverrides: LocalizationMessageOverrides
 }
@@ -14,6 +16,7 @@ export const DEFAULT_AVAILABLE_LOCALES: AppLocale[] = ['uk', 'en']
 
 export const DEFAULT_LOCALIZATION_SETTINGS: LocalizationSettings = {
   showLanguageSwitcher: true,
+  showFaqInFooter: true,
   availableLocales: [...DEFAULT_AVAILABLE_LOCALES],
   messageOverrides: {
     uk: {},

@@ -201,4 +201,18 @@ export class ProductsController {
   patchMetaDescTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
     return this.products.patchMetaDescTranslations(id, dto)
   }
+
+  @Get(':id/translations/search-synonyms')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getSearchSynonymsTranslations(@Param('id') id: string) {
+    return this.products.getSearchSynonymsTranslations(id)
+  }
+
+  @Patch(':id/translations/search-synonyms')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  patchSearchSynonymsTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
+    return this.products.patchSearchSynonymsTranslations(id, dto)
+  }
 }

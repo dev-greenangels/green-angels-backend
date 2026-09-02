@@ -327,6 +327,7 @@ export class FlexiService {
     const retail = variant.prices.find((p) => p.currency === currency) ?? variant.prices[0]
     const nextPrice = Math.round(item.price * 100) / 100
 
+    let shouldNotifyRestock = false
     await this.prisma.$transaction(async (tx) => {
       const variantData: { stock?: number; weight?: number } = {}
       if (fields.stock) variantData.stock = item.stock
@@ -398,8 +399,12 @@ export class FlexiService {
         })
       }
 
-      await this.products.touchProductAvailability(variant.productId, tx)
+      const touch = await this.products.touchProductAvailability(variant.productId, tx)
+      shouldNotifyRestock = touch.shouldNotifyRestock
     })
+    if (shouldNotifyRestock) {
+      this.products.flushRestockNotifications([variant.productId])
+    }
 
     return 'updated'
   }
@@ -1166,7 +1171,6 @@ export class FlexiService {
               }
             }
 
-            await this.products.touchProductAvailability(product.id)
             variantsUpserted += 1
           }
         } catch (error) {
@@ -1972,6 +1976,11 @@ export class FlexiService {
   async applyCheckoutStockHints(
     unavailable: Array<{ sku: string; available: number }>,
   ): Promise<void> {
+    const skus = unavailable
+      .map((row) => row.sku.trim())
+      .filter(Boolean)
+    if (!skus.length) return
+
     for (const row of unavailable) {
       const sku = row.sku.trim()
       if (!sku) continue
@@ -1981,6 +1990,12 @@ export class FlexiService {
         data: { stock },
       })
     }
+
+    const variants = await this.prisma.productVariant.findMany({
+      where: { sku: { in: skus } },
+      select: { productId: true },
+    })
+    await this.products.touchAvailabilityForProducts(variants.map((row) => row.productId))
   }
 
   /**

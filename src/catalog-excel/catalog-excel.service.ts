@@ -3,6 +3,7 @@ import { CharacteristicValueType, PackagingKind, Prisma, VariantAttributeType } 
 import ExcelJS from 'exceljs'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { ProductsService } from '../products/products.service'
 import {
   buildCatalogExcelTemplate,
   type CatalogExcelExportData,
@@ -48,7 +49,10 @@ function decimalToNumber(value: Prisma.Decimal | number | null | undefined): num
 
 @Injectable()
 export class CatalogExcelService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly products: ProductsService,
+  ) {}
 
   async buildTemplate(
     mode: CatalogExcelTemplateMode,
@@ -1202,6 +1206,8 @@ export class CatalogExcelService {
       signatureIndex.set(sig, v.id)
     }
 
+    const affectedProductIds = new Set<string>()
+
     for (const row of rows) {
       try {
         const v = row.values
@@ -1322,6 +1328,7 @@ export class CatalogExcelService {
           if (sku) bySku.set(sku, { id: existingId, sku, ean, legacyId, productId, attributeValues: [] })
           if (ean) byEan.set(ean, { id: existingId, sku, ean, legacyId, productId, attributeValues: [] })
           stats.updated++
+          affectedProductIds.add(productId)
         } else {
           const priceCreates: Array<{ priceType: string; currency: string; value: number }> = []
           if (priceUah != null) {
@@ -1356,11 +1363,14 @@ export class CatalogExcelService {
             noAttrVariantByProduct.set(productId, created.id)
           }
           stats.created++
+          affectedProductIds.add(productId)
         }
       } catch (err) {
         pushExcelError(stats, SHEET_VARIANTS, row.rowNumber, this.errorMessage(err))
       }
     }
+
+    await this.products.touchAvailabilityForProducts(affectedProductIds)
   }
 
   private async upsertVariantPrices(

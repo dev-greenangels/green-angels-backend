@@ -67,7 +67,7 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
     'PRIVACY',
     'de',
     "Datenschutzerklärung",
-    "GDPR privacy notice. Controller: {sellerName}, IČO {ico}, DIČ {dic}, IČ DPH {icDph}, {legalAddress}. Slovak/EU law applies.",
+    "Diese Datenschutzerklärung erfüllt die Informationspflicht nach der DSGVO und dem Gesetz Nr. 18/2018 Z. z. über den Schutz personenbezogener Daten.",
     [
         {
           "heading": "1. Verantwortlicher",
@@ -110,7 +110,9 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
           "body": [
             "Sie haben das Recht auf Auskunft, Berichtigung, Löschung (Anonymisierung), Einschränkung und Widerspruch gegen die Verarbeitung Ihrer Daten.",
             "Sie können eine Kopie Ihrer Daten herunterladen oder Ihr Konto in Ihrer Übersicht unter „Einstellungen“ → „Daten & Datenschutz“ löschen."
-          ]
+         ,
+            "E-Mail zur Ausübung Ihrer Rechte (DSGVO): {supportEmail}"
+ ]
         }
       ],
   ),
@@ -140,6 +142,19 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
             "Sie können Ihre Wahl jederzeit unten auf dieser Seite ändern."
           ]
         }
+,
+      {
+        heading: "Ihre Rechte",
+        body: [
+                  "Sie können Ihre Einwilligung zu Analyse-Cookies jederzeit widerrufen. Details in der [[privacy|Datenschutzerklärung]]."
+        ],
+      },
+      {
+        heading: "Kontakt",
+        body: [
+                  "Widerruf oder Anfragen: {supportEmail}"
+        ],
+      }
       ],
   ),
   legalSeedEntry(
@@ -221,7 +236,7 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
     'PRIVACY',
     'hu',
     "Adatvédelmi irányelvek",
-    "GDPR privacy notice. Controller: {sellerName}, IČO {ico}, DIČ {dic}, IČ DPH {icDph}, {legalAddress}. Slovak/EU law applies.",
+    "Ez az adatvédelmi tájékoztató teljesíti a GDPR és a 18/2018 Z. z. törvény szerinti tájékoztatási kötelezettséget.",
     [
         {
           "heading": "1. Adatkezelő",
@@ -264,7 +279,9 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
           "body": [
             "Önnek joga van hozzáférni, helyesbíteni, törölni (anonimizálni), korlátozni és tiltakozni adatai kezelése ellen.",
             "Adatai másolatát letöltheti, vagy törölheti fiókját az irányítópulton, a „Beállítások” → „Adatok és adatvédelem” menüpontban."
-          ]
+         ,
+            "E-mail a jogok gyakorlásához (GDPR): {supportEmail}"
+ ]
         }
       ],
   ),
@@ -294,6 +311,19 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
             "Választását bármikor módosíthatja az alábbiakban ezen az oldalon."
           ]
         }
+,
+      {
+        heading: "Az Ön jogai",
+        body: [
+                  "Az analitikai sütikhez adott hozzájárulást bármikor visszavonhatja. Részletek: [[privacy|Adatvédelmi irányelvek]]."
+        ],
+      },
+      {
+        heading: "Kapcsolat",
+        body: [
+                  "Visszavonás vagy kérelmek: {supportEmail}"
+        ],
+      }
       ],
   ),
   legalSeedEntry(
@@ -375,7 +405,7 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
     'PRIVACY',
     'cs',
     "Privacy policy",
-    "GDPR privacy notice. Controller: {sellerName}, IČO {ico}, DIČ {dic}, IČ DPH {icDph}, {legalAddress}. Slovak/EU law applies.",
+    "Toto prohlášení o ochraně osobních údajů plní informační povinnost podle GDPR a zákona č. 18/2018 Z. z.",
     [
         {
           "heading": "1. Data controller",
@@ -418,7 +448,9 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
           "body": [
             "You have the right to access, correct, delete (anonymize), restrict, and object to the processing of your data.",
             "You can download a copy of your data or delete your account from your dashboard, under \"Settings\" → \"Data & privacy\"."
-          ]
+         ,
+            "E-mail pro uplatnění práv (GDPR): {supportEmail}"
+ ]
         }
       ],
   ),
@@ -448,6 +480,19 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
             "You can change your choice at any time below on this page."
           ]
         }
+,
+      {
+        heading: "Vaše práva",
+        body: [
+                  "Souhlas s analytickými cookies můžete kdykoli odvolat. Podrobnosti v [[privacy|Zásadách ochrany osobních údajů]]."
+        ],
+      },
+      {
+        heading: "Kontakt",
+        body: [
+                  "Odvolání nebo žádosti: {supportEmail}"
+        ],
+      }
       ],
   ),
   legalSeedEntry(
@@ -529,7 +574,7 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
     'PRIVACY',
     'uk',
     "Політика конфіденційності",
-    "Повідомлення про обробку даних за GDPR. Контролер: {sellerName}, IČO {ico}, DIČ {dic}, IČ DPH {icDph}, {legalAddress}. Застосовується право СР/ЄС.",
+    "Це повідомлення виконує інформаційний обов’язок згідно з GDPR та законом СР № 18/2018 Z. z.",
     [
         {
           "heading": "1. Контролер персональних даних",
@@ -572,7 +617,9 @@ export const SK_EXTENDED_LEGAL_SEED: LegalSeedEntry[] = [
           "body": [
             "Ви маєте право на доступ до своїх даних, їх виправлення, видалення (анонімізацію), обмеження обробки та заперечення проти обробки.",
             "Завантажити копію своїх даних або видалити акаунт можна в особистому кабінеті, у розділі «Налаштування» → «Дані та конфіденційність»."
-          ]
+         ,
+            "E-mail для реалізації прав (GDPR): {supportEmail}"
+ ]
         }
       ],
   ),

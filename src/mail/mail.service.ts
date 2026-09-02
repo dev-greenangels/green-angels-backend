@@ -10,6 +10,10 @@ import {
   resolveLifecycleEmailLocale,
 } from './order-lifecycle-email-labels'
 import { ResendTransport } from './resend.transport'
+import {
+  buildStockAvailableEmailContent,
+} from './stock-available-email-labels'
+import type { StockNotificationLocale } from '../stock-notifications/stock-notification-locale'
 
 @Injectable()
 export class MailService {
@@ -375,8 +379,10 @@ export class MailService {
     name: string
     productName: string
     productUrl: string
-    locale: string
+    locale: StockNotificationLocale
     countrySiteCode?: CountrySiteCode | null
+    subscriptionDate: Date
+    companyName: string
   }): Promise<void> {
     if (!this.isConfigured()) {
       this.logger.warn('Resend не налаштовано — сповіщення про наявність не надіслано')
@@ -389,7 +395,14 @@ export class MailService {
     })
     if (!identity) return
 
-    const copy = this.stockAvailableCopy(input.locale, input.name, input.productName, input.productUrl)
+    const copy = buildStockAvailableEmailContent({
+      locale: input.locale,
+      name: input.name,
+      productName: input.productName,
+      productUrl: input.productUrl,
+      companyName: input.companyName,
+      subscriptionDate: input.subscriptionDate,
+    })
     await this.resend.send({
       from: identity.from,
       to: input.to,
@@ -398,27 +411,5 @@ export class MailService {
       text: copy.text,
       html: copy.html,
     })
-  }
-
-  private stockAvailableCopy(locale: string, name: string, productName: string, url: string) {
-    if (locale === 'sk') {
-      return {
-        subject: `${productName} je opäť na sklade`,
-        text: `Dobrý deň, ${name}.\n\n${productName} je opäť na sklade:\n${url}\n\nGreen Angels`,
-        html: `<p>Dobrý deň, ${name}.</p><p><strong>${productName}</strong> je opäť na sklade.</p><p><a href="${url}">Otvoriť produkt</a></p>`,
-      }
-    }
-    if (locale === 'en') {
-      return {
-        subject: `${productName} is back in stock`,
-        text: `Hello, ${name}.\n\n${productName} is back in stock:\n${url}\n\nGreen Angels`,
-        html: `<p>Hello, ${name}.</p><p><strong>${productName}</strong> is back in stock.</p><p><a href="${url}">Open product</a></p>`,
-      }
-    }
-    return {
-      subject: `${productName} знову в наявності`,
-      text: `Доброго дня, ${name}.\n\n${productName} знову в наявності:\n${url}\n\nЗелені Янголи`,
-      html: `<p>Доброго дня, ${name}.</p><p><strong>${productName}</strong> знову в наявності.</p><p><a href="${url}">Відкрити товар</a></p>`,
-    }
   }
 }

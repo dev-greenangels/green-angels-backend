@@ -92,6 +92,7 @@ export class MailIdentityService {
       countrySiteCode,
       localPart,
       replyToOverride: input.replyToOverride,
+      marketRegion: market.region,
     })
     if (!identity) {
       this.logger.warn(

@@ -487,6 +487,7 @@ export class OrderPaymentLifecycleService {
 
   /** Idempotent stock++ using OrderItem.stockDecremented (never quantity). */
   async releaseLocalStockReservation(orderId: string): Promise<void> {
+    const restockNotifyIds = new Set<string>()
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT 1 FROM "Order" WHERE id = ${orderId} FOR UPDATE`
 
@@ -523,7 +524,8 @@ export class OrderPaymentLifecycleService {
         if (variant?.productId) affectedProductIds.add(variant.productId)
       }
       for (const productId of affectedProductIds) {
-        await this.products.touchProductAvailability(productId, tx)
+        const touch = await this.products.touchProductAvailability(productId, tx)
+        if (touch.shouldNotifyRestock) restockNotifyIds.add(productId)
       }
 
       await tx.order.update({
@@ -531,6 +533,7 @@ export class OrderPaymentLifecycleService {
         data: { stockReleasedAt: new Date() },
       })
     })
+    this.products.flushRestockNotifications(restockNotifyIds)
   }
 
   /** BullMQ: cancel AWAITING_PAYMENT card orders past SYSTEM cancel clock (+40m). */

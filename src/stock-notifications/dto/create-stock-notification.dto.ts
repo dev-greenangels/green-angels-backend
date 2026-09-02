@@ -11,7 +11,7 @@ import {
   MinLength,
 } from 'class-validator'
 
-const LOCALES = ['uk', 'en', 'sk', 'hu', 'de', 'cs'] as const
+import { SUPPORTED_LOCALES } from '../../settings/localization.types'
 
 function trimString(value: unknown): unknown {
   return typeof value === 'string' ? value.trim() : value
@@ -46,7 +46,7 @@ export class CreateStockNotificationDto {
 
   @IsOptional()
   @Transform(({ value }) => trimString(value))
-  @IsIn(LOCALES)
+  @IsIn([...SUPPORTED_LOCALES])
   locale?: string
 
   /** SK storefront host country site; omit on UA. */

@@ -41,6 +41,7 @@ import {
   EMPTY_SELLER,
   interpolateLegalText,
   resolveLegalSeller,
+  resolveSupportEmail,
   sellerPlaceholderVars,
   type LegalSellerIdentity,
 } from './legal-seller'
@@ -49,9 +50,9 @@ const LOCALE_FALLBACKS: Record<string, string[]> = {
   uk: ['uk', 'en'],
   en: ['en', 'sk', 'uk'],
   sk: ['sk', 'en'],
-  hu: ['en', 'sk'],
-  de: ['en', 'sk'],
-  cs: ['en', 'sk'],
+  hu: ['hu', 'en', 'sk'],
+  de: ['de', 'en', 'sk'],
+  cs: ['cs', 'en', 'sk'],
 }
 
 const PURPOSE_DOCUMENT: Record<LegalConsentPurpose, LegalDocumentType> = {
@@ -853,8 +854,8 @@ LIMIT 50000`,
   ): Promise<LegalPublicDocument | null> {
     const row = await this.findPublishedRow(type, locale)
     if (!row) return null
-    const seller = await this.getSeller()
-    const vars = sellerPlaceholderVars(seller)
+    const { seller, supportEmail } = await this.getSellerContext()
+    const vars = sellerPlaceholderVars(seller, supportEmail)
     return {
       id: row.documentId,
       type,
@@ -925,19 +926,30 @@ LIMIT 50000`,
     }
   }
 
-  private async getSeller(): Promise<LegalSellerIdentity> {
+  private async getSellerContext(): Promise<{
+    seller: LegalSellerIdentity
+    supportEmail: string
+  }> {
     try {
       const [cart, store] = await Promise.all([
         this.settings.getCartCheckoutSettings(),
         this.settings.getStoreContactSettings(),
       ])
-      return resolveLegalSeller(cart, store)
+      return {
+        seller: resolveLegalSeller(cart, store),
+        supportEmail: resolveSupportEmail(store),
+      }
     } catch (error) {
       this.logger.warn(
         `Seller identity unavailable: ${error instanceof Error ? error.message : String(error)}`,
       )
-      return EMPTY_SELLER
+      return { seller: EMPTY_SELLER, supportEmail: '' }
     }
+  }
+
+  private async getSeller(): Promise<LegalSellerIdentity> {
+    const { seller } = await this.getSellerContext()
+    return seller
   }
 
   private parseContent(raw: string): LegalSeedSection[] {

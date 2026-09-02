@@ -1753,6 +1753,7 @@ export class OrdersService {
     const shouldAwaitConnectedExport =
       isExternalInventory && shouldExportNow && !erpOfflineAccepted
 
+    const restockNotifyIds = new Set<string>()
     const order = await this.prisma.$transaction(async (tx) => {
       const created = await tx.order.create({
         data: {
@@ -1933,7 +1934,8 @@ export class OrdersService {
       }
 
       for (const productId of affectedProductIds) {
-        await this.products.touchProductAvailability(productId, tx)
+        const touch = await this.products.touchProductAvailability(productId, tx)
+        if (touch.shouldNotifyRestock) restockNotifyIds.add(productId)
       }
 
       if (quote.promoCodeIds.length > 0) {
@@ -1982,6 +1984,7 @@ export class OrdersService {
 
       return created
     })
+    this.products.flushRestockNotifications(restockNotifyIds)
 
     void this.legal
       .recordCheckoutConsents({
@@ -2141,6 +2144,7 @@ export class OrdersService {
     orderId: string,
     lineItems: Array<{ productVariantId: string; stockToDecrement: number }>,
   ): Promise<void> {
+    const restockNotifyIds = new Set<string>()
     await this.prisma.$transaction(async (tx) => {
       const stockNeeds = new Map<string, number>()
       for (const item of lineItems) {
@@ -2165,7 +2169,8 @@ export class OrdersService {
       }
 
       for (const productId of affectedProductIds) {
-        await this.products.touchProductAvailability(productId, tx)
+        const touch = await this.products.touchProductAvailability(productId, tx)
+        if (touch.shouldNotifyRestock) restockNotifyIds.add(productId)
       }
 
       const points = await tx.pointsLedgerEntry.findMany({
@@ -2194,6 +2199,7 @@ export class OrdersService {
       await tx.referralAttribution.deleteMany({ where: { orderId } })
       await tx.order.delete({ where: { id: orderId } })
     })
+    this.products.flushRestockNotifications(restockNotifyIds)
   }
 
   async buildConfirmationPdf(

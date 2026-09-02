@@ -51,9 +51,11 @@ export function canonicalHostForCountryCode(
 
 export function emailDomain(email: string | null | undefined): string | null {
   const trimmed = email?.trim().toLowerCase() ?? ''
-  const at = trimmed.lastIndexOf('@')
-  if (at <= 0 || at === trimmed.length - 1) return null
-  return trimmed.slice(at + 1)
+  const bracket = trimmed.match(/<([^>]+)>/)
+  const addr = (bracket ? bracket[1] : trimmed).trim()
+  const at = addr.lastIndexOf('@')
+  if (at <= 0 || at === addr.length - 1) return null
+  return addr.slice(at + 1)
 }
 
 export function protocolFromSiteUrl(siteUrl: string | null | undefined): 'http' | 'https' {

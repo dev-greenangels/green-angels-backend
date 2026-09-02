@@ -27,11 +27,39 @@ function trimField(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function findLabeledContact<T extends { label: string }>(
+  items: T[],
+  labels: string[],
+): T | undefined {
+  const normalized = labels.map((label) => label.toLowerCase())
+  return (
+    items.find((item) => normalized.includes(item.label.trim().toLowerCase())) ?? items[0]
+  )
+}
+
+/** Public support email from store.contact (label «support» / «kontakt» / first entry). */
+export function resolveSupportEmail(
+  store: Pick<StoreContactSettings, 'emails'>,
+): string {
+  const emails = (store.emails ?? []).filter((item) => item.email?.trim())
+  return (
+    findLabeledContact(emails, ['підтримка', 'support', 'kontakt', 'contact'])?.email.trim() ??
+    emails[0]?.email.trim() ??
+    ''
+  )
+}
+
 export function resolveLegalSeller(
   cart: Pick<CartCheckoutSettings, 'bankDetailsSource' | 'bankDetails'>,
   store: Pick<StoreContactSettings, 'companyDetails'>,
 ): LegalSellerIdentity {
-  const bank = cart.bankDetailsSource === 'store' ? store.companyDetails : cart.bankDetails
+  const primary = cart.bankDetailsSource === 'store' ? store.companyDetails : cart.bankDetails
+  const bank =
+    trimField(primary?.organizationName) ||
+    trimField(primary?.edrpou) ||
+    trimField(primary?.legalAddress)
+      ? primary
+      : store.companyDetails
   return {
     organizationName: trimField(bank?.organizationName),
     ico: trimField(bank?.edrpou),
@@ -44,7 +72,10 @@ export function resolveLegalSeller(
   }
 }
 
-export function sellerPlaceholderVars(seller: LegalSellerIdentity): Record<string, string> {
+export function sellerPlaceholderVars(
+  seller: LegalSellerIdentity,
+  supportEmail = '',
+): Record<string, string> {
   const dash = (value: string) => value || '—'
   return {
     sellerName: dash(seller.organizationName),
@@ -58,6 +89,7 @@ export function sellerPlaceholderVars(seller: LegalSellerIdentity): Record<strin
     iban: dash(seller.iban),
     bankName: dash(seller.bankName),
     taxStatus: dash(seller.taxStatus),
+    supportEmail: dash(supportEmail),
   }
 }
 

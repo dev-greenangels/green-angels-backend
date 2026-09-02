@@ -22,6 +22,7 @@ import { CategoriesService } from '../categories/categories.service'
 import { normalizeCatalogNameLetter, sortCatalogNameLetters } from '../catalog/locale-alphabet'
 import { normalizeSearchQuery } from '../search/normalize-search-query'
 import { ProductSearchService } from '../search/product-search.service'
+import { normalizeSearchSynonymsInput } from './search-synonyms'
 import { PatchTranslationsDto } from '../characteristics/dto/patch-translations.dto'
 import { SUPPORTED_LOCALES } from '../settings/localization.types'
 import { CreateProductDto } from './dto/create-product.dto'
@@ -38,6 +39,10 @@ import { type CatalogAvailableFacets, groupSlugFilterPairs } from './product-fil
 import { toVariantDisplayAttributes } from './to-variant-display-attributes'
 import { VARIANT_LABEL_ATTRIBUTE_SELECT } from './variant-label.util'
 import { VariantLabelService } from './variant-label.service'
+import {
+  NO_PRODUCT_AVAILABILITY_TOUCH,
+  type ProductAvailabilityTouchResult,
+} from './product-availability.types'
 
 export type CatalogStorefrontVariant = {
   id: string
@@ -122,10 +127,12 @@ export type BackstageProductVariant = {
 
 export type BackstageProductDetail = BackstageProductListItem & {
   description: string | null
+  searchSynonyms: string | null
   metaTitle: string | null
   metaDesc: string | null
   nameHint?: { locale: string; text: string } | null
   descriptionHint?: { locale: string; text: string } | null
+  searchSynonymsHint?: { locale: string; text: string } | null
   metaTitleHint?: { locale: string; text: string } | null
   metaDescHint?: { locale: string; text: string } | null
   additionalCategoryIds: string[]
@@ -663,20 +670,20 @@ export class ProductsService {
   async touchProductAvailability(
     productId: string,
     tx?: Prisma.TransactionClient,
-  ): Promise<void> {
+  ): Promise<ProductAvailabilityTouchResult> {
     const client = tx ?? this.prisma
     const variants = await client.productVariant.findMany({
       where: { productId },
       select: { stock: true },
     })
-    if (!variants.length) return
+    if (!variants.length) return NO_PRODUCT_AVAILABILITY_TOUCH
 
     const inStock = variants.some((variant) => variant.stock > 0)
     const product = await client.product.findUnique({
       where: { id: productId },
       select: { fullyOutOfStockAt: true, restockedAt: true, createdAt: true },
     })
-    if (!product) return
+    if (!product) return NO_PRODUCT_AVAILABILITY_TOUCH
 
     if (inStock) {
       if (product.fullyOutOfStockAt != null) {
@@ -684,14 +691,15 @@ export class ProductsService {
           where: { id: productId },
           data: { restockedAt: new Date(), fullyOutOfStockAt: null },
         })
-        this.stockNotifications.scheduleRestockNotify(productId)
-      } else if (product.restockedAt == null) {
+        return { shouldNotifyRestock: true }
+      }
+      if (product.restockedAt == null) {
         await client.product.update({
           where: { id: productId },
           data: { restockedAt: product.createdAt },
         })
       }
-      return
+      return NO_PRODUCT_AVAILABILITY_TOUCH
     }
 
     if (product.fullyOutOfStockAt == null) {
@@ -700,6 +708,26 @@ export class ProductsService {
         data: { fullyOutOfStockAt: new Date() },
       })
     }
+    return NO_PRODUCT_AVAILABILITY_TOUCH
+  }
+
+  flushRestockNotifications(productIds: Iterable<string>): void {
+    const seen = new Set<string>()
+    for (const productId of productIds) {
+      if (!productId || seen.has(productId)) continue
+      seen.add(productId)
+      this.stockNotifications.scheduleRestockNotify(productId)
+    }
+  }
+
+  async touchAvailabilityForProducts(productIds: Iterable<string>): Promise<void> {
+    const notifyIds = new Set<string>()
+    const unique = [...new Set(productIds)].filter(Boolean)
+    for (const productId of unique) {
+      const result = await this.touchProductAvailability(productId)
+      if (result.shouldNotifyRestock) notifyIds.add(productId)
+    }
+    this.flushRestockNotifications(notifyIds)
   }
 
   private isProductInStock(
@@ -1448,6 +1476,7 @@ export class ProductsService {
     variantDtos: CreateProductVariantDto[],
     currency: string,
     defaultSalesUnitId: string | null,
+    restockNotifyIds?: Set<string>,
   ) {
     const existingVariants = await tx.productVariant.findMany({
       where: { productId },
@@ -1572,7 +1601,8 @@ export class ProductsService {
       }
     }
 
-    await this.touchProductAvailability(productId, tx)
+    const touch = await this.touchProductAvailability(productId, tx)
+    if (touch.shouldNotifyRestock) restockNotifyIds?.add(productId)
   }
 
   private async syncImages(
@@ -2110,9 +2140,12 @@ export class ProductsService {
           where: { productId: { in: existingIds } },
           data: { stock: dto.stock },
         })
+        const restockNotifyIds = new Set<string>()
         for (const productId of existingIds) {
-          await this.touchProductAvailability(productId)
+          const touch = await this.touchProductAvailability(productId)
+          if (touch.shouldNotifyRestock) restockNotifyIds.add(productId)
         }
+        this.flushRestockNotifications(restockNotifyIds)
         return { action: dto.action, affected: existingIds.length, variantsUpdated: result.count, stock: dto.stock }
       }
       default:
@@ -2335,6 +2368,7 @@ export class ProductsService {
       locale?: string
       name: string
       description?: string | null
+      searchSynonyms?: string | null
       metaTitle?: string | null
       metaDesc?: string | null
     }>
@@ -2443,6 +2477,13 @@ export class ProductsService {
               })),
               locale,
             ),
+            searchSynonymsHint: pickTranslationHint(
+              product.translations.map((item) => ({
+                locale: item.locale,
+                value: item.searchSynonyms,
+              })),
+              locale,
+            ),
             metaTitleHint: pickTranslationHint(
               product.translations.map((item) => ({ locale: item.locale, value: item.metaTitle })),
               locale,
@@ -2467,6 +2508,15 @@ export class ProductsService {
         ? row?.description?.trim() || null
         : pickLocalizedText(
             product.translations.map((item) => ({ locale: item.locale, value: item.description })),
+            locale,
+          ),
+      searchSynonyms: strictLocale
+        ? row?.searchSynonyms?.trim() || null
+        : pickLocalizedText(
+            product.translations.map((item) => ({
+              locale: item.locale,
+              value: item.searchSynonyms,
+            })),
             locale,
           ),
       metaTitle: strictLocale
@@ -2509,6 +2559,8 @@ export class ProductsService {
       this.commerce.getDefaultSalesUnitId(),
     ])
 
+    const restockNotifyIds = new Set<string>()
+    const normalizedSearchSynonyms = normalizeSearchSynonymsInput(dto.searchSynonyms)
     const productId = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
         data: {
@@ -2523,6 +2575,7 @@ export class ProductsService {
               locale,
               name: dto.name.trim(),
               description: dto.description?.trim() || null,
+              searchSynonyms: normalizedSearchSynonyms,
               metaTitle: dto.metaTitle?.trim() || null,
               metaDesc: dto.metaDesc?.trim() || null,
             },
@@ -2536,10 +2589,11 @@ export class ProductsService {
         },
       })
 
-      await this.syncVariants(tx, product.id, variantDtos, currency, defaultSalesUnitId)
+      await this.syncVariants(tx, product.id, variantDtos, currency, defaultSalesUnitId, restockNotifyIds)
       await this.syncImages(tx, product.id, dto.images)
       return product.id
     })
+    this.flushRestockNotifications(restockNotifyIds)
 
     return this.findOne(productId, locale, true)
   }
@@ -2571,6 +2625,8 @@ export class ProductsService {
       this.commerce.getDefaultSalesUnitId(),
     ])
 
+    const restockNotifyIds = new Set<string>()
+    const normalizedSearchSynonyms = normalizeSearchSynonymsInput(dto.searchSynonyms)
     await this.prisma.$transaction(async (tx) => {
       await tx.product.update({
         where: { id },
@@ -2593,12 +2649,14 @@ export class ProductsService {
           locale,
           name: dto.name.trim(),
           description: dto.description?.trim() || null,
+          searchSynonyms: normalizedSearchSynonyms,
           metaTitle: dto.metaTitle?.trim() || null,
           metaDesc: dto.metaDesc?.trim() || null,
         },
         update: {
           name: dto.name.trim(),
           description: dto.description?.trim() || null,
+          searchSynonyms: normalizedSearchSynonyms,
           metaTitle: dto.metaTitle?.trim() || null,
           metaDesc: dto.metaDesc?.trim() || null,
         },
@@ -2621,9 +2679,10 @@ export class ProductsService {
         })
       }
 
-      await this.syncVariants(tx, id, variantDtos, currency, defaultSalesUnitId)
+      await this.syncVariants(tx, id, variantDtos, currency, defaultSalesUnitId, restockNotifyIds)
       await this.syncImages(tx, id, dto.images)
     })
+    this.flushRestockNotifications(restockNotifyIds)
 
     return this.findOne(id, locale, true)
   }
@@ -2636,7 +2695,7 @@ export class ProductsService {
 
   private async getProductFieldTranslations(
     productId: string,
-    field: 'name' | 'description' | 'metaTitle' | 'metaDesc',
+    field: 'name' | 'description' | 'searchSynonyms' | 'metaTitle' | 'metaDesc',
   ) {
     await this.assertProductExists(productId)
     const rows = await this.prisma.productTranslation.findMany({ where: { productId } })
@@ -2650,7 +2709,7 @@ export class ProductsService {
 
   private async patchProductFieldTranslations(
     productId: string,
-    field: 'name' | 'description' | 'metaTitle' | 'metaDesc',
+    field: 'name' | 'description' | 'searchSynonyms' | 'metaTitle' | 'metaDesc',
     dto: PatchTranslationsDto,
   ) {
     const product = await this.prisma.product.findUnique({
@@ -2664,10 +2723,10 @@ export class ProductsService {
 
     for (const [locale, raw] of Object.entries(dto.translations)) {
       if (!(SUPPORTED_LOCALES as readonly string[]).includes(locale)) continue
-      const value = raw.trim()
-      if (!value) continue
 
       if (field === 'name') {
+        const value = raw.trim()
+        if (!value) continue
         await this.prisma.productTranslation.upsert({
           where: { productId_locale: { productId, locale } },
           create: { productId, locale, name: value },
@@ -2676,12 +2735,18 @@ export class ProductsService {
         continue
       }
 
+      const value =
+        field === 'searchSynonyms' ? normalizeSearchSynonymsInput(raw) : raw.trim() || null
+      if (field !== 'searchSynonyms' && !value) continue
+
       const data =
         field === 'description'
           ? { description: value }
-          : field === 'metaTitle'
-            ? { metaTitle: value }
-            : { metaDesc: value }
+          : field === 'searchSynonyms'
+            ? { searchSynonyms: value }
+            : field === 'metaTitle'
+              ? { metaTitle: value }
+              : { metaDesc: value }
 
       const localeName =
         product.translations.find((row) => row.locale === locale)?.name?.trim() ||
@@ -2728,5 +2793,13 @@ export class ProductsService {
 
   patchMetaDescTranslations(productId: string, dto: PatchTranslationsDto) {
     return this.patchProductFieldTranslations(productId, 'metaDesc', dto)
+  }
+
+  getSearchSynonymsTranslations(productId: string) {
+    return this.getProductFieldTranslations(productId, 'searchSynonyms')
+  }
+
+  patchSearchSynonymsTranslations(productId: string, dto: PatchTranslationsDto) {
+    return this.patchProductFieldTranslations(productId, 'searchSynonyms', dto)
   }
 }

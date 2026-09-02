@@ -8,7 +8,7 @@ import {
   resolveShopPublicOrigin,
   sanitizeReturnBaseUrl,
 } from './country-hosts'
-import { buildMailIdentity } from './mail-identity.rules'
+import { buildMailIdentity, formatMailFromAddress } from './mail-identity.rules'
 
 const SK_HOSTS =
   'green-angels.sk:sk,www.green-angels.sk:sk,green-angels.hu:hu,www.green-angels.hu:hu,green-angels.at:at,www.green-angels.at:at'
@@ -35,9 +35,10 @@ describe('buildMailIdentity OTP', () => {
       domain: 'green-angels.sk',
       supportEmail: 'info@green-angels.sk',
       countrySiteCode: 'sk',
+      marketRegion: 'sk',
     })
     assert.deepEqual(id, {
-      from: 'noreply@green-angels.sk',
+      from: '"Green Angels" <noreply@green-angels.sk>',
       replyTo: 'info@green-angels.sk',
       domain: 'green-angels.sk',
       countrySiteCode: 'sk',
@@ -51,8 +52,9 @@ describe('buildMailIdentity OTP', () => {
         domain: 'green-angels.at',
         supportEmail: 'info@green-angels.at',
         countrySiteCode: 'at',
+        marketRegion: 'sk',
       })?.from,
-      'noreply@green-angels.at',
+      '"Green Angels" <noreply@green-angels.at>',
     )
     assert.equal(
       buildMailIdentity({
@@ -71,8 +73,9 @@ describe('buildMailIdentity OTP', () => {
       domain: 'landshaft.info',
       supportEmail: 'office@landshaft.info',
       countrySiteCode: null,
+      marketRegion: 'ua',
     })
-    assert.equal(id?.from, 'noreply@landshaft.info')
+    assert.equal(id?.from, '"Зелені Янголи" <noreply@landshaft.info>')
     assert.equal(id?.replyTo, 'office@landshaft.info')
   })
 })
@@ -90,8 +93,9 @@ describe('buildMailIdentity order', () => {
         domain,
         supportEmail: support,
         countrySiteCode: code,
+        marketRegion: 'sk',
       })
-      assert.equal(id?.from, support)
+      assert.equal(id?.from, formatMailFromAddress('Green Angels', support))
       assert.equal(id?.replyTo, support)
     }
   })
@@ -102,8 +106,9 @@ describe('buildMailIdentity order', () => {
       domain: 'landshaft.info',
       supportEmail: 'office@landshaft.info',
       countrySiteCode: null,
+      marketRegion: 'ua',
     })
-    assert.equal(id?.from, 'office@landshaft.info')
+    assert.equal(id?.from, '"Зелені Янголи" <office@landshaft.info>')
     assert.equal(id?.replyTo, 'office@landshaft.info')
   })
 
@@ -130,8 +135,9 @@ describe('delivery/tax country must not affect identity', () => {
       domain: 'green-angels.sk',
       supportEmail: 'info@green-angels.sk',
       countrySiteCode: 'sk',
+      marketRegion: 'sk',
     })
-    assert.equal(id?.from, 'info@green-angels.sk')
+    assert.equal(id?.from, '"Green Angels" <info@green-angels.sk>')
     assert.equal(emailDomain(id!.from), 'green-angels.sk')
   })
 
@@ -143,8 +149,9 @@ describe('delivery/tax country must not affect identity', () => {
       domain: 'green-angels.at',
       supportEmail: 'info@green-angels.at',
       countrySiteCode: 'at',
+      marketRegion: 'sk',
     })
-    assert.equal(id?.from, 'info@green-angels.at')
+    assert.equal(id?.from, '"Green Angels" <info@green-angels.at>')
   })
 })
 

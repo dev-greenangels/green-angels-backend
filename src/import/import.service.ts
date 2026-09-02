@@ -3,6 +3,7 @@ import { ReviewStatus, Role } from '@prisma/client'
 
 import { sanitizeBlogAuthor } from '../blog/blog.utils'
 import { PrismaService } from '../prisma/prisma.service'
+import { ProductsService } from '../products/products.service'
 import {
   asBool,
   asNumber,
@@ -38,7 +39,10 @@ const PRICE_TYPE = 'роздріб'
 
 @Injectable()
 export class ImportService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly products: ProductsService,
+  ) {}
 
   async importCsv(type: string, buffer: Buffer): Promise<ImportStats & { type: string }> {
     if (!IMPORT_TYPES.includes(type as ImportType)) {
@@ -802,6 +806,8 @@ export class ImportService {
     })
     const valueByLegacy = new Map(attrValues.map((v) => [v.legacyId!, v.id]))
 
+    const affectedProductIds = new Set<string>()
+
     for (const r of rows) {
       const productLegacyId = r.id_product?.trim()
       const variantLegacyId = r.id_product_attribute?.trim()
@@ -893,6 +899,7 @@ export class ImportService {
           })
         }
         stats.updated++
+        affectedProductIds.add(productId)
       } else {
         const created = await this.prisma.productVariant.create({
           data: {
@@ -916,8 +923,11 @@ export class ImportService {
         })
         void created
         stats.created++
+        affectedProductIds.add(productId)
       }
     }
+
+    await this.products.touchAvailabilityForProducts(affectedProductIds)
 
     return stats
   }

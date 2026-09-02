@@ -15,6 +15,7 @@ export type CategorySearchHit = {
   slug: string
   name: string
   imageUrl: string
+  latinName: string | null
 }
 
 @Injectable()
@@ -31,21 +32,35 @@ export class CategorySearchService {
     const textMatchSql = this.buildTextMatchSql(query, pattern, tokens, threshold)
 
     const rows = await this.prisma.$queryRaw<
-      Array<{ id: string; slug: string; name: string; image: string | null }>
+      Array<{
+        id: string
+        slug: string
+        name: string
+        image: string | null
+        latinName: string | null
+      }>
     >(Prisma.sql`
       SELECT
         c.id,
         c.slug,
         ct.name,
-        c.image
+        c.image,
+        c."latinName"
       FROM "Category" c
       INNER JOIN "CategoryTranslation" ct
         ON ct."categoryId" = c.id AND ct.locale = ${locale}
       WHERE c."isActive" = TRUE
         AND ${textMatchSql}
       ORDER BY
-        CASE WHEN ct.name ILIKE ${pattern} THEN 0 ELSE 1 END,
-        similarity(ct.name, ${query}) DESC,
+        CASE
+          WHEN ct.name ILIKE ${pattern} THEN 0
+          WHEN COALESCE(c."latinName", '') ILIKE ${pattern} THEN 1
+          ELSE 2
+        END,
+        GREATEST(
+          similarity(ct.name, ${query}),
+          similarity(COALESCE(c."latinName", ''), ${query})
+        ) DESC,
         ct.name ASC
       LIMIT ${limit}
     `)
@@ -54,6 +69,7 @@ export class CategorySearchService {
       id: row.id,
       slug: row.slug,
       name: row.name,
+      latinName: row.latinName?.trim() || null,
       imageUrl: row.image?.trim() || CATEGORY_DEFAULT_IMAGE,
     }))
   }
@@ -85,12 +101,16 @@ export class CategorySearchService {
     return Prisma.sql`
       (
         ct.name ILIKE ${pattern}
+        OR COALESCE(c."latinName", '') ILIKE ${pattern}
         OR c.slug ILIKE ${pattern}
         OR ct.name % ${query}
+        OR COALESCE(c."latinName", '') % ${query}
         OR c.slug % ${query}
         OR similarity(ct.name, ${query}) > ${threshold}
+        OR similarity(COALESCE(c."latinName", ''), ${query}) > ${threshold}
         OR similarity(c.slug, ${query}) > ${threshold}
         OR word_similarity(${query}, ct.name) > ${threshold}
+        OR word_similarity(${query}, COALESCE(c."latinName", '')) > ${threshold}
       )
     `
   }

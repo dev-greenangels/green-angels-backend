@@ -10,21 +10,35 @@ import { Prisma } from '@prisma/client'
 
 import { phoneE164ToTurboSms } from '../auth/auth.utils'
 import { validatePhoneForPolicy } from '../auth/market-phone.util'
+import { pickLocalizedName } from '../i18n/pick-localized-name'
+import { resolveStockEmailCompanyName } from '../mail/stock-available-email-labels'
 import { MailService } from '../mail/mail.service'
 import { PrismaService } from '../prisma/prisma.service'
 import { QueueService } from '../queue/queue.service'
 import { SettingsService } from '../settings/settings.service'
+import type { CountrySiteCode } from '../settings/market.types'
 import { TurboSmsService } from '../turbosms/turbosms.service'
 import { CreateStockNotificationDto } from './dto/create-stock-notification.dto'
 import { StockNotificationQueryDto } from './dto/stock-notification-query.dto'
+import {
+  normalizeStockNotificationLocaleInput,
+  resolveStockNotificationLocale,
+  type StockNotificationLocale,
+} from './stock-notification-locale'
 
 const CYRILLIC_NAME_REGEX = /^[А-Яа-яІіЇїЄєҐґ'ʼ]{2,}$/
 const LATIN_NAME_REGEX =
   /^[A-Za-zÀ-ÖØ-öø-ÿĀ-žĄąĆćČčĎďĐđĘęĚěĹĺĽľŁłŃńŇňŐőŘřŚśŠšŤťŮůŰűŹźŻżŽž'ʼ\- ]{2,}$/
 
-const LOCALES = new Set(['uk', 'en', 'sk', 'hu', 'de', 'cs'])
 const DEFAULT_PAGE_SIZE = 20
 const SEND_BATCH = 40
+
+export class StockAvailableRetryError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'StockAvailableRetryError'
+  }
+}
 
 export type StockNotificationListItem = {
   id: string
@@ -36,6 +50,7 @@ export type StockNotificationListItem = {
   email: string | null
   phone: string | null
   locale: string
+  countrySiteCode: string | null
   consentAt: string | null
   notifiedAt: string | null
   createdAt: string
@@ -71,9 +86,11 @@ export class StockNotificationsService {
     }
   }
 
-  private normalizeLocale(locale?: string) {
-    const value = locale?.trim().toLowerCase() ?? ''
-    return LOCALES.has(value) ? value : 'uk'
+  private normalizeCountrySiteCode(
+    value: string | null | undefined,
+  ): CountrySiteCode | null {
+    if (value === 'sk' || value === 'hu' || value === 'at') return value
+    return null
   }
 
   scheduleRestockNotify(productId: string) {
@@ -99,7 +116,11 @@ export class StockNotificationsService {
     const name = dto.name.trim()
     this.assertValidName(name, market.region === 'sk' ? 'sk' : 'ua')
 
-    const locale = this.normalizeLocale(dto.locale)
+    const siteProfile = dto.countrySiteCode
+      ? market.countrySites.find((site) => site.code === dto.countrySiteCode)
+      : null
+    const primaryLocale = siteProfile?.defaultLocale ?? (market.region === 'sk' ? 'sk' : 'uk')
+    const locale = normalizeStockNotificationLocaleInput(dto.locale, primaryLocale)
     const email = dto.email?.trim().toLowerCase() || null
     let phone: string | null = null
     if (dto.phone?.trim()) {
@@ -236,6 +257,7 @@ export class StockNotificationsService {
       email: row.email,
       phone: row.phone,
       locale: row.locale,
+      countrySiteCode: row.countrySiteCode,
       consentAt: row.consentAt?.toISOString() ?? null,
       notifiedAt: row.notifiedAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
@@ -294,6 +316,17 @@ export class StockNotificationsService {
     if (input.productId) {
       const inStock = await this.productHasSellableStock(input.productId)
       if (!inStock) {
+        const pendingCount = await this.prisma.productStockNotification.count({
+          where: { productId: input.productId, notifiedAt: null },
+        })
+        if (pendingCount > 0) {
+          this.logger.warn(
+            `stock-available retry ${input.productId}: немає наявності, pending=${pendingCount}`,
+          )
+          throw new StockAvailableRetryError(
+            `stock-available: no_stock_pending_retry productId=${input.productId}`,
+          )
+        }
         this.logger.log(`stock-available skip ${input.productId}: немає наявності`)
         return { sent: 0, skipped: 0, reason: 'no_stock' as const }
       }
@@ -362,6 +395,19 @@ export class StockNotificationsService {
     return variants.some((variant) => variant.stock > 0)
   }
 
+  private async resolveNotificationLocale(
+    stored: string | null | undefined,
+    countrySiteCode: CountrySiteCode | null,
+  ): Promise<StockNotificationLocale> {
+    const market = await this.settings.getMarketSettings()
+    const siteProfile = countrySiteCode
+      ? market.countrySites.find((site) => site.code === countrySiteCode)
+      : null
+    const primaryLocale =
+      siteProfile?.defaultLocale ?? (market.region === 'sk' ? 'sk' : 'uk')
+    return resolveStockNotificationLocale(stored, countrySiteCode, primaryLocale)
+  }
+
   private async sendOne(id: string) {
     const row = await this.prisma.productStockNotification.findUnique({
       where: { id },
@@ -377,18 +423,15 @@ export class StockNotificationsService {
     })
     if (!row || row.notifiedAt) return
 
-    const locale = this.normalizeLocale(row.locale)
-    const countrySiteCode =
-      row.countrySiteCode === 'sk' ||
-      row.countrySiteCode === 'hu' ||
-      row.countrySiteCode === 'at'
-        ? row.countrySiteCode
-        : null
-    const productName =
-      row.product.translations.find((item) => item.locale === locale)?.name ||
-      row.product.translations.find((item) => item.locale === 'uk')?.name ||
-      row.product.translations[0]?.name ||
-      row.product.slug
+    const countrySiteCode = this.normalizeCountrySiteCode(row.countrySiteCode)
+    const locale = await this.resolveNotificationLocale(row.locale, countrySiteCode)
+    const market = await this.settings.getMarketSettings()
+    const companyName = resolveStockEmailCompanyName(market.region)
+    const productName = pickLocalizedName(
+      row.product.translations,
+      locale,
+      row.product.slug,
+    )
     const productUrl = this.mail.buildLocalizedProductUrl(
       locale,
       row.product.category.slug,
@@ -408,6 +451,8 @@ export class StockNotificationsService {
           productUrl,
           locale,
           countrySiteCode,
+          subscriptionDate: row.createdAt,
+          companyName,
         })
         delivered = true
       }
@@ -433,9 +478,12 @@ export class StockNotificationsService {
     })
   }
 
-  private smsText(locale: string, productName: string, url: string) {
+  private smsText(locale: StockNotificationLocale, productName: string, url: string) {
     const shortName = productName.slice(0, 40)
     if (locale === 'sk') return `Green Angels: ${shortName} je opäť na sklade. ${url}`
+    if (locale === 'cs') return `Green Angels: ${shortName} je opět skladem. ${url}`
+    if (locale === 'hu') return `Green Angels: ${shortName} újra készleten. ${url}`
+    if (locale === 'de') return `Green Angels: ${shortName} ist wieder verfügbar. ${url}`
     if (locale === 'en') return `Green Angels: ${shortName} is back in stock. ${url}`
     return `Зелені Янголи: ${shortName} знову в наявності. ${url}`
   }

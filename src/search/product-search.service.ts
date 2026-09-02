@@ -78,6 +78,7 @@ export class ProductSearchService {
       GREATEST(
         similarity(COALESCE(pt.name, ''), ${query}),
         similarity(COALESCE(p."latinName", ''), ${query}),
+        similarity(COALESCE(pt."searchSynonyms", ''), ${query}),
         similarity(p.slug, ${query})
       )
     `
@@ -86,8 +87,9 @@ export class ProductSearchService {
       CASE
         WHEN pt.name ILIKE ${pattern} THEN 0
         WHEN COALESCE(p."latinName", '') ILIKE ${pattern} THEN 1
-        WHEN p.slug ILIKE ${pattern} THEN 2
-        ELSE 3
+        WHEN COALESCE(pt."searchSynonyms", '') ILIKE ${pattern} THEN 2
+        WHEN p.slug ILIKE ${pattern} THEN 3
+        ELSE 4
       END
     `
 
@@ -235,16 +237,20 @@ export class ProductSearchService {
       (
         pt.name ILIKE ${pattern}
         OR COALESCE(p."latinName", '') ILIKE ${pattern}
+        OR COALESCE(pt."searchSynonyms", '') ILIKE ${pattern}
         OR p.slug ILIKE ${pattern}
         OR COALESCE(pv.sku, '') ILIKE ${pattern}
         OR pt.name % ${query}
         OR COALESCE(p."latinName", '') % ${query}
+        OR COALESCE(pt."searchSynonyms", '') % ${query}
         OR p.slug % ${query}
         OR similarity(pt.name, ${query}) > ${threshold}
         OR similarity(COALESCE(p."latinName", ''), ${query}) > ${threshold}
+        OR similarity(COALESCE(pt."searchSynonyms", ''), ${query}) > ${threshold}
         OR similarity(p.slug, ${query}) > ${threshold}
         OR word_similarity(${query}, pt.name) > ${threshold}
         OR word_similarity(${query}, COALESCE(p."latinName", '')) > ${threshold}
+        OR word_similarity(${query}, COALESCE(pt."searchSynonyms", '')) > ${threshold}
       )
     `
   }

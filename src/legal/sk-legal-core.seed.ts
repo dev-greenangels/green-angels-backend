@@ -1,17 +1,21 @@
 import type { LegalSeedEntry } from './legal-seed.types'
 
+const ACT_108 = 'zákona č. 108/2024 Z. z. o ochrane spotrebiteľa'
+const ACT_391 = 'zákona č. 391/2015 Z. z. o alternatívnom riešení spotrebiteľských sporov'
+
 export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
-{
+  {
     type: 'TERMS',
     locale: 'sk',
     title: 'Obchodné podmienky',
-    intro: 'Tieto obchodné podmienky upravujú kúpu tovaru v internetovom obchode {sellerName}. Odoslaním objednávky kupujúci potvrdzuje, že sa s podmienkami oboznámil a súhlasí s nimi. Predávajúci: {sellerName}, IČO {ico}, DIČ {dic}, IČ DPH {icDph}, sídlo {legalAddress}.',
+    intro:
+      'Tieto obchodné podmienky (VOP) upravujú kúpu tovaru v internetovom obchode {sellerName}. Odoslaním objednávky kupujúci potvrdzuje, že sa s podmienkami oboznámil a súhlasí s nimi.',
     sections: [
       {
         heading: '1. Predávajúci a kupujúci',
         body: [
-          'Predávajúcim je {sellerName}, IČO {ico}, DIČ {dic}, IČ DPH {icDph}, sídlo {legalAddress}. Tieto údaje sa berú z firemných nastavení e-shopu (back office).',
-          'Kupujúcim je každá osoba, ktorá odošle objednávku. Spotrebiteľom je fyzická osoba, ktorá nenakupuje v rámci podnikania alebo povolania, v zmysle zákona č. 102/2014 Z. z. a zákona č. 250/2007 Z. z.',
+          'Predávajúcim je {sellerName}, IČO {ico}, DIČ {dic}, IČ DPH {icDph}, sídlo {legalAddress}.',
+          'Kupujúcim je každá osoba, ktorá odošle objednávku. Spotrebiteľom je fyzická osoba, ktorá nenakupuje v rámci podnikania alebo povolania, v zmysle {ACT_108}.',
           'Zmluvné strany uznávajú elektronickú komunikáciu prostredníctvom e-shopu, e-mailu a telefónu.',
         ],
       },
@@ -21,7 +25,7 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
           'Ceny tovaru sú konečné vrátane DPH v sadzbe platnej v Slovenskej republike, ak nie je pri tovare uvedené inak.',
           'Predávajúci je viazaný cenou zobrazenou v okamihu odoslania objednávky.',
           'Ak je tovar označený ako zľavnený, zľava sa počíta z najnižšej ceny, za ktorú bol tovar ponúkaný v predchádzajúcich 30 dňoch, v súlade s pravidlami o uvádzaní zliav.',
-          'V prípade zjavne chybnej ceny (technická chyba, nezmyselná cifra) predávajúci objednávku za chybnú cenu neuplatní, bezodkladne kupujúceho informuje a navrhne správnu cenu. Objednávka je záväzná až po výslovnom potvrdení upravených podmienok.',
+          'V prípade zjavne chybnej ceny (technická chyba) predávajúci objednávku za chybnú cenu neuplatní, bezodkladne kupujúceho informuje a navrhne správnu cenu. Objednávka je záväzná až po výslovnom potvrdení upravených podmienok.',
         ],
       },
       {
@@ -36,7 +40,7 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
       {
         heading: '4. Platba a dodanie',
         body: [
-          'Dostupné spôsoby platby a dopravy sú zobrazené v pokladni (napr. dobierka, prevod, karta, Packeta, GLS, osobný odber — podľa aktuálnej ponuky).',
+          'Dostupné spôsoby platby a dopravy sú zobrazené v pokladni podľa aktuálnej ponuky. Podrobnosti sú na stránke [[shipping|Doprava a platba]].',
           'Dodacia lehota závisí od dostupnosti rastlín, sezóny a zvoleného dopravcu. Predávajúci informuje o predobjednávkach a termíne expedície v objednávke.',
           'Riziko poškodenia prechádza na kupujúceho prevzatím zásielky. Pri viditeľnom poškodení balíka odporúčame spísať zápis u dopravcu a bezodkladne nás kontaktovať s fotografiami.',
         ],
@@ -44,8 +48,8 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
       {
         heading: '5. Odstúpenie od zmluvy (spotrebiteľ)',
         body: [
-          'Spotrebiteľ môže odstúpiť od zmluvy uzavretej na diaľku do 14 dní odo dňa prevzatia tovaru bez uvedenia dôvodu podľa zákona č. 102/2014 Z. z.',
-          'Živé rastliny podliehajú rýchlemu zhoršeniu a sezónnym vlastnostiam. Právo na odstúpenie sa nemusí uplatniť na tovar, ktorý podlieha rýchlemu zhoršeniu alebo skaze, a na tovar zhotovený podľa požiadaviek spotrebiteľa, v rozsahu povolenom zákonom.',
+          'Spotrebiteľ môže odstúpiť od zmluvy uzavretej na diaľku do 14 dní odo dňa prevzatia tovaru bez uvedenia dôvodu podľa {ACT_108}.',
+          'Na živé rastliny a tovar podliehajúci rýchlemu zhoršeniu sa môžu vzťahovať výnimky podľa § 19 ods. 1 písm. e) {ACT_108}. Podrobnosti a postup sú na stránke [[returns|Vrátenie tovaru a odstúpenie od zmluvy]].',
           'Reklamácie poškodenia prepravou alebo odchýlky od objednaného sortimentu prijímame prednostne do 24 hodín od doručenia s fotodokumentáciou.',
           'Vzorový formulár na odstúpenie je na stránke Vrátenie tovaru. Tovar vráťte na adresu predávajúceho uvedenú v Kontakte, ak sa nedohodnete inak.',
         ],
@@ -62,32 +66,49 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
       {
         heading: '7. Reklamácie a záruka',
         body: [
-          'Predávajúci zodpovedá za vady tovaru v rozsahu Občianskeho zákonníka a zákona o ochrane spotrebiteľa.',
+          'Predávajúci zodpovedá za vady tovaru v rozsahu Občianskeho zákonníka a {ACT_108}.',
           'Záruka sa nevzťahuje na uhynutie alebo poškodenie rastliny po prevzatí v dôsledku nesprávnej starostlivosti, mrazu, preschnutia, premokrenia alebo mechanického poškodenia kupujúcim.',
-          'Reklamáciu uplatnite písomne alebo e-mailom na kontakt uvedený na stránke Kontakt a priložte číslo objednávky a fotografie.',
+          'Reklamáciu uplatnite písomne alebo e-mailom na {supportEmail} a priložte číslo objednávky a fotografie.',
         ],
       },
       {
-        heading: '8. Ochrana údajov a záverečné ustanovenia',
+        heading: '8. Ochrana údajov a mimosúdne riešenie sporov',
         body: [
-          'Spracúvanie osobných údajov upravuje samostatný dokument Podmienky ochrany osobných údajov.',
-          'Vzťahy sa spravujú právom Slovenskej republiky. Spotrebiteľ môže podať návrh na orgán dohľadu (SOI) alebo využiť mimosúdne riešenie sporov.',
+          'Spracúvanie osobných údajov upravuje samostatný dokument [[privacy|Podmienky ochrany osobných údajov]].',
+          'Vzťahy sa spravujú právom Slovenskej republiky. Spotrebiteľ má právo podať žiadosť o nápravu u predávajúceho a podať podnet Slovenskej obchodnej inšpekcii (SOI).',
+          'Spotrebiteľ môže využiť alternatívne riešenie spotrebiteľských sporov (ARS) podľa {ACT_391}. Informácie o subjektoch ARS sú dostupné na www.soi.sk.',
           'Neoddeliteľnou súčasťou zmluvy sú tieto podmienky v znení zverejnenom v čase odoslania objednávky (číslo a dátum revízie sú uvedené na tejto stránke).',
+        ],
+      },
+      {
+        heading: '9. Orgány dozoru',
+        body: [
+          'Slovenská obchodná inšpekcia (SOI) — dohľad nad dodržiavaním predpisov o ochrane spotrebiteľa: https://www.soi.sk',
+          'Inšpektorát SOI pre Nitriansky kraj — pre podnety spotrebiteľov v regióne predávajúceho.',
+          'Ústredný kontrolný a skúšobný ústav poľnohospodársky v Bratislave (ÚKSÚP) — fytosanitárna kontrola a informácie o predaji rastlín: https://www.uksup.sk',
+        ],
+      },
+      {
+        heading: '10. Kontaktné údaje',
+        body: [
+          'Predávajúci: {sellerName}, sídlo {legalAddress}.',
+          'E-mail: {supportEmail}. Telefón a ďalšie kontakty: [[contacts|Kontakty]].',
         ],
       },
     ],
   },
-{
+  {
     type: 'TERMS',
     locale: 'en',
     title: 'Terms and conditions',
-    intro: 'These terms govern purchases in the {sellerName} online shop. By placing an order you confirm that you have read and accept them. Seller: {sellerName}, company ID (IČO) {ico}, tax ID (DIČ) {dic}, VAT ID (IČ DPH) {icDph}, registered office {legalAddress}.',
+    intro:
+      'These terms govern purchases in the {sellerName} online shop. By placing an order you confirm that you have read and accept them.',
     sections: [
       {
         heading: '1. Seller and buyer',
         body: [
-          'The seller is {sellerName}, company ID (IČO) {ico}, tax ID (DIČ) {dic}, VAT ID (IČ DPH) {icDph}, registered office {legalAddress}. These details come from the shop company settings.',
-          'A consumer is a natural person not buying in the course of business. Distance contracts with consumers follow EU consumer law as implemented in the shop’s market (for the Slovak deployment: Act No. 102/2014 Coll.).',
+          'The seller is {sellerName}, company ID (IČO) {ico}, tax ID (DIČ) {dic}, VAT ID (IČ DPH) {icDph}, registered office {legalAddress}.',
+          'A consumer is a natural person not buying in the course of business. Distance contracts with consumers follow Slovak Act No. 108/2024 Coll. on consumer protection.',
           'The parties accept electronic communication via the shop, e-mail and telephone.',
         ],
       },
@@ -97,31 +118,33 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
           'Prices include VAT unless stated otherwise. The binding price is the one shown when the order is submitted.',
           'Discount labels follow the 30-day lowest-price rule where that rule applies.',
           'Submitting the order creates a payment obligation. A contract is formed when the seller confirms the order.',
-          'Payment and delivery methods available at checkout apply. Inspect the parcel on delivery and report transport damage promptly with photos.',
+          'Payment and delivery methods available at checkout apply. See [[shipping|Shipping & payment]].',
         ],
       },
       {
         heading: '3. Withdrawal, plants and plant passports',
         body: [
-          'EU consumers generally have 14 days to withdraw from a distance contract. Live plants may deteriorate quickly; statutory exceptions for goods liable to deteriorate can apply.',
+          'Consumers may withdraw from a distance contract within 14 days under Act 108/2024 Coll. Exceptions for perishable goods (including live plants) may apply under § 19(1)(e). See [[returns|Returns & withdrawal]].',
           'Claims for transport damage or wrong variety should be sent within 24 hours of delivery with photographs.',
-          'Movement of plants in the EU is governed by Regulation (EU) 2016/2031. Plants that require a plant passport are labelled accordingly. Public information on prohibitions and phytosanitary rules: https://www.uksup.sk/internetovy-predaj',
+          'Movement of plants in the EU is governed by Regulation (EU) 2016/2031. Public information: https://www.uksup.sk/internetovy-predaj',
         ],
       },
       {
-        heading: '4. Complaints and privacy',
+        heading: '4. Complaints, privacy and supervision',
         body: [
           'Warranty does not cover plant death after delivery caused by incorrect care, frost, drought, overwatering or mechanical damage by the buyer.',
-          'Personal data is processed under the Privacy policy. The version shown at checkout is the version that applies to that order.',
+          'Personal data is processed under the [[privacy|Privacy policy]].',
+          'Consumer supervision: Slovak Trade Inspection (SOI) at https://www.soi.sk. Phytosanitary authority: ÚKSÚP at https://www.uksup.sk',
         ],
       },
     ],
   },
-{
+  {
     type: 'PRIVACY',
     locale: 'sk',
     title: 'Podmienky ochrany osobných údajov',
-    intro: 'Tento dokument plní informačnú povinnosť podľa nariadenia (EÚ) 2016/679 (GDPR) a zákona č. 18/2018 Z. z. Prevádzkovateľom je {sellerName}, IČO {ico}, DIČ {dic}, IČ DPH {icDph}, sídlo {legalAddress}.',
+    intro:
+      'Tento dokument plní informačnú povinnosť podľa nariadenia (EÚ) 2016/679 (GDPR) a zákona č. 18/2018 Z. z. o ochrane osobných údajov.',
     sections: [
       {
         heading: '1. Nákup tovaru',
@@ -146,35 +169,40 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
         ],
       },
       {
-        heading: '4. Príjemcovia údajov',
+        heading: '4. Príjemcovia osobných údajov',
         body: [
-          'Dopravcom odovzdávame údaje nevyhnutné na doručenie (meno, adresa, telefón, prípadne suma dobierky).',
-          'Platobným bránam odovzdávame údaje o transakcii; údaje platobnej karty nespracúvame my.',
-          'Poskytovateľom e-mailu/SMS a hostingu e-shopu sprístupňujeme údaje v rozsahu sprostredkovateľských zmlúv. Osobné údaje spracúvame v EÚ, ak nie je pri konkrétnej službe uvedené inak.',
+          'Doručovateľské služby a kuriéri (napr. Packeta, DPD, GLS, Slovenská pošta) — údaje nevyhnutné na doručenie (meno, adresa, telefón).',
+          'Platobné brány — údaje o transakcii; údaje platobnej karty priamo nespracúvame my.',
+          'Poskytovatelia IT infraštruktúry a webhostingu — prevádzka e-shopu a e-mailovej komunikácie na základe zmlúv o spracúvaní.',
+          'Účtovní a právni poradcovia — v rozsahu zákonných povinností a ochrany právnych nárokov.',
+          'Osobné údaje spracúvame v EÚ, ak nie je pri konkrétnej službe uvedené inak. Údaje nepredávame tretím stranám.',
         ],
       },
       {
         heading: '5. Marketing a cookies',
         body: [
           'Obchodné oznámenia posielame len so súhlasom alebo v rozsahu, ktorý dovoľuje zákon o elektronických komunikáciách, s možnosťou kedykoľvek odhlásiť odber.',
-          'Nevyhnutné cookies (košík, relácia, jazyk, súhlas s cookies) fungujú bez súhlasu. Analytické cookies spúšťame len po vašom súhlase; súhlas môžete odvolať v Politike cookies.',
+          'Nevyhnutné cookies (košík, relácia, jazyk, súhlas s cookies) fungujú bez súhlasu. Analytické cookies spúšťame len po vašom súhlase; súhlas môžete odvolať v [[cookies|Politike cookies]].',
         ],
       },
       {
-        heading: '6. Vaše práva',
+        heading: '6. Vaše práva podľa GDPR',
         body: [
-          'Máte právo na prístup, opravu, vymazanie, obmedzenie, prenosnosť a namietať proti spracúvaniu na základe oprávneného záujmu.',
-          'Sťažnosť môžete podať Úradu na ochranu osobných údajov SR: https://dataprotection.gov.sk/',
+          'Máte právo na prístup, opravu, vymazanie, obmedzenie spracúvania, prenosnosť údajov a namietať proti spracúvaniu na základe oprávneného záujmu.',
+          'Súhlas so spracúvaním na marketing alebo analytické cookies môžete kedykoľvek odvolať (odkaz v e-mailoch alebo na stránke cookies).',
+          'E-mail pre uplatnenie práv (GDPR): {supportEmail}',
+          'Sťažnosť môžete podať Úradu na ochranu osobných údajov SR: https://dataprotection.gov.sk/uoou/',
           'Práva si uplatníte e-mailom alebo poštou na kontakt prevádzkovateľa. Táto revízia je tá, ktorú ste videli v čase súhlasu alebo objednávky.',
         ],
       },
     ],
   },
-{
+  {
     type: 'PRIVACY',
     locale: 'en',
     title: 'Privacy policy',
-    intro: 'This notice explains how we process personal data under the GDPR. The controller is {sellerName}, company ID {ico}, tax ID {dic}, VAT ID {icDph}, registered office {legalAddress}.',
+    intro:
+      'This notice explains how we process personal data under the GDPR and Slovak Act No. 18/2018 Coll.',
     sections: [
       {
         heading: '1. Orders and account',
@@ -186,37 +214,51 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
       {
         heading: '2. Recipients, cookies and rights',
         body: [
-          'Carriers, payment providers and hosting/e-mail processors receive only what is needed to deliver the service. We do not sell personal data.',
+          'Carriers, payment providers, IT/hosting processors and professional advisers receive only what is needed to deliver the service. We do not sell personal data.',
           'Necessary cookies keep the cart and session working. Analytics cookies run only with consent and can be withdrawn on the Cookie policy page.',
-          'You may access, rectify, erase, restrict or port your data and object to legitimate-interest processing. You may complain to the supervisory authority in your country (for Slovakia: https://dataprotection.gov.sk/).',
+          'GDPR requests: {supportEmail}. You may complain to the supervisory authority (Slovakia: https://dataprotection.gov.sk/uoou/).',
         ],
       },
     ],
   },
-{
+  {
     type: 'COOKIES',
     locale: 'sk',
     title: 'Politika súborov cookie',
-    intro: 'Cookies sú malé textové súbory. Táto politika vysvetľuje, ktoré kategórie používame a ako spravovať súhlas podľa ePrivacy / zákona o elektronických komunikáciách.',
+    intro:
+      'Cookies sú malé textové súbory. Táto politika vysvetľuje, ktoré kategórie používame a ako spravovať súhlas podľa ePrivacy a zákona o elektronických komunikáciách.',
     sections: [
       {
-        heading: 'Kategórie',
+        heading: 'Kategórie cookies',
         body: [
           'Nevyhnutné cookies: košík, prihlásenie, jazyk, uloženie voľby súhlasu. Túto kategóriu nemožno vypnúť.',
-          'Analytické cookies (Vercel Analytics) spúšťame len s predchádzajúcim súhlasom. Reklamné cookies v súčasnosti nepoužívame, kým ich v e-shope nezapneme a nepožiadame o súhlas.',
-          'Prevádzkovateľ: {sellerName}, IČO {ico}, DIČ {dic}, IČ DPH {icDph}, sídlo {legalAddress}.',
+          'Analytické cookies spúšťame len s predchádzajúcim súhlasom (opt-in). Reklamné cookies v súčasnosti nepoužívame, kým ich v e-shope nezapneme a nepožiadame o súhlas.',
         ],
       },
       {
         heading: 'Správa súhlasu',
         body: [
-          'Súhlas udelíte bannerom alebo nastaveniami na tejto stránke. Platnosť voľby je približne 180 dní, kým ju nezmeníte.',
-          'Odvolanie súhlasu zapíšeme ako novú udalosť; predchádzajúci súhlas ostáva v denníku ako dôkaz histórie.',
+          'Súhlas udelíte bannerom alebo nastaveniami na tejto stránke. Predvolene sú aktívne len nevyhnutné cookies.',
+          'Platnosť voľby je približne 180 dní, kým ju nezmeníte. Odvolanie súhlasu zapíšeme ako novú udalosť.',
+        ],
+      },
+      {
+        heading: 'Práva dotknutej osoby',
+        body: [
+          'Máte právo na prístup k údajom z cookies, ich opravu, vymazanie a odvolanie súhlasu so spracúvaním analytických cookies.',
+          'Podrobnosti o spracúvaní osobných údajov sú v [[privacy|Podmienkach ochrany osobných údajov]].',
+          'Sťažnosť môžete podať Úradu na ochranu osobných údajov SR: https://dataprotection.gov.sk/uoou/',
+        ],
+      },
+      {
+        heading: 'Kontakt pre odvolanie súhlasu',
+        body: [
+          'Súhlas s analytickými cookies môžete kedykoľvek odvolať na tejto stránke alebo e-mailom na {supportEmail}.',
         ],
       },
     ],
   },
-{
+  {
     type: 'COOKIES',
     locale: 'en',
     title: 'Cookie policy',
@@ -226,13 +268,13 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
         heading: 'Categories and choice',
         body: [
           'Necessary cookies run the cart, sign-in, language and the storage of your cookie choice.',
-          'Analytics cookies (Vercel Analytics) start only after consent. You can change your choice at any time on this page.',
-          'Controller: {sellerName}, company ID (IČO) {ico}, tax ID (DIČ) {dic}, VAT ID (IČ DPH) {icDph}, registered office {legalAddress}.',
+          'Analytics cookies start only after consent (opt-in). You can change your choice at any time on this page.',
+          'To withdraw consent or exercise GDPR rights, contact {supportEmail}.',
         ],
       },
     ],
   },
-{
+  {
     type: 'MARKETING_CONSENT',
     locale: 'sk',
     title: 'Súhlas s marketingovými správami',
@@ -248,7 +290,7 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
       },
     ],
   },
-{
+  {
     type: 'MARKETING_CONSENT',
     locale: 'en',
     title: 'Marketing email consent',
@@ -265,3 +307,16 @@ export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
     ],
   },
 ]
+
+// Replace template constants in body strings (seed is static JSON-like)
+for (const entry of SK_CORE_LEGAL_SEED) {
+  entry.intro = entry.intro.replaceAll('{ACT_108}', ACT_108).replaceAll('{ACT_391}', ACT_391)
+  for (const section of entry.sections) {
+    section.heading = section.heading
+      .replaceAll('{ACT_108}', ACT_108)
+      .replaceAll('{ACT_391}', ACT_391)
+    section.body = section.body.map((p) =>
+      p.replaceAll('{ACT_108}', ACT_108).replaceAll('{ACT_391}', ACT_391),
+    )
+  }
+}

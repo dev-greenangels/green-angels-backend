@@ -196,12 +196,14 @@ model ProductAdditionalCategory {
 }
 
 model ProductTranslation {
-  id          String  @id @default(uuid())
-  locale      String
-  name        String
-  description String? @db.Text
-  metaTitle   String?
-  metaDesc    String?
+  id             String  @id @default(uuid())
+  locale         String
+  name           String
+  description    String? @db.Text
+  /// Comma-separated alternate search names for this locale (normalized on save).
+  searchSynonyms String? @db.Text
+  metaTitle      String?
+  metaDesc       String?
 
   productId String
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)

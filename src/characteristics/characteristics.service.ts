@@ -65,6 +65,7 @@ export type CharacteristicCellValue = {
 export type BulkMatrixProductRow = {
   productId: string
   productName: string
+  imageUrl: string | null
   stock: number
   values: Record<string, CharacteristicCellValue>
 }
@@ -101,6 +102,17 @@ export class CharacteristicsService {
 
   private defaultLocale(locale?: string) {
     return (locale?.trim() || 'uk').toLowerCase()
+  }
+
+  private resolveMainImageUrl(
+    images: Array<{ url: string; isMain: boolean; sortOrder: number }>,
+  ): string | null {
+    if (!images.length) return null
+    const sorted = [...images].sort((a, b) => {
+      if (a.isMain !== b.isMain) return a.isMain ? -1 : 1
+      return a.sortOrder - b.sortOrder
+    })
+    return sorted[0]?.url ?? null
   }
 
   private slugifyLabel(label: string): string {
@@ -590,6 +602,10 @@ export class CharacteristicsService {
         orderBy: { slug: 'asc' },
         include: {
           translations: { where: { locale: loc } },
+          images: {
+            select: { url: true, isMain: true, sortOrder: true },
+            orderBy: [{ isMain: 'desc' }, { sortOrder: 'asc' }],
+          },
           characteristics: {
             include: {
               characteristic: { select: { id: true, valueType: true } },
@@ -619,6 +635,7 @@ export class CharacteristicsService {
       return {
         productId: product.id,
         productName: product.translations[0]?.name ?? product.slug,
+        imageUrl: this.resolveMainImageUrl(product.images),
         stock: product.variants.reduce((sum, variant) => sum + variant.stock, 0),
         values,
       }

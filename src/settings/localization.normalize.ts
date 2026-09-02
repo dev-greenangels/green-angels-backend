@@ -48,6 +48,10 @@ export function normalizeLocalizationSettings(raw: unknown): LocalizationSetting
       typeof raw.showLanguageSwitcher === 'boolean'
         ? raw.showLanguageSwitcher
         : DEFAULT_LOCALIZATION_SETTINGS.showLanguageSwitcher,
+    showFaqInFooter:
+      typeof raw.showFaqInFooter === 'boolean'
+        ? raw.showFaqInFooter
+        : DEFAULT_LOCALIZATION_SETTINGS.showFaqInFooter,
     availableLocales: normalizeAvailableLocales(raw.availableLocales),
     messageOverrides: normalizeOverrides(raw.messageOverrides),
   }

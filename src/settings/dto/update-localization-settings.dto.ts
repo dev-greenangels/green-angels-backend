@@ -6,6 +6,10 @@ export class UpdateLocalizationSettingsDto {
   showLanguageSwitcher?: boolean
 
   @IsOptional()
+  @IsBoolean()
+  showFaqInFooter?: boolean
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   availableLocales?: string[]

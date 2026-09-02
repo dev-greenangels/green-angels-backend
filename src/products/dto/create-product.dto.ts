@@ -62,6 +62,11 @@ export class CreateProductDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(2000)
+  searchSynonyms?: string
+
+  @IsOptional()
+  @IsString()
   @MaxLength(120)
   metaTitle?: string
 
