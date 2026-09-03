@@ -256,13 +256,47 @@ export class UpdateCartCheckoutSettingsDto {
   deliveryWeightRules?: Array<{ maxWeightKg: number; allowedMethods: string[] }>
 
   /**
-   * Weight tiers per delivery method slug, e.g.
-   * { "packeta-box": [{ maxWeightKg: 5, amount: 3.49 }] }
-   * Normalized in cart-checkout.normalize — keep DTO permissive for PATCH.
+   * Weight tiers keyed by method or method:CC, e.g.
+   * { "packeta-box:SK": [{ maxWeightKg: 15, amount: 2.3 }] }
+   * `amount` = NET transport only. Normalized in cart-checkout.normalize.
    */
   @IsOptional()
   @IsObject()
   carrierRateTables?: Record<string, Array<{ maxWeightKg: number; amount: number }>>
+
+  @IsOptional()
+  @IsObject()
+  carrierSurcharges?: Record<
+    string,
+    {
+      fuelPercent?: number
+      fuelMode?: 'separate' | 'included' | 'none'
+      tollPerStartedKgNet?: number
+      tollMode?: 'separate' | 'included' | 'none'
+      maxParcelWeightKg?: number
+    }
+  >
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  standardParcelMaxWeightKg?: number
+
+  /** Shipping-only fallback kg/unit when product weight is missing. Must be > 0. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.001)
+  defaultMissingWeightKg?: number
+
+  @IsOptional()
+  @IsBoolean()
+  packagingAmountsAreNet?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  codFeeAmountsAreNet?: boolean
 
   @IsOptional()
   @ValidateNested()

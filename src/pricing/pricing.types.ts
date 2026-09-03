@@ -82,8 +82,8 @@ export type CheckoutTotalsBreakdown = {
   /** Reverse charge + inc_vat: % to strip from gross line prices for display/payable */
   stripVatRatePercent?: number | null
   taxAppliesToFees?: boolean
-  /** Способи доставки після фільтрів ваги (deliveryWeightRules) і габаритів (cartSize) */
   allowedDeliveryMethods: string[]
+  deliveryUnavailableReason?: 'missing_weight' | 'no_tariff' | null
 }
 
 export type PricingQuoteResult = {
@@ -112,6 +112,14 @@ export type PricingQuoteResult = {
   }
   /** Об’єм кошика (л) для packagingMode=boxes */
   cartVolumeL?: number
+  /**
+   * @deprecated Missing product weight now uses defaultMissingWeightKg; kept optional for older clients.
+   */
+  hasUnweighedShippableItem?: boolean
+  /** True when shipping weight used defaultMissingWeightKg for at least one unit. */
+  usedFallbackWeight?: boolean
+  /** Quantity of units that used the shipping weight fallback. */
+  fallbackWeightItemCount?: number
 }
 
 export type ScopeMatchInput = {

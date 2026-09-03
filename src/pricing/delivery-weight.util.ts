@@ -15,13 +15,29 @@ export type WeighableVariant = {
   }>
 }
 
+export type ShippingWeightResolveOptions = {
+  /**
+   * Applied only when factual/tare resolution yields ≤ 0.
+   * Shipping calculation only — never written to ProductVariant.
+   */
+  defaultMissingWeightKg?: number
+}
+
+export type CartWeightComputation = {
+  cartWeightKg: number
+  /** True when at least one unit used defaultMissingWeightKg. */
+  usedFallbackWeight: boolean
+  /** Sum of quantities that used the fallback (not distinct SKUs). */
+  fallbackWeightItemCount: number
+}
+
 /** Вага одного варіанту (кг): ProductVariant.weight з фолбеком на tareWeightKg атрибуту (напр. вага тари горщика). */
 export function resolveVariantWeightKg(variant: WeighableVariant): number {
   if (variant.weight != null && variant.weight > 0) return variant.weight
 
   const tare = variant.attributeValues
     ?.map((link) => link.value.tareWeightKg)
-    .find((value) => value != null)
+    .find((value) => value != null && Number(value) > 0)
 
   return tare != null ? Number(tare) : 0
 }
@@ -51,9 +67,15 @@ export function resolveVariantVolumetricKg(
   return 0
 }
 
+/**
+ * Billable unit weight for shipping.
+ * Order: factual weight → tare → optional defaultMissingWeightKg.
+ * Null/0 never silently stay as 0 when a positive fallback is configured.
+ */
 export function resolveVariantBillableWeightKg(
   variant: WeighableVariant,
   settings: CartWeightSettings,
+  options?: ShippingWeightResolveOptions,
 ): number {
   if (!settings.enabled) return 0
 
@@ -62,10 +84,30 @@ export function resolveVariantBillableWeightKg(
     ? resolveVariantVolumetricKg(variant, settings.volumetricDivisor)
     : 0
 
-  if (settings.useFactKg && settings.useVolumetricKg) return Math.max(fact, vol)
-  if (settings.useFactKg) return fact
-  if (settings.useVolumetricKg) return vol
+  let resolved = 0
+  if (settings.useFactKg && settings.useVolumetricKg) resolved = Math.max(fact, vol)
+  else if (settings.useFactKg) resolved = fact
+  else if (settings.useVolumetricKg) resolved = vol
+
+  if (resolved > 0) return resolved
+
+  const fallback = options?.defaultMissingWeightKg ?? 0
+  if (fallback > 0 && settings.useFactKg) return fallback
   return 0
+}
+
+export function variantUsesFallbackWeight(
+  variant: WeighableVariant,
+  settings: CartWeightSettings,
+  options?: ShippingWeightResolveOptions,
+): boolean {
+  if (!settings.enabled || !settings.useFactKg) return false
+  const fallback = options?.defaultMissingWeightKg ?? 0
+  if (!(fallback > 0)) return false
+  const withoutFallback = resolveVariantBillableWeightKg(variant, settings, {
+    defaultMissingWeightKg: 0,
+  })
+  return withoutFallback <= 0
 }
 
 /** Сумарна вага кошика (кг) за мапою кількостей на варіант. */
@@ -73,20 +115,43 @@ export function computeCartWeightKg(
   variants: WeighableVariant[],
   quantityByVariantId: Map<string, number>,
   settings?: CartWeightSettings,
+  options?: ShippingWeightResolveOptions,
 ): number {
+  return computeCartWeightWithMeta(variants, quantityByVariantId, settings, options).cartWeightKg
+}
+
+export function computeCartWeightWithMeta(
+  variants: WeighableVariant[],
+  quantityByVariantId: Map<string, number>,
+  settings?: CartWeightSettings,
+  options?: ShippingWeightResolveOptions,
+): CartWeightComputation {
   const weightSettings: CartWeightSettings = settings ?? {
     enabled: true,
     useFactKg: true,
     useVolumetricKg: false,
     volumetricDivisor: 5000,
   }
-  if (!weightSettings.enabled) return 0
+  if (!weightSettings.enabled) {
+    return { cartWeightKg: 0, usedFallbackWeight: false, fallbackWeightItemCount: 0 }
+  }
 
-  return variants.reduce((sum, variant) => {
+  let cartWeightKg = 0
+  let fallbackWeightItemCount = 0
+  for (const variant of variants) {
     const quantity = quantityByVariantId.get(variant.id) ?? 0
-    if (quantity <= 0) return sum
-    return sum + resolveVariantBillableWeightKg(variant, weightSettings) * quantity
-  }, 0)
+    if (quantity <= 0) continue
+    const unit = resolveVariantBillableWeightKg(variant, weightSettings, options)
+    cartWeightKg += unit * quantity
+    if (variantUsesFallbackWeight(variant, weightSettings, options)) {
+      fallbackWeightItemCount += quantity
+    }
+  }
+  return {
+    cartWeightKg,
+    usedFallbackWeight: fallbackWeightItemCount > 0,
+    fallbackWeightItemCount,
+  }
 }
 
 /** Об’єм одного варіанту в літрах з L×W×H (см). */

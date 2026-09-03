@@ -3,10 +3,8 @@ import type { Role } from '@prisma/client'
 import type {
   BelowMinOrderBehavior,
   CartCheckoutSettings,
-  CarrierRateTier,
   DeliveryMode,
 } from '../settings/cart-checkout.types'
-import type { CheckoutDeliveryMethodSlug } from '../settings/checkout-methods.constants'
 import {
   filterDeliveryMethodsBySize,
   type CartSizeEnvelope,
@@ -15,53 +13,64 @@ import { filterDeliveryMethodsByWeight } from './delivery-weight.util'
 import { resolveMinOrderPolicy } from './min-order-policy'
 import { roundMoney } from './pricing.helpers'
 import { netToGross, grossToNet } from './vat-price'
+import {
+  lookupCarrierTransportNet,
+  normalizeShippingCountryCode,
+} from './carrier-rate-lookup'
+import {
+  computeFuelNet,
+  computeTollNet,
+  resolveCarrierSurchargeConfig,
+} from './carrier-surcharges'
+import { customerFeeSnapshotFromNet } from './fee-vat'
+import {
+  DEFAULT_STANDARD_PARCEL_MAX_KG,
+  splitWeightIntoParcels,
+  type ShipmentParcel,
+} from './shipment-parcels'
+
+export type DeliveryUnavailableReason = 'missing_weight' | 'no_tariff'
 
 export type CheckoutTotalsBreakdown = {
   productsSubtotal: number
   discountAmount: number
+  /** Customer-payable delivery (GROSS when VAT applies; NET on reverse charge). */
   deliveryAmount: number
   deliveryMode: DeliveryMode
-  /** false лише якщо carrier_rates і тариф не знайдено */
+  /** false when carrier quote cannot be formed (missing weight / no tariff) */
   deliveryIncludedInTotal: boolean
   packagingAmount: number
   packagingBoxCount: number
   packagingPalletCount: number
   taxAmount: number
-  /** Комісія за післяплату (dobierka / COD), якщо paymentMethod === 'dobierka' */
   codFeeAmount: number
   grandTotal: number
   minOrderAmount: number | null
-  /** Resolved policy for this audience (retail vs wholesaler) */
   belowMinOrderBehavior: BelowMinOrderBehavior
   belowMinPackagingFee: number
   belowMinOrder: boolean
   canPlaceOrder: boolean
-  /**
-   * @deprecated Prefer shop i18n from minOrderAmount + belowMinOrderBehavior.
-   * Kept null so clients do not show hardcoded UA strings.
-   */
   belowMinOrderMessage: string | null
   showDelivery: boolean
   showPackaging: boolean
   showTax: boolean
   taxIncluded: boolean
-  /** Effective VAT % used for this quote */
   taxRatePercent: number
-  /** seller | destination | reverse_charge */
   taxRegime?: string
   taxCountryCode?: string | null
-  /**
-   * Reverse charge + inc_vat: seller VAT % stripped from gross to get net payable.
-   * Clients use this to show line prices net of VAT.
-   */
   stripVatRatePercent?: number | null
-  /** When true, delivery/packaging are priced ex-VAT and VAT is included in taxAmount/grandTotal */
   taxAppliesToFees: boolean
-  /** Способи доставки, дозволені після фільтрації за deliveryWeightRules та вагою кошика */
   allowedDeliveryMethods: string[]
+  deliveryUnavailableReason?: DeliveryUnavailableReason | null
 }
 
 const DOBIERKA_PAYMENT_METHOD = 'dobierka'
+
+const EU_WEIGHT_GATED_METHODS = new Set(['packeta-box', 'packeta-courier', 'gls-courier'])
+
+function isEuCarrierMethod(method: string | undefined): boolean {
+  return Boolean(method && EU_WEIGHT_GATED_METHODS.has(method))
+}
 
 function resolveCodFeeAmount(
   settings: CartCheckoutSettings,
@@ -77,13 +86,14 @@ function resolveCodFeeAmount(
   return roundMoney(settings.codFeeAmount)
 }
 
-function lookupCarrierRate(
+/** UA / NP / legacy: last-tier fallback, no country, amounts already customer-facing. */
+function lookupLegacyCarrierRate(
   tables: CartCheckoutSettings['carrierRateTables'],
   method: string | undefined,
   weightKg: number,
 ): number | null {
   if (!method) return null
-  const tiers = tables[method as CheckoutDeliveryMethodSlug]
+  const tiers = tables[method]
   if (!tiers?.length) return null
   const sorted = [...tiers].sort((a, b) => a.maxWeightKg - b.maxWeightKg)
   const w = Math.max(0, weightKg)
@@ -91,48 +101,172 @@ function lookupCarrierRate(
   return hit ? roundMoney(Math.max(0, hit.amount)) : null
 }
 
-function resolveDeliveryAmount(
-  settings: CartCheckoutSettings,
-  deliveryMethod?: string,
-  cartWeightKg = 0,
-): { amount: number; mode: DeliveryMode; includedInTotal: boolean } {
+function rateEuCarrierDeliveryNet(input: {
+  settings: CartCheckoutSettings
+  method: string
+  cartWeightKg: number
+  countryCode: string | null
+}): { net: number; unavailable: DeliveryUnavailableReason | null } {
+  const { settings, method, cartWeightKg, countryCode } = input
+  const surcharge = resolveCarrierSurchargeConfig(
+    settings.carrierSurcharges,
+    method,
+    countryCode,
+  )
+  const maxParcel =
+    surcharge && surcharge.maxParcelWeightKg > 0
+      ? surcharge.maxParcelWeightKg
+      : method === 'gls-courier'
+        ? 0
+        : settings.standardParcelMaxWeightKg || DEFAULT_STANDARD_PARCEL_MAX_KG
+
+  const parcels: ShipmentParcel[] =
+    maxParcel > 0
+      ? splitWeightIntoParcels(cartWeightKg, maxParcel)
+      : cartWeightKg > 0
+        ? [{ weightKg: cartWeightKg }]
+        : []
+
+  if (!parcels.length) {
+    return { net: 0, unavailable: 'no_tariff' }
+  }
+
+  let deliveryNet = 0
+  for (const parcel of parcels) {
+    const baseTransportNet = lookupCarrierTransportNet(
+      settings.carrierRateTables,
+      method,
+      parcel.weightKg,
+      countryCode,
+    )
+    if (baseTransportNet == null) {
+      return { net: 0, unavailable: 'no_tariff' }
+    }
+    const fuelNet = computeFuelNet(baseTransportNet, surcharge)
+    const tollNet = computeTollNet(parcel, surcharge)
+    deliveryNet += roundMoney(baseTransportNet + fuelNet + tollNet)
+  }
+  return { net: roundMoney(deliveryNet), unavailable: null }
+}
+
+function resolveDelivery(input: {
+  settings: CartCheckoutSettings
+  deliveryMethod?: string
+  cartWeightKg: number
+  countryCode: string | null
+}): {
+  amountNet: number
+  customerAmount: number
+  mode: DeliveryMode
+  includedInTotal: boolean
+  unavailable: DeliveryUnavailableReason | null
+  treatAsNet: boolean
+} {
+  const { settings, deliveryMethod, cartWeightKg, countryCode } = input
+
   if (!settings.showDelivery) {
-    return { amount: 0, mode: 'free', includedInTotal: true }
+    return {
+      amountNet: 0,
+      customerAmount: 0,
+      mode: 'free',
+      includedInTotal: true,
+      unavailable: null,
+      treatAsNet: false,
+    }
   }
 
   if (deliveryMethod === 'pickup' && settings.deliveryFreeForPickup) {
-    return { amount: 0, mode: 'free', includedInTotal: true }
+    return {
+      amountNet: 0,
+      customerAmount: 0,
+      mode: 'free',
+      includedInTotal: true,
+      unavailable: null,
+      treatAsNet: false,
+    }
   }
 
-  switch (settings.deliveryMode) {
-    case 'free':
-      return { amount: 0, mode: 'free', includedInTotal: true }
-    case 'carrier_rates': {
-      const fromTable = lookupCarrierRate(
-        settings.carrierRateTables,
-        deliveryMethod,
-        cartWeightKg,
-      )
-      if (fromTable != null) {
-        return { amount: fromTable, mode: 'carrier_rates', includedInTotal: true }
-      }
-      // Fallback: fixed amount if configured, else 0 but still show as carrier quote pending
-      if (settings.deliveryAmount > 0) {
-        return {
-          amount: roundMoney(settings.deliveryAmount),
-          mode: 'carrier_rates',
-          includedInTotal: true,
-        }
-      }
-      return { amount: 0, mode: 'carrier_rates', includedInTotal: true }
+  if (settings.deliveryMode === 'free') {
+    return {
+      amountNet: 0,
+      customerAmount: 0,
+      mode: 'free',
+      includedInTotal: true,
+      unavailable: null,
+      treatAsNet: false,
     }
-    case 'fixed':
-    default:
+  }
+
+  if (settings.deliveryMode === 'carrier_rates' && isEuCarrierMethod(deliveryMethod)) {
+    const rated = rateEuCarrierDeliveryNet({
+      settings,
+      method: deliveryMethod!,
+      cartWeightKg,
+      countryCode,
+    })
+    if (rated.unavailable) {
       return {
-        amount: roundMoney(Math.max(0, settings.deliveryAmount)),
-        mode: 'fixed',
-        includedInTotal: true,
+        amountNet: 0,
+        customerAmount: 0,
+        mode: 'carrier_rates',
+        includedInTotal: false,
+        unavailable: rated.unavailable,
+        treatAsNet: true,
       }
+    }
+    return {
+      amountNet: rated.net,
+      customerAmount: rated.net,
+      mode: 'carrier_rates',
+      includedInTotal: true,
+      unavailable: null,
+      treatAsNet: true,
+    }
+  }
+
+  if (settings.deliveryMode === 'carrier_rates') {
+    const fromTable = lookupLegacyCarrierRate(
+      settings.carrierRateTables,
+      deliveryMethod,
+      cartWeightKg,
+    )
+    if (fromTable != null) {
+      return {
+        amountNet: fromTable,
+        customerAmount: fromTable,
+        mode: 'carrier_rates',
+        includedInTotal: true,
+        unavailable: null,
+        treatAsNet: false,
+      }
+    }
+    if (settings.deliveryAmount > 0) {
+      return {
+        amountNet: roundMoney(settings.deliveryAmount),
+        customerAmount: roundMoney(settings.deliveryAmount),
+        mode: 'carrier_rates',
+        includedInTotal: true,
+        unavailable: null,
+        treatAsNet: false,
+      }
+    }
+    return {
+      amountNet: 0,
+      customerAmount: 0,
+      mode: 'carrier_rates',
+      includedInTotal: true,
+      unavailable: null,
+      treatAsNet: false,
+    }
+  }
+
+  return {
+    amountNet: roundMoney(Math.max(0, settings.deliveryAmount)),
+    customerAmount: roundMoney(Math.max(0, settings.deliveryAmount)),
+    mode: 'fixed',
+    includedInTotal: true,
+    unavailable: null,
+    treatAsNet: false,
   }
 }
 
@@ -162,21 +296,18 @@ export function computeCheckoutTotals(input: {
   settings: CartCheckoutSettings
   deliveryMethod?: string
   paymentMethod?: string
-  /** Вага кошика (кг) — для фільтрації способів доставки за deliveryWeightRules */
   cartWeightKg?: number
-  /** Габаритний конверт кошика — для cartSize limits */
   cartSizeEnvelope?: CartSizeEnvelope | null
-  /** Об’єм кошика (л) — для packagingMode=boxes */
   cartVolumeL?: number
-  /** Prisma Role — WHOLESALER uses wholesaler* min-order fields */
   audienceRole?: Role | string | null
-  /** Override VAT from SK country / OSS / reverse charge resolution */
+  hasUnweighedShippableItem?: boolean
+  deliveryCountryCode?: string | null
+  hostCountryCode?: string | null
   taxOverride?: {
     taxRatePercent: number
     taxIncluded: boolean
     taxRegime?: string
     taxCountryCode?: string | null
-    /** For reverse_charge + inc_vat: strip this % from gross lines */
     stripVatRatePercent?: number
   }
 }): CheckoutTotalsBreakdown {
@@ -191,12 +322,22 @@ export function computeCheckoutTotals(input: {
     cartVolumeL,
     audienceRole,
     taxOverride,
+    deliveryCountryCode,
+    hostCountryCode,
   } = input
   const discountAmount = Math.max(0, roundMoney(subtotalBeforeDiscount - productsSubtotal))
 
   const taxRatePercent = taxOverride?.taxRatePercent ?? settings.taxRatePercent
   const taxIncluded = taxOverride?.taxIncluded ?? settings.taxIncluded
   const isReverseCharge = taxOverride?.taxRegime === 'reverse_charge'
+  const shippingCountry = normalizeShippingCountryCode(deliveryCountryCode, hostCountryCode)
+
+  const feeVat = {
+    taxIncluded,
+    taxAppliesToFees: Boolean(settings.taxAppliesToFees),
+    taxRatePercent,
+    taxRegime: taxOverride?.taxRegime,
+  }
 
   const minPolicy = resolveMinOrderPolicy(settings, audienceRole)
   const minOrderAmount = minPolicy.minOrderAmount
@@ -204,7 +345,7 @@ export function computeCheckoutTotals(input: {
     minOrderAmount != null && productsSubtotal + 0.001 < minOrderAmount
 
   let canPlaceOrder = true
-  let packagingAmount = 0
+  let packagingConfigured = 0
   let packagingBoxCount = 0
   let packagingPalletCount = 0
 
@@ -212,7 +353,7 @@ export function computeCheckoutTotals(input: {
     if (minPolicy.belowMinOrderBehavior === 'reject') {
       canPlaceOrder = false
     } else {
-      packagingAmount += Math.max(0, minPolicy.belowMinPackagingFee)
+      packagingConfigured += Math.max(0, minPolicy.belowMinPackagingFee)
     }
   }
 
@@ -223,39 +364,67 @@ export function computeCheckoutTotals(input: {
         cartWeightKg ?? 0,
         cartVolumeL ?? 0,
       )
-      packagingAmount += boxes.amount
+      packagingConfigured += boxes.amount
       packagingBoxCount = boxes.boxCount
       packagingPalletCount = boxes.palletCount
     } else {
-      packagingAmount += Math.max(0, settings.packagingAmount)
+      packagingConfigured += Math.max(0, settings.packagingAmount)
     }
   }
-  packagingAmount = roundMoney(packagingAmount)
+  packagingConfigured = roundMoney(packagingConfigured)
 
-  const delivery = resolveDeliveryAmount(settings, deliveryMethod, cartWeightKg ?? 0)
-  const deliveryAmount = delivery.amount
-  const deliveryInTotal = delivery.includedInTotal ? deliveryAmount : 0
-  const codFeeAmount = resolveCodFeeAmount(settings, productsSubtotal, paymentMethod)
+  const delivery = resolveDelivery({
+    settings,
+    deliveryMethod,
+    cartWeightKg: cartWeightKg ?? 0,
+    countryCode: shippingCountry,
+  })
+
+  const packagingCustomer = settings.packagingAmountsAreNet
+    ? customerFeeSnapshotFromNet(packagingConfigured, feeVat)
+    : roundMoney(packagingConfigured)
+
+  const deliveryCustomer = delivery.treatAsNet
+    ? customerFeeSnapshotFromNet(delivery.amountNet, feeVat)
+    : delivery.customerAmount
+
+  const codConfigured = resolveCodFeeAmount(settings, productsSubtotal, paymentMethod)
+  const codCustomer = settings.codFeeAmountsAreNet
+    ? customerFeeSnapshotFromNet(codConfigured, feeVat)
+    : roundMoney(codConfigured)
+
+  const deliveryAmount = delivery.includedInTotal ? deliveryCustomer : 0
+  const deliveryInTotal = deliveryAmount
+  const packagingAmount = packagingCustomer
+  const codFeeAmount = codCustomer
 
   let taxAmount = 0
   let grandTotal = 0
   let productsForTotal = productsSubtotal
   let deliveryForTotal = deliveryInTotal
   let packagingForTotal = packagingAmount
+  let codForTotal = codFeeAmount
 
-  // Fixed gross catalog + EU B2B reverse charge: strip embedded VAT → net payable.
   if (isReverseCharge && taxIncluded) {
     const stripRate = taxOverride?.stripVatRatePercent ?? 0
     if (stripRate > 0) {
       productsForTotal = grossToNet(productsSubtotal, stripRate)
-      deliveryForTotal =
-        deliveryInTotal > 0 ? grossToNet(deliveryInTotal, stripRate) : 0
-      packagingForTotal =
-        packagingAmount > 0 ? grossToNet(packagingAmount, stripRate) : 0
+      if (!delivery.treatAsNet && !settings.packagingAmountsAreNet) {
+        deliveryForTotal =
+          deliveryInTotal > 0 ? grossToNet(deliveryInTotal, stripRate) : 0
+        packagingForTotal =
+          packagingAmount > 0 ? grossToNet(packagingAmount, stripRate) : 0
+      } else {
+        deliveryForTotal = deliveryInTotal
+        packagingForTotal = packagingAmount
+      }
+      if (!settings.codFeeAmountsAreNet) {
+        codForTotal = codFeeAmount > 0 ? grossToNet(codFeeAmount, stripRate) : 0
+      }
     }
     taxAmount = 0
     grandTotal = roundMoney(
-      productsForTotal + deliveryForTotal + packagingForTotal + codFeeAmount,
+      productsForTotal + deliveryForTotal + packagingForTotal + codForTotal,
     )
   } else {
     const taxAddsToTotal = settings.showTax && !taxIncluded && taxRatePercent > 0
@@ -265,13 +434,17 @@ export function computeCheckoutTotals(input: {
       const productsGross = netToGross(productsSubtotal, rate)
       const deliveryGross = deliveryInTotal > 0 ? netToGross(deliveryInTotal, rate) : 0
       const packagingGross = packagingAmount > 0 ? netToGross(packagingAmount, rate) : 0
+      const codGross = settings.codFeeAmountsAreNet && codFeeAmount > 0
+        ? netToGross(codFeeAmount, rate)
+        : codFeeAmount
       taxAmount = roundMoney(
         productsGross -
           productsSubtotal +
           (deliveryGross - deliveryInTotal) +
-          (packagingGross - packagingAmount),
+          (packagingGross - packagingAmount) +
+          (codGross - (settings.codFeeAmountsAreNet ? codFeeAmount : codGross)),
       )
-      grandTotal = roundMoney(productsGross + deliveryGross + packagingGross + codFeeAmount)
+      grandTotal = roundMoney(productsGross + deliveryGross + packagingGross + codGross)
     } else if (taxAddsToTotal) {
       taxAmount = roundMoney((productsSubtotal * taxRatePercent) / 100)
       grandTotal = roundMoney(
@@ -280,7 +453,10 @@ export function computeCheckoutTotals(input: {
     } else {
       if (settings.showTax && taxIncluded && taxRatePercent > 0) {
         const feeBase = settings.taxAppliesToFees
-          ? productsSubtotal + deliveryInTotal + packagingAmount
+          ? productsSubtotal +
+            deliveryInTotal +
+            packagingAmount +
+            (settings.codFeeAmountsAreNet ? codFeeAmount : 0)
           : productsSubtotal
         taxAmount = roundMoney((feeBase * taxRatePercent) / (100 + taxRatePercent))
       }
@@ -288,6 +464,10 @@ export function computeCheckoutTotals(input: {
         productsSubtotal + deliveryInTotal + packagingAmount + codFeeAmount,
       )
     }
+  }
+
+  if (delivery.unavailable && isEuCarrierMethod(deliveryMethod)) {
+    canPlaceOrder = false
   }
 
   const byWeight = filterDeliveryMethodsByWeight(
@@ -303,7 +483,9 @@ export function computeCheckoutTotals(input: {
   )
 
   return {
-    productsSubtotal: roundMoney(isReverseCharge && taxIncluded ? productsForTotal : productsSubtotal),
+    productsSubtotal: roundMoney(
+      isReverseCharge && taxIncluded ? productsForTotal : productsSubtotal,
+    ),
     discountAmount,
     deliveryAmount: isReverseCharge && taxIncluded ? deliveryForTotal : deliveryAmount,
     deliveryMode: delivery.mode,
@@ -312,7 +494,7 @@ export function computeCheckoutTotals(input: {
     packagingBoxCount,
     packagingPalletCount,
     taxAmount,
-    codFeeAmount,
+    codFeeAmount: isReverseCharge && taxIncluded ? codForTotal : codFeeAmount,
     grandTotal,
     minOrderAmount,
     belowMinOrderBehavior: minPolicy.belowMinOrderBehavior,
@@ -333,7 +515,8 @@ export function computeCheckoutTotals(input: {
         : null,
     taxAppliesToFees: Boolean(settings.taxAppliesToFees),
     allowedDeliveryMethods,
+    deliveryUnavailableReason: delivery.unavailable,
   }
 }
 
-export type { CarrierRateTier }
+export type { ShipmentParcel }

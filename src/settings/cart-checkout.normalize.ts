@@ -176,41 +176,95 @@ function normalizeNextSteps(raw: unknown): CheckoutNextStepItem[] {
     : DEFAULT_CHECKOUT_NEXT_STEPS.map((step) => ({ ...step }))
 }
 
+function normalizeCarrierRateTiers(value: unknown): CarrierRateTier[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const row = item as Partial<CarrierRateTier>
+      const maxWeightKg = Number(row.maxWeightKg)
+      const amount = Number(row.amount)
+      if (!Number.isFinite(maxWeightKg) || maxWeightKg <= 0) return null
+      if (!Number.isFinite(amount) || amount < 0) return null
+      return { maxWeightKg, amount }
+    })
+    .filter((t): t is CarrierRateTier => Boolean(t))
+    .sort((a, b) => a.maxWeightKg - b.maxWeightKg)
+}
+
+function normalizeCarrierRateTableKey(key: string): string | null {
+  const trimmed = key.trim()
+  if (!trimmed) return null
+  const colon = trimmed.lastIndexOf(':')
+  if (colon > 0) {
+    const method = trimmed.slice(0, colon).trim()
+    const country = trimmed.slice(colon + 1).trim().toUpperCase()
+    if (!CHECKOUT_DELIVERY_METHODS.includes(method as CheckoutDeliveryMethodSlug)) return null
+    if (!/^[A-Z]{2}$/.test(country)) return null
+    return `${method}:${country}`
+  }
+  if (!CHECKOUT_DELIVERY_METHODS.includes(trimmed as CheckoutDeliveryMethodSlug)) return null
+  return trimmed
+}
+
 function normalizeCarrierRateTables(
   raw: unknown,
 ): CartCheckoutSettings['carrierRateTables'] {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { ...DEFAULT_CART_CHECKOUT_SETTINGS.carrierRateTables }
+    return {}
   }
-  const allowed = new Set(CHECKOUT_DELIVERY_METHODS)
   const out: CartCheckoutSettings['carrierRateTables'] = {}
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!allowed.has(key as CheckoutDeliveryMethodSlug)) continue
-    if (!Array.isArray(value)) continue
-    const tiers: CarrierRateTier[] = value
-      .map((item) => {
-        if (!item || typeof item !== 'object') return null
-        const row = item as Partial<CarrierRateTier>
-        const maxWeightKg = Number(row.maxWeightKg)
-        const amount = Number(row.amount)
-        if (!Number.isFinite(maxWeightKg) || maxWeightKg <= 0) return null
-        if (!Number.isFinite(amount) || amount < 0) return null
-        return { maxWeightKg, amount }
-      })
-      .filter((t): t is CarrierRateTier => Boolean(t))
-      .sort((a, b) => a.maxWeightKg - b.maxWeightKg)
-    if (tiers.length) out[key as CheckoutDeliveryMethodSlug] = tiers
+    const normalizedKey = normalizeCarrierRateTableKey(key)
+    if (!normalizedKey) continue
+    const tiers = normalizeCarrierRateTiers(value)
+    if (tiers.length) out[normalizedKey] = tiers
+  }
+  return out
+}
+
+function isSurchargeMode(value: unknown): value is CartCheckoutSettings['carrierSurcharges'][string]['fuelMode'] {
+  return value === 'separate' || value === 'included' || value === 'none'
+}
+
+function normalizeCarrierSurchargeConfig(raw: unknown): CartCheckoutSettings['carrierSurcharges'][string] | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const row = raw as Record<string, unknown>
+  const fuelMode = isSurchargeMode(row.fuelMode) ? row.fuelMode : 'none'
+  const tollMode = isSurchargeMode(row.tollMode) ? row.tollMode : 'none'
+  return {
+    fuelPercent: Math.max(0, Number(row.fuelPercent) || 0),
+    fuelMode,
+    tollPerStartedKgNet: Math.max(0, Number(row.tollPerStartedKgNet) || 0),
+    tollMode,
+    maxParcelWeightKg: Math.max(0, Number(row.maxParcelWeightKg) || 0),
+  }
+}
+
+function normalizeCarrierSurcharges(
+  raw: unknown,
+): CartCheckoutSettings['carrierSurcharges'] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ...DEFAULT_CART_CHECKOUT_SETTINGS.carrierSurcharges }
+  }
+  const out: CartCheckoutSettings['carrierSurcharges'] = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const normalizedKey = normalizeCarrierRateTableKey(key)
+    if (!normalizedKey) continue
+    const config = normalizeCarrierSurchargeConfig(value)
+    if (config) out[normalizedKey] = config
   }
   return Object.keys(out).length
     ? out
-    : { ...DEFAULT_CART_CHECKOUT_SETTINGS.carrierRateTables }
+    : { ...DEFAULT_CART_CHECKOUT_SETTINGS.carrierSurcharges }
 }
 
 /** Підтримка старих налаштувань без deliveryMode. */
 export function normalizeCartCheckoutSettings(
   raw: Partial<CartCheckoutSettings> | null | undefined,
 ): CartCheckoutSettings {
-  const base = { ...DEFAULT_CART_CHECKOUT_SETTINGS, ...raw }
+  const source = raw && typeof raw === 'object' ? raw : {}
+  const base = { ...DEFAULT_CART_CHECKOUT_SETTINGS, ...source }
 
   let deliveryMode = base.deliveryMode
   if (!isDeliveryMode(deliveryMode)) {
@@ -275,7 +329,26 @@ export function normalizeCartCheckoutSettings(
     ),
     showPromoCode: base.showPromoCode !== false,
     deliveryWeightRules: normalizeDeliveryWeightRules(base.deliveryWeightRules),
-    carrierRateTables: normalizeCarrierRateTables(base.carrierRateTables),
+    carrierRateTables: normalizeCarrierRateTables(source.carrierRateTables),
+    carrierSurcharges: normalizeCarrierSurcharges(source.carrierSurcharges),
+    standardParcelMaxWeightKg: Math.max(
+      0,
+      Number(source.standardParcelMaxWeightKg ?? DEFAULT_CART_CHECKOUT_SETTINGS.standardParcelMaxWeightKg) || 0,
+    ) || DEFAULT_CART_CHECKOUT_SETTINGS.standardParcelMaxWeightKg,
+    defaultMissingWeightKg: (() => {
+      const raw = Number(
+        source.defaultMissingWeightKg ?? DEFAULT_CART_CHECKOUT_SETTINGS.defaultMissingWeightKg,
+      )
+      return Number.isFinite(raw) && raw > 0
+        ? raw
+        : DEFAULT_CART_CHECKOUT_SETTINGS.defaultMissingWeightKg
+    })(),
+    packagingAmountsAreNet:
+      'packagingAmountsAreNet' in source
+        ? Boolean(source.packagingAmountsAreNet)
+        : false,
+    codFeeAmountsAreNet:
+      'codFeeAmountsAreNet' in source ? Boolean(source.codFeeAmountsAreNet) : false,
     cartWeight: normalizeCartWeight(base.cartWeight),
     cartSize: normalizeCartSize(base.cartSize ?? DEFAULT_CART_SIZE_SETTINGS),
     codFeeAmount: Math.max(0, Number(base.codFeeAmount) || 0),

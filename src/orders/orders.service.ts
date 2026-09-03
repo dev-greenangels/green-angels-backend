@@ -421,7 +421,7 @@ export class OrdersService {
     return this.buildOrderPdfByOrderNumber(String(order.orderNumber), undefined, { internal: true })
   }
 
-  private async resolveOrderItemSnapshots(variantIds: string[]) {
+  private async resolveOrderItemSnapshots(variantIds: string[], locale?: string) {
     const uniqueIds = [...new Set(variantIds)]
     if (!uniqueIds.length) return new Map<string, {
       productName: string
@@ -431,6 +431,8 @@ export class OrdersService {
       availableFrom: Date | null
     }>()
 
+    const snapshotLocale = locale?.trim() || DEFAULT_LOCALE
+
     const variants = await this.prisma.productVariant.findMany({
       where: { id: { in: uniqueIds } },
       include: {
@@ -438,7 +440,9 @@ export class OrdersService {
           include: {
             value: {
               include: {
-                translations: { where: { locale: DEFAULT_LOCALE } },
+                translations: {
+                  where: { locale: { in: snapshotLocale === DEFAULT_LOCALE ? [DEFAULT_LOCALE] : [snapshotLocale, DEFAULT_LOCALE] } },
+                },
                 attribute: { select: VARIANT_LABEL_ATTRIBUTE_SELECT },
               },
             },
@@ -446,7 +450,9 @@ export class OrdersService {
         },
         product: {
           include: {
-            translations: { where: { locale: DEFAULT_LOCALE }, take: 1 },
+            translations: {
+              where: { locale: { in: snapshotLocale === DEFAULT_LOCALE ? [DEFAULT_LOCALE] : [snapshotLocale, DEFAULT_LOCALE] } },
+            },
           },
         },
       },
@@ -463,8 +469,26 @@ export class OrdersService {
     }>()
 
     for (const variant of variants) {
+      const localizedProductName =
+        variant.product.translations.find((t) => t.locale === snapshotLocale)?.name ??
+        variant.product.translations.find((t) => t.locale === DEFAULT_LOCALE)?.name ??
+        variant.product.slug
+
+      // Pick locale-specific attribute value translations for variant label
+      for (const link of variant.attributeValues) {
+        const localized = link.value.translations.find((t) => t.locale === snapshotLocale)
+        if (localized) {
+          // Move the localized translation to index 0 so buildFromLinksWithOrder picks it
+          const idx = link.value.translations.indexOf(localized)
+          if (idx > 0) {
+            link.value.translations.splice(idx, 1)
+            link.value.translations.unshift(localized)
+          }
+        }
+      }
+
       map.set(variant.id, {
-        productName: variant.product.translations[0]?.name ?? variant.product.slug,
+        productName: localizedProductName,
         productSlug: variant.product.slug,
         variantLabel: this.variantLabels.buildFromLinksWithOrder(variant.attributeValues, typeOrder),
         sku: variant.sku,
@@ -788,6 +812,26 @@ export class OrdersService {
       }
     }
 
+    // Enrich items with localized product names if order has a non-default locale
+    const orderLocale = (order.locale ?? DEFAULT_LOCALE).trim() || DEFAULT_LOCALE
+    let localizedNames: Map<string, { productName: string; variantLabel: string | null }> | null = null
+
+    if (orderLocale !== DEFAULT_LOCALE) {
+      const variantIds = order.items
+        .map((item) => item.productVariantId)
+        .filter((id): id is string => Boolean(id))
+      if (variantIds.length > 0) {
+        const snapshots = await this.resolveOrderItemSnapshots(variantIds, orderLocale)
+        localizedNames = new Map()
+        for (const [variantId, snapshot] of snapshots) {
+          localizedNames.set(variantId, {
+            productName: snapshot.productName,
+            variantLabel: snapshot.variantLabel,
+          })
+        }
+      }
+    }
+
     return {
       id: order.id,
       orderNumber,
@@ -826,14 +870,15 @@ export class OrdersService {
       ...this.mapPublicOrderFields(order),
       items: order.items.map((item) => {
         const lineTotal = Math.round(Number(item.priceAtPurchase) * item.quantity * 100) / 100
+        const localized = item.productVariantId ? localizedNames?.get(item.productVariantId) : null
         return {
           id: item.id,
           quantity: item.quantity,
           priceAtPurchase: Number(item.priceAtPurchase),
           lineTotal,
-          productName: item.productName,
+          productName: localized?.productName ?? item.productName,
           productSlug: item.productSlug,
-          variantLabel: item.variantLabel,
+          variantLabel: localized?.variantLabel ?? item.variantLabel,
         }
       }),
     }
@@ -1554,6 +1599,8 @@ export class OrdersService {
       cartSizeEnvelope: quote.cartSizeEnvelope,
       cartVolumeL: quote.cartVolumeL,
       audienceRole: audience.role,
+      deliveryCountryCode: dto.deliveryCountryCode,
+      hostCountryCode: dto.countryCode,
       taxOverride: tax,
     })
 
@@ -1601,6 +1648,11 @@ export class OrdersService {
     }
 
     if (!checkout.canPlaceOrder) {
+      if (checkout.deliveryUnavailableReason === 'no_tariff') {
+        throw new BadRequestException(
+          'Немає тарифу доставки для цієї ваги або країни.',
+        )
+      }
       throw new BadRequestException('Сума замовлення менша за мінімальну.')
     }
 
@@ -1622,6 +1674,7 @@ export class OrdersService {
 
     const snapshotByVariantId = await this.resolveOrderItemSnapshots(
       lineItems.map((item) => item.productVariantId),
+      dto.locale,
     )
 
     for (const item of lineItems) {

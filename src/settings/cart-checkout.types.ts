@@ -86,9 +86,27 @@ export type CartWeightSettings = {
 
 export type CodFeeMode = 'fixed' | 'percent'
 
-/** Вагові тарифи перевізника для режиму carrier_rates */
+/** Packeta fuel/toll: separate = add NET; included = already in base; none = do not apply. */
+export type CarrierSurchargeMode = 'separate' | 'included' | 'none'
+
+export type CarrierSurchargeConfig = {
+  /** NET % of base transportation (editable; Packeta changes monthly). */
+  fuelPercent: number
+  fuelMode: CarrierSurchargeMode
+  /** NET EUR per commenced kg (Packeta SK: 0.04). */
+  tollPerStartedKgNet: number
+  tollMode: CarrierSurchargeMode
+  /** 0 = do not split (single parcel of cart weight). Packeta standard = 15. */
+  maxParcelWeightKg: number
+}
+
+/**
+ * Weight tiers for carrier_rates.
+ * `amount` is always the contractual transportation price NET (without VAT, fuel, or toll).
+ */
 export type CarrierRateTier = {
   maxWeightKg: number
+  /** NET transportation price in deploy currency (EUR on SK). Never VAT-inclusive. */
   amount: number
 }
 
@@ -108,7 +126,7 @@ export type CartCheckoutSettings = {
   boxMaxWeightKg: number
   /** 0 = ignore volume (liters) for box count */
   boxMaxVolumeL: number
-  /** Gross unit price per box (boxes mode) */
+  /** Gross unit price per box when packagingAmountsAreNet is false; NET when true */
   boxUnitPrice: number
   /** 0 = no pallet surcharge */
   boxesPerPallet: number
@@ -136,10 +154,32 @@ export type CartCheckoutSettings = {
   /** Правила фільтрації способів доставки за вагою кошика */
   deliveryWeightRules: DeliveryWeightRule[]
   /**
-   * Таблиці тарифів для carrier_rates (ключ = delivery method slug).
-   * Перший tier де cartWeightKg <= maxWeightKg визначає суму.
+   * Таблиці тарифів для carrier_rates.
+   * Ключ: delivery slug (`packeta-box`) або `slug:CC` (`packeta-box:SK`).
+   * `amount` = NET transportation only (no VAT / fuel / toll).
    */
-  carrierRateTables: Partial<Record<CheckoutDeliveryMethodSlug, CarrierRateTier[]>>
+  carrierRateTables: Record<string, CarrierRateTier[]>
+  /**
+   * Packeta/GLS surcharge policy, keyed like rate tables (`packeta-box`, `packeta-courier:SK`).
+   */
+  carrierSurcharges: Record<string, CarrierSurchargeConfig>
+  /** Default max kg per standard parcel when surcharge config omits maxParcelWeightKg. */
+  standardParcelMaxWeightKg: number
+  /**
+   * Shipping-calculation-only fallback when a variant has no factual/tare weight.
+   * Does not mutate ProductVariant.weight. Must be > 0 (normalize restores default).
+   */
+  defaultMissingWeightKg: number
+  /**
+   * When true, packagingAmount / boxUnitPrice / palletSurcharge / belowMinPackagingFee are NET.
+   * Missing on legacy JSON → false (treat as GROSS, do not double-VAT).
+   */
+  packagingAmountsAreNet: boolean
+  /**
+   * When true, codFeeAmount is NET and follows the same VAT path as delivery/packaging.
+   * Missing on legacy JSON → false (COD stays outside VAT extract — historical).
+   */
+  codFeeAmountsAreNet: boolean
   /** Керування розрахунком ваги кошика */
   cartWeight: CartWeightSettings
   /** Макс. довжина / сума сторін / girth по способу доставки */
@@ -256,23 +296,42 @@ export const DEFAULT_CART_CHECKOUT_SETTINGS: CartCheckoutSettings = {
   enabledDeliveryMethods: [...DEFAULT_ENABLED_DELIVERY_METHODS],
   enabledPaymentMethods: [...DEFAULT_ENABLED_PAYMENT_METHODS],
   deliveryWeightRules: [],
-  carrierRateTables: {
-    'packeta-box': [
-      { maxWeightKg: 5, amount: 3.49 },
-      { maxWeightKg: 10, amount: 4.49 },
-      { maxWeightKg: 999, amount: 5.99 },
-    ],
-    'packeta-courier': [
-      { maxWeightKg: 5, amount: 4.99 },
-      { maxWeightKg: 10, amount: 6.49 },
-      { maxWeightKg: 999, amount: 7.99 },
-    ],
-    'gls-courier': [
-      { maxWeightKg: 5, amount: 4.79 },
-      { maxWeightKg: 10, amount: 6.29 },
-      { maxWeightKg: 999, amount: 7.79 },
-    ],
+  /** Empty on purpose — never ship placeholder Packeta prices as contract rates. */
+  carrierRateTables: {},
+  carrierSurcharges: {
+    'packeta-box': {
+      fuelPercent: 18.5,
+      fuelMode: 'separate',
+      tollPerStartedKgNet: 0.04,
+      tollMode: 'separate',
+      maxParcelWeightKg: 15,
+    },
+    'packeta-courier:SK': {
+      fuelPercent: 18.5,
+      fuelMode: 'separate',
+      tollPerStartedKgNet: 0.04,
+      tollMode: 'separate',
+      maxParcelWeightKg: 15,
+    },
+    'packeta-courier': {
+      fuelPercent: 18.5,
+      fuelMode: 'included',
+      tollPerStartedKgNet: 0.04,
+      tollMode: 'included',
+      maxParcelWeightKg: 15,
+    },
+    'gls-courier': {
+      fuelPercent: 0,
+      fuelMode: 'none',
+      tollPerStartedKgNet: 0,
+      tollMode: 'none',
+      maxParcelWeightKg: 0,
+    },
   },
+  standardParcelMaxWeightKg: 15,
+  defaultMissingWeightKg: 1,
+  packagingAmountsAreNet: true,
+  codFeeAmountsAreNet: true,
   cartWeight: { ...DEFAULT_CART_WEIGHT_SETTINGS },
   cartSize: {
     enabled: false,

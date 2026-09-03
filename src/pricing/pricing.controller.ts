@@ -81,6 +81,8 @@ export class PricingController {
       cartSizeEnvelope: quote.cartSizeEnvelope,
       cartVolumeL: quote.cartVolumeL,
       audienceRole: audience.role,
+      deliveryCountryCode: dto.deliveryCountryCode,
+      hostCountryCode: dto.countryCode,
       taxOverride: tax,
     })
 

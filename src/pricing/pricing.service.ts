@@ -19,7 +19,10 @@ import { VARIANT_LABEL_ATTRIBUTE_SELECT } from '../products/variant-label.util'
 import { SettingsService } from '../settings/settings.service'
 import { buildCategoryDescendantMap, type CategoryDescendantMap } from './category-scope.util'
 import { computeCartSizeEnvelope } from './delivery-size.util'
-import { computeCartWeightKg, computeCartVolumeLiters } from './delivery-weight.util'
+import {
+  computeCartVolumeLiters,
+  computeCartWeightWithMeta,
+} from './delivery-weight.util'
 import {
   isWithinDateRange,
   matchesAudience,
@@ -510,7 +513,11 @@ export class PricingService {
       throw new NotFoundException('Один або кілька товарів не знайдено.')
     }
 
-    const cartWeightSettings = (await this.settings.getCartCheckoutSettings()).cartWeight
+    const cartCheckout = await this.settings.getCartCheckoutSettings()
+    const cartWeightSettings = cartCheckout.cartWeight
+    const shippingWeightOpts = {
+      defaultMissingWeightKg: cartCheckout.defaultMissingWeightKg,
+    }
     const discountRules = await this.loadActiveDiscountRules()
     const requestedCodes = normalizePromoCodesInput(input.promoCode, input.promoCodes)
     const loadedPromos = await this.loadPromoCodes(requestedCodes)
@@ -879,7 +886,13 @@ export class PricingService {
       }
     })
 
-    const cartWeightKg = computeCartWeightKg(variants, uniqueItems, cartWeightSettings)
+    const weightMeta = computeCartWeightWithMeta(
+      variants,
+      uniqueItems,
+      cartWeightSettings,
+      shippingWeightOpts,
+    )
+    const cartWeightKg = weightMeta.cartWeightKg
     const cartVolumeL = computeCartVolumeLiters(variants, uniqueItems)
     const cartSizeEnvelope = computeCartSizeEnvelope(variants, uniqueItems)
 
@@ -891,6 +904,8 @@ export class PricingService {
       cartWeightKg,
       cartVolumeL,
       cartSizeEnvelope,
+      usedFallbackWeight: weightMeta.usedFallbackWeight,
+      fallbackWeightItemCount: weightMeta.fallbackWeightItemCount,
       promoCodeId: appliedPromoIdList[0] ?? null,
       promoCode: appliedPromoCodes[0] ?? null,
       promoCodeIds: appliedPromoIdList,
