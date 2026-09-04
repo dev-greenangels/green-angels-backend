@@ -85,6 +85,24 @@ export class BackstageMediaController {
     return { ok: true }
   }
 
+  @Post('settings/home-hero-mobile')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 8 * 1024 * 1024 },
+    }),
+  )
+  async uploadHomeHeroMobile(@UploadedFile() file: Express.Multer.File) {
+    this.assertImage(file)
+    return this.catalogMedia.storeHomeHeroMobileImage(file.buffer)
+  }
+
+  @Post('settings/home-hero-mobile/delete')
+  async deleteHomeHeroMobile() {
+    await this.catalogMedia.deleteHomeHeroMobileImage()
+    return { ok: true }
+  }
+
   @Post('blog')
   @UseInterceptors(
     FileInterceptor('file', {

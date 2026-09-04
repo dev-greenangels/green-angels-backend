@@ -36,3 +36,10 @@ export const HOME_HERO_IMAGE_PATH_REGEX =
 export function isValidHomeHeroImagePath(url: string): boolean {
   return HOME_HERO_IMAGE_PATH_REGEX.test(url.trim())
 }
+
+export const HOME_HERO_MOBILE_IMAGE_PATH_REGEX =
+  /^\/uploads\/settings\/home-hero-mobile\/v\d+\/cover\.webp$/i
+
+export function isValidHomeHeroMobileImagePath(url: string): boolean {
+  return HOME_HERO_MOBILE_IMAGE_PATH_REGEX.test(url.trim())
+}
