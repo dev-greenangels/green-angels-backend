@@ -24,6 +24,7 @@ function createService(prisma: unknown) {
     {} as never,
     variantLabels as never,
     commerce as never,
+    {} as never,
   )
 }
 

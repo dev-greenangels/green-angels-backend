@@ -79,6 +79,9 @@ export type BackstageProductListItem = {
   stock: number
   variantLabel: string | null
   imageUrl: string | null
+  /** Present when list is requested with merchant=1 (strict locale copy + gallery). */
+  description?: string | null
+  images?: string[]
   characteristics: ProductCharacteristicsDto
   createdAt: string
   updatedAt: string
@@ -477,7 +480,7 @@ export class ProductsService {
       categoryId: string
       createdAt: Date
       updatedAt?: Date
-      translations: Array<{ locale?: string; name: string }>
+      translations: Array<{ locale?: string; name: string; description?: string | null }>
       category: { slug: string; translations: Array<{ locale?: string; name: string }> }
       images: Array<{ url: string; isMain: boolean; sortOrder: number }>
       characteristics: Array<{
@@ -515,6 +518,7 @@ export class ProductsService {
     slugFallback?: string,
     typeOrder: VariantAttributeType[] = [],
     locale = 'uk',
+    options?: { merchant?: boolean },
   ): BackstageProductListItem {
     const firstVariant = product.variants[0]
     const priceRow = firstVariant?.prices[0]
@@ -524,13 +528,19 @@ export class ProductsService {
       ''
     const nameEn = product.translations.find((row) => row.locale === 'en')?.name ?? ''
     const nameSk = product.translations.find((row) => row.locale === 'sk')?.name ?? ''
-    const localizedName = pickLocalizedName(
-      product.translations,
-      locale,
-      slugFallback || product.slug,
-    )
+    const merchant = Boolean(options?.merchant)
+    const strictName = product.translations
+      .find((row) => row.locale === locale)
+      ?.name?.trim()
+    const localizedName = merchant
+      ? strictName || ''
+      : pickLocalizedName(product.translations, locale, slugFallback || product.slug)
+    const categoryName = merchant
+      ? product.category.translations.find((row) => row.locale === locale)?.name?.trim() ||
+        product.category.slug
+      : pickLocalizedName(product.category.translations, locale, product.category.slug)
 
-    return {
+    const item: BackstageProductListItem = {
       id: product.id,
       slug: product.slug,
       name: localizedName,
@@ -543,11 +553,7 @@ export class ProductsService {
       isPublished: product.isPublished,
       categoryId: product.categoryId,
       categorySlug: product.category.slug,
-      categoryName: pickLocalizedName(
-        product.category.translations,
-        locale,
-        product.category.slug,
-      ),
+      categoryName,
       variantCount: product._count.variants,
       sku: firstVariant?.sku ?? null,
       price: priceRow ? Number(priceRow.value) : null,
@@ -563,6 +569,21 @@ export class ProductsService {
       pricingMode: this.inferPricingMode(product.variants),
       variants: product.variants.map((variant) => this.toListVariantSummary(variant, typeOrder, locale)),
     }
+
+    if (merchant) {
+      const description =
+        product.translations.find((row) => row.locale === locale)?.description?.trim() || null
+      item.description = description
+      item.images = [...product.images]
+        .sort((a, b) => {
+          if (a.isMain !== b.isMain) return a.isMain ? -1 : 1
+          return a.sortOrder - b.sortOrder
+        })
+        .map((image) => image.url)
+        .filter(Boolean)
+    }
+
+    return item
   }
 
   private listInclude(locale: string, currency: string) {
@@ -1279,6 +1300,7 @@ export class ProductsService {
     sort?: string,
     currencyCode?: string,
     lowStockThreshold?: number,
+    options?: { merchant?: boolean },
   ): Promise<PaginatedBackstageProducts> {
     const currency = currencyCode ?? (await this.commerce.getDefaultCurrencyCode())
     const sortRows = await this.prisma.product.findMany({
@@ -1311,7 +1333,9 @@ export class ProductsService {
     const labelTypeOrder = await this.variantLabels.getTypeOrder()
 
     return {
-      items: rows.map((row) => this.toListItem(row, undefined, labelTypeOrder, locale)),
+      items: rows.map((row) =>
+        this.toListItem(row, undefined, labelTypeOrder, locale, options),
+      ),
       total,
       page,
       pageSize,
@@ -1717,10 +1741,12 @@ export class ProductsService {
     discountMinQuantity?: number
     discountQuantityMode?: string
     limit?: number
+    merchant?: boolean
   }): Promise<BackstageProductListItem[] | PaginatedBackstageProducts> {
     const locale = this.defaultLocale(params.locale)
     const currency = await this.commerce.getDefaultCurrencyCode()
     const normalizedSearch = params.search ? normalizeSearchQuery(params.search) : ''
+    const listOptions = { merchant: Boolean(params.merchant) }
 
     if (normalizedSearch) {
       if (this.hasCatalogFacetFilters(params)) {
@@ -1758,6 +1784,7 @@ export class ProductsService {
         params.sort,
         currency,
         params.lowStockThreshold,
+        listOptions,
       )
     }
 
@@ -1773,7 +1800,9 @@ export class ProductsService {
     })
 
     const labelTypeOrder = await this.variantLabels.getTypeOrder()
-    const items = rows.map((row) => this.toListItem(row, undefined, labelTypeOrder, locale))
+    const items = rows.map((row) =>
+      this.toListItem(row, undefined, labelTypeOrder, locale, listOptions),
+    )
     return slugList.length ? orderRowsBySlugList(items, slugList) : items
   }
 

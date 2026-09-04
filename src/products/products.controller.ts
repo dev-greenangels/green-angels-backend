@@ -42,6 +42,7 @@ export class ProductsController {
     @Query('hasDiscount') hasDiscount?: string,
     @Query('discountMinQuantity') discountMinQuantity?: string,
     @Query('discountQuantityMode') discountQuantityMode?: string,
+    @Query('merchant') merchant?: string,
   ) {
     return this.products.findAll({
       locale,
@@ -72,6 +73,7 @@ export class ProductsController {
           ? Number(discountMinQuantity)
           : undefined,
       discountQuantityMode,
+      merchant: merchant === '1' || merchant === 'true',
     })
   }
 
