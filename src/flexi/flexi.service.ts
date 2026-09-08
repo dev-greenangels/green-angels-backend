@@ -52,6 +52,7 @@ import type {
   FlexiStockLine,
   FlexiStromCenikLink,
   FlexiStromNode,
+  FlexiCategoryLegacyBackfillResult,
   FlexiStromSyncResult,
   FlexiSyncResult,
 } from './flexi.types'
@@ -67,6 +68,27 @@ function slugify(input: string): string {
       .replace(/^-+|-+$/g, '')
       .slice(0, 80) || 'item'
   )
+}
+
+/** ABRA strom id → Category.legacyId (Int). Non-numeric ids are skipped. */
+function parseFlexiCategoryLegacyId(id: string): number | null {
+  const trimmed = id.trim()
+  if (!/^\d+$/.test(trimmed)) return null
+  const value = Number(trimmed)
+  if (!Number.isSafeInteger(value) || value < 0) return null
+  return value
+}
+
+/** New category slug from latin name; on collision append `-{abraId}`. */
+function categorySlugFromNazev(nazev: string, abraId: string): string {
+  const base = slugify(nazev || abraId).slice(0, 100) || 'item'
+  return base
+}
+
+function categorySlugWithAbraSuffix(baseSlug: string, abraId: string): string {
+  const suffix = `-${abraId.trim()}`
+  const maxBase = Math.max(1, 100 - suffix.length)
+  return `${baseSlug.slice(0, maxBase)}${suffix}`
 }
 
 /** Flexi product external id on site: flexi:{stromLeafId}. Never bare digits (collides with 1C). */
@@ -753,6 +775,8 @@ export class FlexiService {
 
   /**
    * Branch nodes → Category; leaf nodes → Product; strom-cenik → variants by SKU.
+   * Categories: match legacyId (ABRA id) → slugify(kod) fallback → create.
+   * Create sets slug from nazev, tree once; update never rewrites slug/parent/position.
    * Field mappers unchanged — createMissing only gates create vs skip-missing.
    */
   async syncStromCatalog(opts?: {
@@ -864,13 +888,44 @@ export class FlexiService {
           const parentCategoryId = resolveShopParentCategoryId(parentFlexiId)
 
           const content = mapStromCategoryContent(node)
-          const slug = slugify(node.kod || node.nazev || node.id).slice(0, 100)
-          let existing = await this.prisma.category.findUnique({ where: { slug } })
+          const flexiLegacyId = parseFlexiCategoryLegacyId(node.id)
+          const kodSlug = node.kod ? slugify(node.kod).slice(0, 100) : null
+
+          let existing =
+            flexiLegacyId != null
+              ? await this.prisma.category.findUnique({ where: { legacyId: flexiLegacyId } })
+              : null
+          if (!existing && kodSlug) {
+            existing = await this.prisma.category.findUnique({ where: { slug: kodSlug } })
+          }
 
           if (!existing) {
             if (!createMissing) {
               skippedMissingCategories += 1
               continue
+            }
+            let slug = categorySlugFromNazev(content.latinName || node.nazev, node.id)
+            const slugTaken = await this.prisma.category.findUnique({ where: { slug } })
+            if (slugTaken) {
+              slug = categorySlugWithAbraSuffix(slug, node.id)
+              const stillTaken = await this.prisma.category.findUnique({ where: { slug } })
+              if (stillTaken) {
+                errors.push(
+                  `category ${node.kod || node.id}: slug «${slug}» вже зайнятий — пропущено create`,
+                )
+                continue
+              }
+            }
+            if (flexiLegacyId != null) {
+              const legacyTaken = await this.prisma.category.findUnique({
+                where: { legacyId: flexiLegacyId },
+              })
+              if (legacyTaken) {
+                errors.push(
+                  `category ${node.kod || node.id}: legacyId ${flexiLegacyId} вже зайнятий — пропущено create`,
+                )
+                continue
+              }
             }
             existing = await this.prisma.category.create({
               data: {
@@ -880,6 +935,7 @@ export class FlexiService {
                 parentId: parentCategoryId,
                 isCatalogRoot: !parentCategoryId,
                 isActive: true,
+                legacyId: flexiLegacyId,
                 translations: {
                   create: categoryTranslationCreates(content),
                 },
@@ -888,16 +944,22 @@ export class FlexiService {
           } else {
             const categoryUpdate: {
               latinName?: string
-              position?: number
-              parentId?: string | null
-              isCatalogRoot?: boolean
+              legacyId?: number
             } = {}
             if (fields.categoryLatinName) categoryUpdate.latinName = content.latinName
-            if (fields.categoryTree) {
-              categoryUpdate.position = node.poradi
-              categoryUpdate.parentId = parentCategoryId
-              categoryUpdate.isCatalogRoot = !parentCategoryId
+            if (existing.legacyId == null && flexiLegacyId != null) {
+              const legacyTaken = await this.prisma.category.findFirst({
+                where: { legacyId: flexiLegacyId, NOT: { id: existing.id } },
+                select: { id: true },
+              })
+              if (!legacyTaken) categoryUpdate.legacyId = flexiLegacyId
+              else {
+                errors.push(
+                  `category ${node.kod || node.id}: legacyId ${flexiLegacyId} вже на іншій категорії`,
+                )
+              }
             }
+            // Tree (parent/position/isCatalogRoot) and slug are never rewritten on update.
             if (Object.keys(categoryUpdate).length > 0) {
               await this.prisma.category.update({
                 where: { id: existing.id },
@@ -1281,6 +1343,152 @@ export class FlexiService {
         skippedMissingProducts,
         skippedMissingVariants,
         journalAbsorbed,
+        message,
+        errors: [...errors, message],
+      }
+    }
+  }
+
+  /**
+   * One-shot: set Category.legacyId from ABRA strom id where slug === slugify(kod).
+   * Does not create categories or change slug/parent/position.
+   */
+  async backfillCategoryLegacyIds(): Promise<FlexiCategoryLegacyBackfillResult> {
+    const empty = {
+      matched: 0,
+      updated: 0,
+      skippedAlreadySet: 0,
+      skippedNoMatch: 0,
+      skippedConflict: 0,
+      skippedNonNumericId: 0,
+      errors: [] as string[],
+    }
+    const configured = await this.isConfigured()
+    if (!configured) {
+      return {
+        ok: false,
+        ...empty,
+        message: 'ABRA Flexi не налаштовано.',
+      }
+    }
+
+    const settings = await this.settings.getSettings()
+    const errors: string[] = []
+    let matched = 0
+    let updated = 0
+    let skippedAlreadySet = 0
+    let skippedNoMatch = 0
+    let skippedConflict = 0
+    let skippedNonNumericId = 0
+
+    try {
+      const planned = resolveStromTreeAndShopRoot(
+        settings.stromRootCode,
+        settings.stromShopRootCode,
+      )
+      let shopRootCode = planned.shopRootCode
+      let nodes = await this.client.fetchStromNodes(planned.treeCode)
+      if (nodes.length === 0 && planned.treeCode.toUpperCase() !== 'STR_CEN') {
+        nodes = await this.client.fetchStromNodes('STR_CEN')
+        if (nodes.length > 0 && !shopRootCode) {
+          shopRootCode = settings.stromRootCode.trim()
+        }
+      }
+      if (shopRootCode) {
+        const subtree = filterStromSubtree(nodes, shopRootCode)
+        if (subtree.length === 0) {
+          errors.push(
+            `Папка каталогу «${shopRootCode}» не знайдена в дереві ${planned.treeCode}.`,
+          )
+        } else {
+          nodes = subtree
+        }
+      }
+
+      const childrenOf = new Map<string, string[]>()
+      const byKod = new Map<string, FlexiStromNode>()
+      for (const n of nodes) {
+        if (n.kod) byKod.set(n.kod, n)
+      }
+      for (const n of nodes) {
+        const parentKey = n.parentId ?? (n.parentKod ? byKod.get(n.parentKod)?.id : null)
+        if (!parentKey) continue
+        const list = childrenOf.get(parentKey) ?? []
+        list.push(n.id)
+        childrenOf.set(parentKey, list)
+      }
+      const isLeaf = (id: string) => !(childrenOf.get(id)?.length)
+      const branchNodes = nodes.filter((n) => !isLeaf(n.id) && !isSkippedStromNode(n))
+
+      for (const node of branchNodes) {
+        const flexiLegacyId = parseFlexiCategoryLegacyId(node.id)
+        if (flexiLegacyId == null) {
+          skippedNonNumericId += 1
+          continue
+        }
+        if (!node.kod?.trim()) {
+          skippedNoMatch += 1
+          continue
+        }
+        const kodSlug = slugify(node.kod).slice(0, 100)
+        const category = await this.prisma.category.findUnique({ where: { slug: kodSlug } })
+        if (!category) {
+          skippedNoMatch += 1
+          continue
+        }
+        matched += 1
+        if (category.legacyId != null) {
+          if (category.legacyId === flexiLegacyId) skippedAlreadySet += 1
+          else {
+            skippedConflict += 1
+            errors.push(
+              `${kodSlug}: legacyId уже ${category.legacyId}, ABRA ${flexiLegacyId} — пропущено`,
+            )
+          }
+          continue
+        }
+        const taken = await this.prisma.category.findFirst({
+          where: { legacyId: flexiLegacyId, NOT: { id: category.id } },
+          select: { id: true, slug: true },
+        })
+        if (taken) {
+          skippedConflict += 1
+          errors.push(
+            `${kodSlug}: ABRA id ${flexiLegacyId} уже на категорії «${taken.slug}»`,
+          )
+          continue
+        }
+        await this.prisma.category.update({
+          where: { id: category.id },
+          data: { legacyId: flexiLegacyId },
+        })
+        updated += 1
+      }
+
+      const message =
+        `Backfill legacyId: оновлено ${updated}, вже було ${skippedAlreadySet}, без матчу ${skippedNoMatch}, конфлікти ${skippedConflict}, нечислові id ${skippedNonNumericId}, помилок ${errors.length}.`
+
+      return {
+        ok: errors.length === 0,
+        matched,
+        updated,
+        skippedAlreadySet,
+        skippedNoMatch,
+        skippedConflict,
+        skippedNonNumericId,
+        message,
+        errors,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return {
+        ok: false,
+        matched,
+        updated,
+        skippedAlreadySet,
+        skippedNoMatch,
+        skippedConflict,
+        skippedNonNumericId,
         message,
         errors: [...errors, message],
       }

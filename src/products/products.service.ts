@@ -931,6 +931,7 @@ export class ProductsService {
       this.prisma.productVariantAttributeValue.findMany({
         where: {
           variant: {
+            stock: { gt: 0 },
             product: productWhere,
           },
         },
@@ -1019,6 +1020,7 @@ export class ProductsService {
       and.push({
         variants: {
           some: {
+            stock: { gt: 0 },
             attributeValues: {
               some: {
                 value: {

@@ -204,6 +204,11 @@ export class FlexiAdminController {
     return this.flexi.syncStromCatalog({ createMissing, absorbJournal: true })
   }
 
+  @Post('backfill-category-legacy-ids/run')
+  backfillCategoryLegacyIdsRun() {
+    return this.flexi.backfillCategoryLegacyIds()
+  }
+
   @Post('import-new-products')
   async importNewProducts() {
     const job = await this.queue.enqueueImportNewProducts()

@@ -56,9 +56,10 @@ export class UpdateCategoryDto {
   image?: string | null
 
   @IsOptional()
+  @ValidateIf((_, value) => value !== null && value !== undefined)
   @IsInt()
   @Min(0)
-  legacyId?: number
+  legacyId?: number | null
 
   @IsOptional()
   @IsBoolean()

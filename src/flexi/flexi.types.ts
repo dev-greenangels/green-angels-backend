@@ -350,6 +350,19 @@ export type FlexiStromSyncResult = {
   errors: string[]
 }
 
+/** One-shot: write Category.legacyId from ABRA strom id (match by slugify(kod)). */
+export type FlexiCategoryLegacyBackfillResult = {
+  ok: boolean
+  matched: number
+  updated: number
+  skippedAlreadySet: number
+  skippedNoMatch: number
+  skippedConflict: number
+  skippedNonNumericId: number
+  message: string
+  errors: string[]
+}
+
 export type FlexiImportResult = {
   ok: boolean
   created: number

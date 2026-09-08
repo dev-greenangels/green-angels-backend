@@ -428,7 +428,7 @@ export class CategoriesService {
       }
     }
 
-    if (dto.legacyId !== undefined) {
+    if (dto.legacyId !== undefined && dto.legacyId !== null) {
       const legacyConflict = await this.prisma.category.findFirst({
         where: { legacyId: dto.legacyId, NOT: { id } },
       })
