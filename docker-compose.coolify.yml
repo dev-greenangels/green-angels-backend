@@ -14,6 +14,8 @@
 #
 # Startup: migrate (`prisma migrate deploy`, one-shot) → api.
 # Start Coolify Postgres + Redis first. Failed migrate → api does not start.
+# Settings JSON (e.g. page.about EU content) is NOT updated by prisma migrate;
+# SK About approved pack bootstraps idempotently in SettingsService.onModuleInit.
 # UA/HostPro: use docker-compose.prod.yml instead (in-stack PG/Redis AOF).
 #
 # migrate receives DATABASE_URL only. UA payment/delivery/SMS env is not

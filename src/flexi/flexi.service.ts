@@ -18,7 +18,11 @@ import {
 import { resolveErpSyncStatus } from '../orders/erp-sync.constants'
 import { formatEuVatId } from '../vies/vies.types'
 import { FLEXI_ORDER_CONFLICT_USER_STATUS, FLEXI_ORDER_STORNO_USER_STATUS, FLEXI_CENIK_QUERY_BATCH, FLEXI_STOCK_FILTER_CHUNK, isFlexiMissingRecordError, isImplementedFlexiEvidence, normalizeFlexiEvidence } from './flexi.constants'
-import { applyFlexiOrderHeaderMapping } from './flexi-order-export-mapping'
+import {
+  applyFlexiOrderHeaderMapping,
+  resolveFlexiDocumentStatCode,
+  resolveFlexiLineVatFields,
+} from './flexi-order-export-mapping'
 import { parseSizeLabel } from './flexi-size-label'
 import {
   categoryTranslationCreates,
@@ -1772,16 +1776,16 @@ export class FlexiService {
     const taxRate = order.taxRatePercent != null ? Number(order.taxRatePercent) : null
     const taxRegime = (order.taxRegime ?? '').trim()
     const isReverseCharge = taxRegime === 'reverse_charge'
+    const lineVat = resolveFlexiLineVatFields({
+      taxRegime: order.taxRegime,
+      taxRatePercent: order.taxRatePercent,
+    })
 
     const applyLineVat = (line: Record<string, unknown>) => {
       // Abra main prices include VAT
       line.typCenyDphK = 'typCeny.sDph'
-      if (isReverseCharge) {
-        line.szbDph = 0
-        line.typSzbDph = 'typSzbDph.dphOsv'
-      } else if (taxRate != null && Number.isFinite(taxRate)) {
-        line.szbDph = taxRate
-      }
+      if (lineVat.szbDph != null) line.szbDph = lineVat.szbDph
+      if (lineVat.typSzbDph) line.typSzbDph = lineVat.typSzbDph
     }
 
     const lines = order.items
@@ -1870,13 +1874,14 @@ export class FlexiService {
     const billingPostal = (order.companyPostalCode ?? '').trim()
     const shippingPostal = (order.deliveryPostalCode ?? '').trim()
     const postal = (isB2b && billingPostal) || shippingPostal
-    const countryCode = (
-      order.deliveryCountryCode ||
-      order.taxCountryCode ||
-      ''
-    )
-      .trim()
-      .toLowerCase()
+    // VAT country for Flexi `stat` (seller/destination ← taxCountryCode). Ship-to
+    // stays on address / doprava via delivery* fields — do not reuse for `stat`.
+    const documentStatCode = resolveFlexiDocumentStatCode({
+      taxRegime: order.taxRegime,
+      taxCountryCode: order.taxCountryCode,
+      deliveryCountryCode: order.deliveryCountryCode,
+      currency: order.currency,
+    })
 
     let firmaRef: string | null = null
     try {
@@ -1987,19 +1992,7 @@ export class FlexiService {
       document.poznam = notes.join('\n')
     }
 
-    const statCode =
-      menaCode === 'UAH'
-        ? 'UA'
-        : countryCode === 'hu'
-          ? 'HU'
-          : countryCode === 'at'
-            ? 'AT'
-            : countryCode === 'cz'
-              ? 'CZ'
-              : countryCode === 'sk' || !countryCode
-                ? 'SK'
-                : countryCode.toUpperCase()
-    document.stat = `code:${statCode}`
+    document.stat = `code:${documentStatCode}`
 
     const dopravaParts = [order.deliveryMethod]
     if (order.deliveryMethod === 'packeta-box' && branch) {
@@ -2381,6 +2374,19 @@ export class FlexiService {
       if (!isFinalAttempt) {
         throw new FlexiExportRetryError(result.message, errorCode)
       }
+      return
+    }
+
+    if (kind === 'vat_configuration' || kind === 'permanent') {
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: {
+          erpSyncStatus: 'FAILED',
+          erpLastErrorCode: errorCode,
+          erpLastErrorMessage: result.message,
+          erpLastSyncAt: now,
+        },
+      })
       return
     }
 

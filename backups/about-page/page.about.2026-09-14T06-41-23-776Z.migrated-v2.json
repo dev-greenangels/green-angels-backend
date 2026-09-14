@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 2,
+  "byLocale": {
+    "sk": {
+      "schemaVersion": 2,
+      "seo": {
+        "title": "O nás · Green Angels",
+        "description": "Škôlka Green Angels — vlastná produkcia sadbového materiálu pre Slovensko a EÚ. Kvalita, sortiment a spoľahlivé dodávky."
+      },
+      "hero": {
+        "enabled": true,
+        "title": "Green Angels — škôlka rastlín pre Slovensko a EÚ"
+      },
+      "intro": {
+        "enabled": true,
+        "body": "<p>Green Angels je škôlka s vlastnou produkciou listnatých a ihličnatých drevín. Pestujeme rastliny od odrezku a semenáčika až po väčšie veľkosti — s dôrazom na kvalitu koreňového systému, adaptáciu a spoľahlivé dodávky pre záhradkárov, krajinárov aj záhradné centrá.</p>\n<p>Partneri na Slovensku a v EÚ oceňujú predvídateľnú kvalitu, široký sortiment a férovú spoluprácu. Rastliny sú pripravené na stredoeurópske podmienky a bežnú logistiku v rámci EÚ.</p>\n<p>Značka Green Angels spája skúsenosti rodinného pestovania s moderným e‑shopom: transparentný katalóg, jasné veľkosti a podpora pri výbere sortimentu pre váš projekt alebo predajňu.</p>",
+        "imageUrl": "",
+        "imageAlt": "Tím škôlky Green Angels",
+        "imageStyle": "rounded"
+      },
+      "stats": {
+        "enabled": false,
+        "title": "",
+        "subtitle": "",
+        "items": [],
+        "theses": []
+      },
+      "whyUs": {
+        "enabled": true,
+        "title": "Prečo Green Angels?",
+        "body": "<p>Záhrada je pre mnohých miestom oddychu a hrdosti. Ponúkame kvalitné rastliny, jasné veľkosti, férovú cenu a praktickú podporu pri výbere — od živých plotov po solitéry a kontajnerové výpestky.</p>\n<p>Nemáte veľký pozemok? Poradíme sortiment aj do menších priestorov — terasy, predzáhradky či spoločné plochy.</p>\n<p>Pre záhradné centrá, krajinárov a zelený biznis v EÚ pripravíme veľkoobchodné podmienky a pomôžeme zložiť sortiment podľa dopytu.</p>",
+        "benefits": [
+          "Vlastná produkcia — predvídateľná kvalita",
+          "Široký sortiment ihličnanov a listnáčov",
+          "Veľkosti vhodné pre maloobchod aj projekty",
+          "Podpora pri výbere sortimentu",
+          "Orientácia na Slovensko a EÚ logistiku",
+          "Veľkoobchodná spolupráca pre partnerov"
+        ]
+      },
+      "production": {
+        "enabled": false,
+        "title": "",
+        "cards": []
+      },
+      "markets": {
+        "enabled": true,
+        "title": "",
+        "body": ""
+      },
+      "delivery": {
+        "enabled": true,
+        "title": "Dodávka rastlín",
+        "body": "<p>Pripravujeme rastliny na spoľahlivú prepravu — starostlivé balenie a spolupráca s overenými dopravcami. Dodávame maloobchodné aj väčšie partnerské objednávky.</p>\n<p>Pre Slovensko a EÚ nastavujeme logistiku podľa typu tovaru (kontajnery, väčšie výpestky) a dohody s partnerom.</p>",
+        "cities": [
+          "Bratislava",
+          "Košice",
+          "Žilina",
+          "Nitra",
+          "Banská Bystrica",
+          "Trnava",
+          "Prešov",
+          "a ďalšie mestá SR / EÚ"
+        ],
+        "imageUrl": "",
+        "imageAlt": "Dodávka rastlín",
+        "ctaLabel": "Podmienky platby a dopravy"
+      },
+      "video": {
+        "enabled": false,
+        "title": "",
+        "subtitle": "",
+        "embedUrl": ""
+      },
+      "cta": {
+        "enabled": true,
+        "primaryLabel": "Prejsť do katalógu",
+        "secondaryLabel": "Kontakt a veľkoobchod"
+      }
+    },
+    "en": {
+      "schemaVersion": 2,
+      "seo": {
+        "title": "About us · Green Angels",
+        "description": "Green Angels nursery — own production of planting material for Slovakia and the EU. Quality assortment and reliable supply."
+      },
+      "hero": {
+        "enabled": true,
+        "title": "Green Angels — nursery plants for Slovakia & the EU"
+      },
+      "intro": {
+        "enabled": true,
+        "body": "<p>Green Angels is a nursery with in-house production of deciduous and coniferous plants — from cuttings and seedlings to larger sizes. We focus on root quality, adaptation and reliable supply for gardeners, landscapers and garden centres.</p>\n<p>Partners in Slovakia and the EU value predictable quality, a wide range and fair cooperation. Plants are prepared for Central European conditions and typical EU logistics.</p>\n<p>The Green Angels brand combines hands-on growing experience with a modern webshop: a clear catalogue, transparent sizes and support when choosing stock for your project or store.</p>",
+        "imageUrl": "",
+        "imageAlt": "Green Angels nursery team",
+        "imageStyle": "rounded"
+      },
+      "stats": {
+        "enabled": false,
+        "title": "",
+        "subtitle": "",
+        "items": [],
+        "theses": []
+      },
+      "whyUs": {
+        "enabled": true,
+        "title": "Why Green Angels?",
+        "body": "<p>A garden is a place of rest and pride for many. We offer quality plants, clear sizes, fair pricing and practical selection support — from hedges to specimens and container stock.</p>\n<p>No large plot? We can advise assortment for smaller spaces — terraces, front yards or shared areas.</p>\n<p>For garden centres, landscapers and green businesses in the EU we prepare wholesale terms and help build assortment to demand.</p>",
+        "benefits": [
+          "Own production — predictable quality",
+          "Wide range of conifers and deciduous plants",
+          "Sizes for retail and projects",
+          "Support when choosing assortment",
+          "Focus on Slovakia and EU logistics",
+          "Wholesale cooperation for partners"
+        ]
+      },
+      "production": {
+        "enabled": false,
+        "title": "",
+        "cards": []
+      },
+      "markets": {
+        "enabled": true,
+        "title": "",
+        "body": ""
+      },
+      "delivery": {
+        "enabled": true,
+        "title": "Plant delivery",
+        "body": "<p>We prepare plants for reliable transport — careful packing and verified carriers. We deliver retail and larger partner orders.</p>\n<p>For Slovakia and the EU we set logistics by goods type (containers, larger stock) and agreement with the partner.</p>",
+        "cities": [
+          "Bratislava",
+          "Košice",
+          "Žilina",
+          "Nitra",
+          "Banská Bystrica",
+          "Trnava",
+          "Prešov",
+          "and other SK / EU cities"
+        ],
+        "imageUrl": "",
+        "imageAlt": "Plant delivery",
+        "ctaLabel": "Payment & delivery terms"
+      },
+      "video": {
+        "enabled": false,
+        "title": "",
+        "subtitle": "",
+        "embedUrl": ""
+      },
+      "cta": {
+        "enabled": true,
+        "primaryLabel": "Browse catalog",
+        "secondaryLabel": "Contact & wholesale"
+      }
+    }
+  }
+}

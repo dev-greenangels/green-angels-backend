@@ -17,4 +17,9 @@ export class SendOtpDto {
   @IsOptional()
   @IsIn(['sk', 'hu', 'at'])
   countrySiteCode?: 'sk' | 'hu' | 'at'
+
+  /** Storefront UI locale for OTP email/SMS copy. Unknown → en. */
+  @IsOptional()
+  @IsString()
+  locale?: string
 }

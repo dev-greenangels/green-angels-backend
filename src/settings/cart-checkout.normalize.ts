@@ -20,7 +20,8 @@ import {
 } from './cart-checkout.types'
 import {
   CHECKOUT_DELIVERY_METHODS,
-  CHECKOUT_PAYMENT_METHODS,
+  PAY_ON_PICKUP_PAYMENT_METHOD,
+  TOGGLEABLE_PAYMENT_METHODS,
   type CheckoutDeliveryMethodSlug,
   type CheckoutPaymentMethodSlug,
 } from './checkout-methods.constants'
@@ -324,9 +325,9 @@ export function normalizeCartCheckoutSettings(
     ),
     enabledPaymentMethods: normalizeMethodList<CheckoutPaymentMethodSlug>(
       base.enabledPaymentMethods,
-      CHECKOUT_PAYMENT_METHODS,
+      TOGGLEABLE_PAYMENT_METHODS,
       DEFAULT_CART_CHECKOUT_SETTINGS.enabledPaymentMethods,
-    ),
+    ).filter((method) => method !== PAY_ON_PICKUP_PAYMENT_METHOD),
     showPromoCode: base.showPromoCode !== false,
     deliveryWeightRules: normalizeDeliveryWeightRules(base.deliveryWeightRules),
     carrierRateTables: normalizeCarrierRateTables(source.carrierRateTables),
@@ -370,5 +371,8 @@ export function normalizeCartCheckoutSettings(
     orderPdfDownloadEnabled: base.orderPdfDownloadEnabled !== false,
     orderPdfEmailEnabled: base.orderPdfEmailEnabled !== false,
     orderPdfTitle: asTrimmedString(base.orderPdfTitle),
+    allowPayOnPickup: base.allowPayOnPickup === true,
+    newOrderNotifyEmailEnabled: base.newOrderNotifyEmailEnabled === true,
+    newOrderNotifyEmail: asTrimmedString(base.newOrderNotifyEmail).slice(0, 254),
   }
 }

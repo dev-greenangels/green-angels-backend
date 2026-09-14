@@ -14,6 +14,11 @@ export class LegalLocaleQueryDto {
   @IsString()
   @MaxLength(8)
   locale?: string
+
+  /** SK multi-domain host site for {supportEmail} interpolation. */
+  @IsOptional()
+  @IsIn(['sk', 'hu', 'at'])
+  countrySiteCode?: 'sk' | 'hu' | 'at'
 }
 
 export class LegalTypeQueryDto extends LegalLocaleQueryDto {

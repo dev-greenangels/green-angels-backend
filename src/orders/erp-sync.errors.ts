@@ -13,7 +13,12 @@ export class FlexiExportRetryError extends Error {
   }
 }
 
-export type FlexiErrorKind = 'transport' | 'auth' | 'business' | 'permanent'
+export type FlexiErrorKind =
+  | 'transport'
+  | 'auth'
+  | 'business'
+  | 'permanent'
+  | 'vat_configuration'
 
 /**
  * Checkout offline fallback (EXTERNAL only): true for genuine ERP transport/unavailability.
@@ -30,6 +35,7 @@ export function isFlexiTransportError(error: unknown): boolean {
 
 /**
  * Classify Flexi export/API error text. Conservative: HTTP 4xx defaults to business, not offline.
+ * VAT rate/country mismatches are a dedicated kind (not TRANSPORT / stock reject).
  */
 export function classifyFlexiError(message: string): FlexiErrorKind {
   const m = message.toLowerCase()
@@ -40,6 +46,11 @@ export function classifyFlexiError(message: string): FlexiErrorKind {
     )
   ) {
     return 'permanent'
+  }
+
+  // Flexi DPH table miss (e.g. szbDph=23 with stat=AT) — before generic 4xx.
+  if (/sazbadphnotfound/i.test(message)) {
+    return 'vat_configuration'
   }
 
   if (/flexi http 401|flexi http 403|unauthorized|forbidden/i.test(m)) {
@@ -54,7 +65,8 @@ export function classifyFlexiError(message: string): FlexiErrorKind {
     return 'business'
   }
 
-  if (/flexi http 4\d\d/.test(message)) {
+  // Case-insensitive: client throws `Flexi HTTP 400: …`
+  if (/flexi http 4\d\d/i.test(message)) {
     return 'business'
   }
 
@@ -75,6 +87,8 @@ export function erpSyncErrorCodeForKind(kind: FlexiErrorKind): ErpSyncErrorCode 
       return 'AUTH'
     case 'business':
       return 'REJECTED_STOCK'
+    case 'vat_configuration':
+      return 'VAT_CONFIGURATION'
     case 'permanent':
       return 'DOCUMENT_CREATE_FAILED'
     default:

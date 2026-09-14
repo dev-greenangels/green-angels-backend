@@ -93,23 +93,30 @@ export class LegalService {
     private readonly settings: SettingsService,
   ) {}
 
-  async getCurrent(localeRaw?: string): Promise<{ items: LegalPublicDocument[] }> {
+  async getCurrent(
+    localeRaw?: string,
+    countrySiteCode?: string | null,
+  ): Promise<{ items: LegalPublicDocument[] }> {
     await this.ensureSeeded()
     const locale = this.normalizeLocale(localeRaw)
     const types = Object.values(LegalDocumentType)
     const items: LegalPublicDocument[] = []
     for (const type of types) {
-      const doc = await this.findPublished(type, locale)
+      const doc = await this.findPublished(type, locale, countrySiteCode)
       if (doc) items.push(doc)
     }
     return { items }
   }
 
-  async getByType(typeRaw: string, localeRaw?: string): Promise<LegalPublicDocument> {
+  async getByType(
+    typeRaw: string,
+    localeRaw?: string,
+    countrySiteCode?: string | null,
+  ): Promise<LegalPublicDocument> {
     await this.ensureSeeded()
     const type = this.parseType(typeRaw)
     const locale = this.normalizeLocale(localeRaw)
-    const doc = await this.findPublished(type, locale)
+    const doc = await this.findPublished(type, locale, countrySiteCode)
     if (!doc) {
       throw new NotFoundException('Документ не знайдено.')
     }
@@ -945,10 +952,11 @@ LIMIT 50000`,
   private async findPublished(
     type: LegalDocumentType,
     locale: string,
+    countrySiteCode?: string | null,
   ): Promise<LegalPublicDocument | null> {
     const row = await this.findPublishedRow(type, locale)
     if (!row) return null
-    const { seller, supportEmail } = await this.getSellerContext()
+    const { seller, supportEmail } = await this.getSellerContext(countrySiteCode)
     const vars = sellerPlaceholderVars(seller, supportEmail)
     return {
       id: row.documentId,
@@ -969,8 +977,22 @@ LIMIT 50000`,
     }
   }
 
+  private localeFallbackChain(type: LegalDocumentType, locale: string): string[] {
+    const normalized = locale.slice(0, 2)
+    // Public TERMS / PRIVACY / COOKIES / RETURNS: same-locale published revision only.
+    if (
+      type === LegalDocumentType.TERMS ||
+      type === LegalDocumentType.PRIVACY ||
+      type === LegalDocumentType.COOKIES ||
+      type === LegalDocumentType.RETURNS
+    ) {
+      return [normalized]
+    }
+    return LOCALE_FALLBACKS[normalized] ?? [normalized, 'en', 'sk', 'uk']
+  }
+
   private async findPublishedRow(type: LegalDocumentType, locale: string) {
-    const chain = LOCALE_FALLBACKS[locale] ?? [locale, 'en', 'sk', 'uk']
+    const chain = this.localeFallbackChain(type, locale)
     const document = await this.prisma.legalDocument.findUnique({ where: { type } })
     if (!document) return null
     for (const candidate of chain) {
@@ -1020,18 +1042,19 @@ LIMIT 50000`,
     }
   }
 
-  private async getSellerContext(): Promise<{
+  private async getSellerContext(countrySiteCode?: string | null): Promise<{
     seller: LegalSellerIdentity
     supportEmail: string
   }> {
     try {
-      const [cart, store] = await Promise.all([
+      const [cart, store, market] = await Promise.all([
         this.settings.getCartCheckoutSettings(),
         this.settings.getStoreContactSettings(),
+        this.settings.getMarketSettings(),
       ])
       return {
         seller: resolveLegalSeller(cart, store),
-        supportEmail: resolveSupportEmail(store),
+        supportEmail: resolveSupportEmail(store, market, countrySiteCode),
       }
     } catch (error) {
       this.logger.warn(

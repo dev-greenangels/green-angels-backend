@@ -1,0 +1,506 @@
+[
+  {
+    "type": "RETURNS",
+    "locale": "sk",
+    "title": "Vrátenie tovaru a odstúpenie od zmluvy",
+    "intro": "Táto stránka obsahuje informácie o práve spotrebiteľa na odstúpenie od zmluvy uzavretej na diaľku, o vrátení tovaru a o postupe pri reklamácii alebo poškodení tovaru.",
+    "sections": [
+      {
+        "heading": "1. Odstúpenie od zmluvy",
+        "body": [
+          "Spotrebiteľ má pri zmluve uzavretej na diaľku právo odstúpiť od zmluvy bez uvedenia dôvodu v zákonnej lehote, spravidla do 14 dní od prevzatia tovaru, ak sa na konkrétny prípad nevzťahuje zákonná výnimka.",
+          "Odstúpenie od zmluvy je potrebné oznámiť predávajúcemu jednoznačným vyhlásením o rozhodnutí odstúpiť od zmluvy.",
+          "Na tento účel môžete použiť formulár dostupný na tejto stránke alebo nás kontaktovať prostredníctvom údajov uvedených nižšie.",
+          "Ak oznámenie odošlete elektronicky prostredníctvom nášho formulára, jeho prijatie vám potvrdíme e-mailom."
+        ]
+      },
+      {
+        "heading": "---WITHDRAWAL_FORMS---",
+        "body": []
+      },
+      {
+        "heading": "2. Lehota na vrátenie tovaru",
+        "body": [
+          "Po odstúpení od zmluvy je spotrebiteľ povinný zaslať alebo odovzdať tovar späť bez zbytočného odkladu, najneskôr v lehote stanovenej platnými právnymi predpismi.",
+          "Tovar zašlite alebo odovzdajte na adresu:",
+          "{returnAddress}",
+          "Pokiaľ sa s predávajúcim nedohodnete inak, priame náklady na vrátenie tovaru znáša spotrebiteľ."
+        ]
+      },
+      {
+        "heading": "3. Vrátenie platieb",
+        "body": [
+          "Po platnom odstúpení od zmluvy vrátime spotrebiteľovi platby, ktoré sme od neho prijali v súvislosti s príslušnou časťou zmluvy, v rozsahu a lehote stanovenej platnými právnymi predpismi.",
+          "Ak spotrebiteľ odstupuje od celej zmluvy, vrátenie platieb zahŕňa aj náklady na najlacnejší bežný spôsob doručenia, ktorý sme pri objednávke ponúkali, ak to vyžadujú platné právne predpisy.",
+          "Platbu spravidla vrátime rovnakým spôsobom, aký spotrebiteľ použil pri pôvodnej platbe, pokiaľ sa so spotrebiteľom výslovne nedohodneme na inom spôsobe, ktorý mu nespôsobí ďalšie náklady.",
+          "Ak sa v súvislosti s odstúpením vracia tovar, predávajúci môže v prípadoch povolených zákonom zadržať vrátenie platby do momentu, kým mu bude tovar doručený späť alebo kým spotrebiteľ nepreukáže jeho odoslanie, podľa toho, čo nastane skôr.",
+          "Interné spracovanie vrátenia platby môže byť vykonané manuálne podľa pôvodného spôsobu platby. Táto skutočnosť nemá vplyv na zákonné práva spotrebiteľa ani zákonné lehoty na vrátenie platieb."
+        ]
+      },
+      {
+        "heading": "4. Čiastočné odstúpenie",
+        "body": [
+          "Ak sa odstúpenie týka iba časti objednávky, vrátenie tovaru a príslušných platieb sa posudzuje vo vzťahu k tejto časti objednávky.",
+          "Výška prípadnej vratky závisí od rozsahu odstúpenia, hodnoty vráteného tovaru, prípadných zliav, nákladov na dopravu a ďalších okolností podľa platných právnych predpisov."
+        ]
+      },
+      {
+        "heading": "5. Živé rastliny a zákonné výnimky",
+        "body": [
+          "Pri živých rastlinách je potrebné zohľadniť ich prirodzený biologický charakter a stav v čase vrátenia.",
+          "Právo na odstúpenie od zmluvy sa uplatňuje v rozsahu stanovenom príslušnými právnymi predpismi. Pri tovare, ktorý podlieha rýchlemu zníženiu kvality alebo skaze, alebo pri inom tovare, na ktorý sa vzťahuje zákonná výnimka, môže byť právo na odstúpenie obmedzené alebo vylúčené.",
+          "Spotrebiteľ zodpovedá za zníženie hodnoty tovaru, ktoré vzniklo v dôsledku zaobchádzania s tovarom nad rámec toho, čo je potrebné na zistenie jeho vlastností a funkčnosti, v rozsahu stanovenom platnými právnymi predpismi.",
+          "Pri živých rastlinách môže ísť napríklad o poškodenie spôsobené nevhodným skladovaním, nedostatočnou alebo nadmernou zálievkou, mrazom, prehriatím, nesprávnou manipuláciou alebo inými nevhodnými podmienkami po prevzatí."
+        ]
+      },
+      {
+        "heading": "6. Poškodenie počas dopravy a reklamácie",
+        "body": [
+          "Ak bol tovar doručený poškodený, nekompletný alebo nezodpovedá objednávke, ide spravidla o otázku zodpovednosti za vady, nie o odstúpenie od zmluvy bez uvedenia dôvodu.",
+          "Odporúčame zásielku pri prevzatí skontrolovať a viditeľné poškodenie zdokumentovať.",
+          "Ak zistíte poškodenie, vadu alebo nesúlad s objednávkou, kontaktujte nás čo najskôr a podľa možnosti priložte číslo objednávky a fotografie.",
+          "Toto odporúčanie neobmedzuje zákonné práva spotrebiteľa.",
+          "Podrobnejšie informácie o reklamáciách sú uvedené v [[terms|Všeobecných obchodných podmienkach]]."
+        ]
+      },
+      {
+        "heading": "7. Potvrdenie prijatia oznámenia",
+        "body": [
+          "Ak oznámenie o odstúpení odošlete prostredníctvom elektronického formulára, zašleme vám potvrdenie o jeho prijatí na e-mailovú adresu uvedenú vo formulári.",
+          "Potvrdenie obsahuje najmä referenčné číslo, dátum a čas prijatia a údaje potrebné na identifikáciu príslušnej objednávky.",
+          "Potvrdenie prijatia oznámenia samo osebe neznamená potvrdenie prijatia vráteného tovaru ani vykonanie vrátenia platby."
+        ]
+      },
+      {
+        "heading": "8. Kontakt",
+        "body": [
+          "Otázky týkajúce sa odstúpenia od zmluvy, vrátenia tovaru alebo reklamácií môžete posielať na:",
+          "{supportEmail}",
+          "Ďalšie kontaktné údaje sú uvedené na stránke [[contacts|Kontakty]].",
+          "Súvisiace dokumenty:",
+          "[[terms|Všeobecné obchodné podmienky]]\n[[privacy|Podmienky ochrany osobných údajov]]\n[[cookies|Politika súborov cookie]]\n[[shipping|Doprava a platba]]"
+        ]
+      }
+    ]
+  },
+  {
+    "type": "RETURNS",
+    "locale": "en",
+    "title": "Returns and Right of Withdrawal",
+    "intro": "This page provides information about the consumer’s right to withdraw from a distance contract, about returning goods, and about the procedure for complaints or damage to goods.",
+    "sections": [
+      {
+        "heading": "1. Right of withdrawal",
+        "body": [
+          "For a distance contract, the consumer has the right to withdraw from the contract without giving a reason within the statutory period, generally within 14 days of taking delivery of the goods, unless a statutory exception applies to the particular case.",
+          "Withdrawal from the contract must be notified to the seller by an unequivocal statement of the decision to withdraw from the contract.",
+          "For this purpose you may use the form available on this page or contact us using the details provided below.",
+          "If you submit the notice electronically through our form, we will confirm receipt by email."
+        ]
+      },
+      {
+        "heading": "---WITHDRAWAL_FORMS---",
+        "body": []
+      },
+      {
+        "heading": "2. Time limit for returning goods",
+        "body": [
+          "After withdrawing from the contract, the consumer must send or hand over the goods back without undue delay, and no later than within the period set by applicable law.",
+          "Please send or hand over the goods to:",
+          "{returnAddress}",
+          "Unless otherwise agreed with the seller, the direct costs of returning the goods are borne by the consumer."
+        ]
+      },
+      {
+        "heading": "3. Refund of payments",
+        "body": [
+          "After a valid withdrawal from the contract, we will refund to the consumer the payments we received from the consumer in connection with the relevant part of the contract, to the extent and within the time limit set by applicable law.",
+          "If the consumer withdraws from the entire contract, the refund of payments also includes the costs of the least expensive standard delivery method we offered at the time of the order, where required by applicable law.",
+          "We will generally refund the payment using the same method the consumer used for the original payment, unless we expressly agree with the consumer on another method that does not cause the consumer further costs.",
+          "Where goods are returned in connection with withdrawal, the seller may, in cases permitted by law, withhold the refund until the goods have been received back or the consumer has provided evidence of having sent them, whichever occurs first.",
+          "Internal processing of the refund may be carried out manually according to the original payment method. This does not affect the consumer’s statutory rights or the statutory time limits for refunds."
+        ]
+      },
+      {
+        "heading": "4. Partial withdrawal",
+        "body": [
+          "If the withdrawal concerns only part of an order, the return of goods and the related payments are assessed in relation to that part of the order.",
+          "The amount of any refund depends on the scope of the withdrawal, the value of the returned goods, any discounts, shipping costs and other circumstances under applicable law."
+        ]
+      },
+      {
+        "heading": "5. Live plants and statutory exceptions",
+        "body": [
+          "For live plants, their natural biological character and condition at the time of return must be taken into account.",
+          "The right of withdrawal applies to the extent set by the applicable legal provisions. For goods that are liable to deteriorate or expire rapidly, or for other goods covered by a statutory exception, the right of withdrawal may be limited or excluded.",
+          "The consumer is liable for any diminished value of the goods resulting from handling beyond what is necessary to establish the nature, characteristics and functioning of the goods, to the extent set by applicable law.",
+          "For live plants, this may include, for example, damage caused by unsuitable storage, insufficient or excessive watering, frost, overheating, improper handling or other unsuitable conditions after delivery."
+        ]
+      },
+      {
+        "heading": "6. Damage in transit and complaints",
+        "body": [
+          "If goods were delivered damaged, incomplete or not as ordered, this is generally a matter of liability for defects, not withdrawal from the contract without giving a reason.",
+          "We recommend checking the shipment upon receipt and documenting any visible damage.",
+          "If you discover damage, a defect or a mismatch with the order, contact us as soon as possible and, where possible, include the order number and photographs.",
+          "This recommendation does not limit the consumer’s statutory rights.",
+          "More detailed information on complaints is set out in the [[terms|General Terms and Conditions]]."
+        ]
+      },
+      {
+        "heading": "7. Confirmation of receipt of the notice",
+        "body": [
+          "If you submit a withdrawal notice via the electronic form, we will send you confirmation of receipt to the email address stated in the form.",
+          "The confirmation includes in particular a reference number, the date and time of receipt, and details needed to identify the relevant order.",
+          "Confirmation of receipt of the notice alone does not mean confirmation that returned goods have been received or that a refund has been made."
+        ]
+      },
+      {
+        "heading": "8. Contact",
+        "body": [
+          "Questions about withdrawal from the contract, returning goods or complaints may be sent to:",
+          "{supportEmail}",
+          "Further contact details are available on the [[contacts|Contact]] page.",
+          "Related documents:",
+          "[[terms|General Terms and Conditions]]\n[[privacy|Privacy Policy]]\n[[cookies|Cookie Policy]]\n[[shipping|Shipping and payment]]"
+        ]
+      }
+    ]
+  },
+  {
+    "type": "RETURNS",
+    "locale": "hu",
+    "title": "Termékvisszaküldés és elállási jog",
+    "intro": "Ez az oldal tájékoztatást nyújt a fogyasztó távollevők között kötött szerződésből való elállási jogáról, a termékek visszaküldéséről, valamint a panaszok és a termék sérülése esetén követendő eljárásról.",
+    "sections": [
+      {
+        "heading": "1. Elállás a szerződéstől",
+        "body": [
+          "Távollevők között kötött szerződés esetén a fogyasztónak joga van indokolás nélkül elállni a szerződéstől a törvényes határidőn belül, általában a termék átvételétől számított 14 napon belül, ha az adott esetre nem vonatkozik törvényi kivétel.",
+          "A szerződéstől való elállást egyértelmű, az elállási döntést tartalmazó nyilatkozattal kell közölni az eladóval.",
+          "Erre a célra használhatja az ezen az oldalon elérhető űrlapot, vagy a lent megadott elérhetőségeken léphet kapcsolatba velünk.",
+          "Ha az értesítést elektronikus űrlapunkon keresztül küldi el, annak átvételét e-mailben igazoljuk vissza."
+        ]
+      },
+      {
+        "heading": "---WITHDRAWAL_FORMS---",
+        "body": []
+      },
+      {
+        "heading": "2. A termék visszaküldésének határideje",
+        "body": [
+          "A szerződéstől való elállást követően a fogyasztó köteles a terméket indokolatlan késedelem nélkül visszaküldeni vagy átadni, legkésőbb a hatályos jogszabályokban meghatározott határidőn belül.",
+          "A terméket az alábbi címre küldje vagy adja át:",
+          "{returnAddress}",
+          "Ha az eladóval másként nem állapodnak meg, a termék visszaküldésének közvetlen költségeit a fogyasztó viseli."
+        ]
+      },
+      {
+        "heading": "3. Fizetések visszatérítése",
+        "body": [
+          "Érvényes elállást követően visszatérítjük a fogyasztónak azokat a fizetéseket, amelyeket a szerződés érintett részével összefüggésben tőle átvettünk, a hatályos jogszabályokban meghatározott mértékben és határidőn belül.",
+          "Ha a fogyasztó a teljes szerződéstől eláll, a fizetések visszatérítése magában foglalja a rendeléskor általunk kínált legolcsóbb szokásos szállítási mód költségét is, amennyiben azt a hatályos jogszabályok megkövetelik.",
+          "A fizetést általában ugyanazzal a móddal térítjük vissza, amelyet a fogyasztó az eredeti fizetéshez használt, kivéve, ha a fogyasztóval kifejezetten más, számára további költséget nem okozó módban állapodunk meg.",
+          "Ha az elállással összefüggésben termék kerül visszaküldésre, az eladó a törvény által megengedett esetekben visszatarthatja a visszatérítést addig, amíg a terméket visszakapja, vagy a fogyasztó igazolja annak elküldését — attól függően, hogy melyik történik korábban.",
+          "A visszatérítés belső feldolgozása az eredeti fizetési mód szerint manuálisan is történhet. Ez nem érinti a fogyasztó törvényes jogait, sem a visszatérítések törvényes határidejét."
+        ]
+      },
+      {
+        "heading": "4. Részleges elállás",
+        "body": [
+          "Ha az elállás csak a rendelés egy részét érinti, a termékek és a kapcsolódó fizetések visszatérítése a rendelésnek erre a részére vonatkozva kerül értékelésre.",
+          "Az esetleges visszatérítés összege az elállás terjedelmétől, a visszaküldött termék értékétől, esetleges kedvezményektől, a szállítási költségektől és a hatályos jogszabályok szerinti egyéb körülményektől függ."
+        ]
+      },
+      {
+        "heading": "5. Élő növények és törvényi kivételek",
+        "body": [
+          "Élő növények esetén figyelembe kell venni azok természetes biológiai jellegét és állapotát a visszaküldés időpontjában.",
+          "Az elállási jog a vonatkozó jogszabályokban meghatározott terjedelemben érvényesül. Gyors minőségromlásnak vagy romlásnak kitett termékeknél, illetve egyéb, törvényi kivétel alá tartozó termékeknél az elállási jog korlátozott vagy kizárt lehet.",
+          "A fogyasztó felel a termék értékcsökkenéséért, amely a termék tulajdonságainak és működésének megállapításához szükséges mértéket meghaladó kezelésből ered, a hatályos jogszabályokban meghatározott terjedelemben.",
+          "Élő növények esetén ez lehet például nem megfelelő tárolás, elégtelen vagy túlzott öntözés, fagy, túlmelegedés, helytelen kezelés vagy az átvétel utáni egyéb nem megfelelő körülmények által okozott károsodás."
+        ]
+      },
+      {
+        "heading": "6. Szállítás közbeni sérülés és panaszok",
+        "body": [
+          "Ha a termék sérülten, hiányosan vagy a rendeléstől eltérően érkezett, ez általában a hibás teljesítés miatti felelősség kérdése, nem indokolás nélküli elállás a szerződéstől.",
+          "Javasoljuk, hogy az átvételkor ellenőrizze a küldeményt, és a látható sérülést dokumentálja.",
+          "Ha sérülést, hibát vagy a rendeléstől való eltérést észlel, mielőbb vegye fel velünk a kapcsolatot, és lehetőség szerint csatolja a rendelésszámot és fényképeket.",
+          "Ez az ajánlás nem korlátozza a fogyasztó törvényes jogait.",
+          "A panaszokkal kapcsolatos részletesebb tájékoztatás az [[terms|Általános Szerződési Feltételek]]ben található."
+        ]
+      },
+      {
+        "heading": "7. Az értesítés átvételének visszaigazolása",
+        "body": [
+          "Ha az elállási értesítést elektronikus űrlapon keresztül küldi el, az űrlapon megadott e-mail-címre visszaigazolást küldünk az átvételről.",
+          "A visszaigazolás különösen hivatkozási számot, az átvétel dátumát és időpontját, valamint a vonatkozó rendelés azonosításához szükséges adatokat tartalmaz.",
+          "Az értesítés átvételének visszaigazolása önmagában nem jelenti a visszaküldött termék átvételének, sem a fizetés visszatérítésének megerősítését."
+        ]
+      },
+      {
+        "heading": "8. Kapcsolat",
+        "body": [
+          "A szerződéstől való elállással, a termékek visszaküldésével vagy panaszokkal kapcsolatos kérdéseket a következő címre küldheti:",
+          "{supportEmail}",
+          "További elérhetőségek a [[contacts|Kapcsolat]] oldalon találhatók.",
+          "Kapcsolódó dokumentumok:",
+          "[[terms|Általános Szerződési Feltételek]]\n[[privacy|Adatvédelmi tájékoztató]]\n[[cookies|Cookie-szabályzat]]\n[[shipping|Szállítás és fizetés]]"
+        ]
+      }
+    ]
+  },
+  {
+    "type": "RETURNS",
+    "locale": "de",
+    "title": "Rückgabe und Widerrufsrecht",
+    "intro": "Diese Seite enthält Informationen über das Recht des Verbrauchers, von einem Fernabsatzvertrag zurückzutreten, über die Rückgabe von Waren sowie über das Vorgehen bei Reklamationen oder Beschädigung der Ware.",
+    "sections": [
+      {
+        "heading": "1. Widerruf des Vertrags",
+        "body": [
+          "Bei einem Fernabsatzvertrag hat der Verbraucher das Recht, ohne Angabe von Gründen innerhalb der gesetzlichen Frist vom Vertrag zurückzutreten, in der Regel innerhalb von 14 Tagen ab Erhalt der Ware, sofern auf den konkreten Fall keine gesetzliche Ausnahme Anwendung findet.",
+          "Der Widerruf des Vertrags ist dem Verkäufer durch eine eindeutige Erklärung über die Entscheidung, vom Vertrag zurückzutreten, mitzuteilen.",
+          "Hierzu können Sie das auf dieser Seite verfügbare Formular verwenden oder uns über die unten angegebenen Kontaktdaten erreichen.",
+          "Wenn Sie die Mitteilung elektronisch über unser Formular absenden, bestätigen wir Ihnen deren Eingang per E-Mail."
+        ]
+      },
+      {
+        "heading": "---WITHDRAWAL_FORMS---",
+        "body": []
+      },
+      {
+        "heading": "2. Frist für die Rücksendung der Ware",
+        "body": [
+          "Nach dem Widerruf des Vertrags ist der Verbraucher verpflichtet, die Ware unverzüglich und spätestens innerhalb der durch die geltenden Rechtsvorschriften festgelegten Frist zurückzusenden oder zu übergeben.",
+          "Bitte senden oder übergeben Sie die Ware an:",
+          "{returnAddress}",
+          "Sofern mit dem Verkäufer nichts anderes vereinbart ist, trägt der Verbraucher die unmittelbaren Kosten der Rücksendung der Ware."
+        ]
+      },
+      {
+        "heading": "3. Erstattung von Zahlungen",
+        "body": [
+          "Nach einem wirksamen Widerruf des Vertrags erstatten wir dem Verbraucher die Zahlungen, die wir von ihm im Zusammenhang mit dem betreffenden Teil des Vertrags erhalten haben, in dem Umfang und innerhalb der Frist, die durch die geltenden Rechtsvorschriften festgelegt sind.",
+          "Tritt der Verbraucher vom gesamten Vertrag zurück, umfasst die Erstattung der Zahlungen auch die Kosten der günstigsten Standardliefermethode, die wir bei der Bestellung angeboten haben, soweit dies die geltenden Rechtsvorschriften verlangen.",
+          "Die Zahlung erstatten wir in der Regel auf demselben Weg, den der Verbraucher für die ursprüngliche Zahlung genutzt hat, es sei denn, wir vereinbaren ausdrücklich mit dem Verbraucher eine andere Methode, die ihm keine weiteren Kosten verursacht.",
+          "Wird im Zusammenhang mit dem Widerruf Ware zurückgesandt, darf der Verkäufer in den gesetzlich zulässigen Fällen die Erstattung zurückhalten, bis die Ware bei ihm eingegangen ist oder der Verbraucher den Nachweis der Absendung erbracht hat — je nachdem, was zuerst eintritt.",
+          "Die interne Bearbeitung der Erstattung kann manuell entsprechend der ursprünglichen Zahlungsmethode erfolgen. Dies berührt weder die gesetzlichen Rechte des Verbrauchers noch die gesetzlichen Fristen für Erstattungen."
+        ]
+      },
+      {
+        "heading": "4. Teilwiderruf",
+        "body": [
+          "Betrifft der Widerruf nur einen Teil der Bestellung, werden die Rückgabe der Ware und die entsprechenden Zahlungen in Bezug auf diesen Teil der Bestellung beurteilt.",
+          "Die Höhe einer etwaigen Erstattung hängt vom Umfang des Widerrufs, dem Wert der zurückgesandten Ware, etwaigen Rabatten, Versandkosten und weiteren Umständen nach den geltenden Rechtsvorschriften ab."
+        ]
+      },
+      {
+        "heading": "5. Lebende Pflanzen und gesetzliche Ausnahmen",
+        "body": [
+          "Bei lebenden Pflanzen sind ihr natürlicher biologischer Charakter und ihr Zustand zum Zeitpunkt der Rückgabe zu berücksichtigen.",
+          "Das Widerrufsrecht gilt in dem durch die einschlägigen Rechtsvorschriften festgelegten Umfang. Bei Waren, die schnell an Qualität verlieren oder verderben, oder bei anderen Waren, für die eine gesetzliche Ausnahme gilt, kann das Widerrufsrecht eingeschränkt oder ausgeschlossen sein.",
+          "Der Verbraucher haftet für eine Minderung des Warenwerts, die durch einen Umgang mit der Ware entstanden ist, der über das hinausgeht, was zur Prüfung der Beschaffenheit, Eigenschaften und Funktionsweise der Ware erforderlich ist, in dem durch die geltenden Rechtsvorschriften festgelegten Umfang.",
+          "Bei lebenden Pflanzen kann es sich beispielsweise um Schäden durch unsachgemäße Lagerung, unzureichende oder übermäßige Bewässerung, Frost, Überhitzung, unsachgemäße Handhabung oder andere ungeeignete Bedingungen nach der Übernahme handeln."
+        ]
+      },
+      {
+        "heading": "6. Beschädigung während des Transports und Reklamationen",
+        "body": [
+          "Wurde die Ware beschädigt, unvollständig oder nicht der Bestellung entsprechend geliefert, handelt es sich in der Regel um eine Frage der Mängelhaftung, nicht um einen Widerruf des Vertrags ohne Angabe von Gründen.",
+          "Wir empfehlen, die Sendung bei der Übernahme zu prüfen und sichtbare Beschädigungen zu dokumentieren.",
+          "Wenn Sie eine Beschädigung, einen Mangel oder eine Abweichung von der Bestellung feststellen, kontaktieren Sie uns bitte möglichst umgehend und fügen Sie nach Möglichkeit die Bestellnummer und Fotos bei.",
+          "Diese Empfehlung schränkt die gesetzlichen Rechte des Verbrauchers nicht ein.",
+          "Nähere Informationen zu Reklamationen finden Sie in den [[terms|Allgemeine Geschäftsbedingungen]]."
+        ]
+      },
+      {
+        "heading": "7. Bestätigung des Eingangs der Mitteilung",
+        "body": [
+          "Wenn Sie die Widerrufsmitteilung über das elektronische Formular absenden, senden wir Ihnen eine Eingangsbestätigung an die im Formular angegebene E-Mail-Adresse.",
+          "Die Bestätigung enthält insbesondere eine Referenznummer, Datum und Uhrzeit des Eingangs sowie Angaben zur Identifizierung der betreffenden Bestellung.",
+          "Die Bestätigung des Eingangs der Mitteilung bedeutet für sich genommen weder die Bestätigung des Empfangs zurückgesandter Ware noch die Durchführung einer Erstattung."
+        ]
+      },
+      {
+        "heading": "8. Kontakt",
+        "body": [
+          "Fragen zum Widerruf des Vertrags, zur Rückgabe von Waren oder zu Reklamationen können Sie senden an:",
+          "{supportEmail}",
+          "Weitere Kontaktdaten finden Sie auf der Seite [[contacts|Kontakt]].",
+          "Verwandte Dokumente:",
+          "[[terms|Allgemeine Geschäftsbedingungen]]\n[[privacy|Datenschutzerklärung]]\n[[cookies|Cookie-Richtlinie]]\n[[shipping|Versand und Zahlung]]"
+        ]
+      }
+    ]
+  },
+  {
+    "type": "RETURNS",
+    "locale": "cs",
+    "title": "Vrácení zboží a odstoupení od smlouvy",
+    "intro": "Tato stránka obsahuje informace o právu spotřebitele odstoupit od smlouvy uzavřené na dálku, o vrácení zboží a o postupu při reklamaci nebo poškození zboží.",
+    "sections": [
+      {
+        "heading": "1. Odstoupení od smlouvy",
+        "body": [
+          "Spotřebitel má u smlouvy uzavřené na dálku právo odstoupit od smlouvy bez uvedení důvodu v zákonné lhůtě, zpravidla do 14 dnů od převzetí zboží, pokud se na konkrétní případ nevztahuje zákonná výjimka.",
+          "Odstoupení od smlouvy je třeba oznámit prodávajícímu jednoznačným prohlášením o rozhodnutí odstoupit od smlouvy.",
+          "K tomuto účelu můžete použít formulář dostupný na této stránce nebo nás kontaktovat prostřednictvím údajů uvedených níže.",
+          "Pokud oznámení odešlete elektronicky prostřednictvím našeho formuláře, jeho přijetí vám potvrdíme e-mailem."
+        ]
+      },
+      {
+        "heading": "---WITHDRAWAL_FORMS---",
+        "body": []
+      },
+      {
+        "heading": "2. Lhůta pro vrácení zboží",
+        "body": [
+          "Po odstoupení od smlouvy je spotřebitel povinen zaslat nebo předat zboží zpět bez zbytečného odkladu, nejpozději ve lhůtě stanovené platnými právními předpisy.",
+          "Zboží zašlete nebo předejte na adresu:",
+          "{returnAddress}",
+          "Pokud se s prodávajícím nedohodnete jinak, přímé náklady na vrácení zboží nese spotřebitel."
+        ]
+      },
+      {
+        "heading": "3. Vrácení plateb",
+        "body": [
+          "Po platném odstoupení od smlouvy vrátíme spotřebiteli platby, které jsme od něj přijali v souvislosti s příslušnou částí smlouvy, v rozsahu a lhůtě stanovené platnými právními předpisy.",
+          "Pokud spotřebitel odstupuje od celé smlouvy, vrácení plateb zahrnuje také náklady na nejlevnější běžný způsob doručení, který jsme při objednávce nabízeli, pokud to vyžadují platné právní předpisy.",
+          "Platbu zpravidla vrátíme stejným způsobem, jaký spotřebitel použil při původní platbě, pokud se se spotřebitelem výslovně nedohodneme na jiném způsobu, který mu nezpůsobí další náklady.",
+          "Pokud se v souvislosti s odstoupením vrací zboží, může prodávající v případech povolených zákonem zadržet vrácení platby do okamžiku, než mu bude zboží doručeno zpět nebo než spotřebitel prokáže jeho odeslání, podle toho, co nastane dříve.",
+          "Interní zpracování vrácení platby může být provedeno manuálně podle původního způsobu platby. Tato skutečnost nemá vliv na zákonná práva spotřebitele ani zákonné lhůty pro vrácení plateb."
+        ]
+      },
+      {
+        "heading": "4. Částečné odstoupení",
+        "body": [
+          "Pokud se odstoupení týká pouze části objednávky, posuzuje se vrácení zboží a příslušných plateb ve vztahu k této části objednávky.",
+          "Výše případné vratky závisí na rozsahu odstoupení, hodnotě vráceného zboží, případných slevách, nákladech na dopravu a dalších okolnostech podle platných právních předpisů."
+        ]
+      },
+      {
+        "heading": "5. Živé rostliny a zákonné výjimky",
+        "body": [
+          "U živých rostlin je třeba zohlednit jejich přirozený biologický charakter a stav v době vrácení.",
+          "Právo na odstoupení od smlouvy se uplatňuje v rozsahu stanoveném příslušnými právními předpisy. U zboží, které podléhá rychlému snížení kvality nebo zkáze, nebo u jiného zboží, na které se vztahuje zákonná výjimka, může být právo na odstoupení omezeno nebo vyloučeno.",
+          "Spotřebitel odpovídá za snížení hodnoty zboží, které vzniklo v důsledku zacházení se zbožím nad rámec toho, co je nutné ke zjištění jeho vlastností a funkčnosti, v rozsahu stanoveném platnými právními předpisy.",
+          "U živých rostlin může jít například o poškození způsobené nevhodným skladováním, nedostatečnou nebo nadměrnou zálivkou, mrazem, přehřátím, nesprávnou manipulací nebo jinými nevhodnými podmínkami po převzetí."
+        ]
+      },
+      {
+        "heading": "6. Poškození během dopravy a reklamace",
+        "body": [
+          "Pokud bylo zboží doručeno poškozené, neúplné nebo neodpovídá objednávce, jde zpravidla o otázku odpovědnosti za vady, nikoli o odstoupení od smlouvy bez uvedení důvodu.",
+          "Doporučujeme zásilku při převzetí zkontrolovat a viditelné poškození zdokumentovat.",
+          "Pokud zjistíte poškození, vadu nebo nesoulad s objednávkou, kontaktujte nás co nejdříve a podle možnosti přiložte číslo objednávky a fotografie.",
+          "Toto doporučení neomezuje zákonná práva spotřebitele.",
+          "Podrobnější informace o reklamacích jsou uvedeny ve [[terms|Všeobecné obchodní podmínky]]."
+        ]
+      },
+      {
+        "heading": "7. Potvrzení přijetí oznámení",
+        "body": [
+          "Pokud oznámení o odstoupení odešlete prostřednictvím elektronického formuláře, zašleme vám potvrzení o jeho přijetí na e-mailovou adresu uvedenou ve formuláři.",
+          "Potvrzení obsahuje zejména referenční číslo, datum a čas přijetí a údaje potřebné k identifikaci příslušné objednávky.",
+          "Potvrzení přijetí oznámení samo o sobě neznamená potvrzení přijetí vráceného zboží ani provedení vrácení platby."
+        ]
+      },
+      {
+        "heading": "8. Kontakt",
+        "body": [
+          "Dotazy týkající se odstoupení od smlouvy, vrácení zboží nebo reklamací můžete zasílat na:",
+          "{supportEmail}",
+          "Další kontaktní údaje jsou uvedeny na stránce [[contacts|Kontakty]].",
+          "Související dokumenty:",
+          "[[terms|Všeobecné obchodní podmínky]]\n[[privacy|Zásady ochrany osobních údajů]]\n[[cookies|Zásady používání cookies]]\n[[shipping|Doprava a platba]]"
+        ]
+      }
+    ]
+  },
+  {
+    "type": "RETURNS",
+    "locale": "uk",
+    "title": "Повернення товару та відмова від договору",
+    "intro": "На цій сторінці наведено інформацію про право споживача відмовитися від договору, укладеного на відстані, про повернення товару та про порядок дій у разі рекламації чи пошкодження товару.",
+    "sections": [
+      {
+        "heading": "1. Відмова від договору",
+        "body": [
+          "У разі договору, укладеного на відстані, споживач має право відмовитися від договору без зазначення причини протягом встановленого законом строку, як правило протягом 14 днів з моменту отримання товару, якщо на конкретний випадок не поширюється передбачений законом виняток.",
+          "Про відмову від договору необхідно повідомити продавця однозначною заявою про рішення відмовитися від договору.",
+          "Для цього ви можете скористатися формою, доступною на цій сторінці, або зв’язатися з нами за контактними даними, наведеними нижче.",
+          "Якщо ви надішлете повідомлення електронно через нашу форму, ми підтвердимо його отримання електронною поштою."
+        ]
+      },
+      {
+        "heading": "---WITHDRAWAL_FORMS---",
+        "body": []
+      },
+      {
+        "heading": "2. Строк повернення товару",
+        "body": [
+          "Після відмови від договору споживач зобов’язаний надіслати або передати товар назад без невиправданої затримки, не пізніше строку, встановленого чинним законодавством.",
+          "Надішліть або передайте товар на адресу:",
+          "{returnAddress}",
+          "Якщо з продавцем не домовлено інше, прямі витрати на повернення товару несе споживач."
+        ]
+      },
+      {
+        "heading": "3. Повернення платежів",
+        "body": [
+          "Після дійсної відмови від договору ми повернемо споживачеві платежі, які ми отримали від нього у зв’язку з відповідною частиною договору, в обсязі та у строк, встановлені чинним законодавством.",
+          "Якщо споживач відмовляється від усього договору, повернення платежів також включає витрати на найдешевший звичайний спосіб доставки, який ми пропонували під час замовлення, якщо цього вимагає чинне законодавство.",
+          "Платіж ми, як правило, повертаємо тим самим способом, яким споживач здійснив початкову оплату, якщо ми прямо не домовимося зі споживачем про інший спосіб, який не спричинить йому додаткових витрат.",
+          "Якщо у зв’язку з відмовою повертається товар, продавець у випадках, дозволених законом, може утримати повернення платежу до моменту, коли йому буде доставлено товар назад або коли споживач надасть доказ його відправлення — залежно від того, що настане раніше.",
+          "Внутрішня обробка повернення платежу може виконуватися вручну відповідно до початкового способу оплати. Це не впливає на законні права споживача та законні строки повернення платежів."
+        ]
+      },
+      {
+        "heading": "4. Часткова відмова",
+        "body": [
+          "Якщо відмова стосується лише частини замовлення, повернення товару та відповідних платежів оцінюється щодо цієї частини замовлення.",
+          "Розмір можливого повернення коштів залежить від обсягу відмови, вартості повернутого товару, можливих знижок, витрат на доставку та інших обставин згідно з чинним законодавством."
+        ]
+      },
+      {
+        "heading": "5. Живі рослини та законні винятки",
+        "body": [
+          "Щодо живих рослин необхідно враховувати їх природний біологічний характер і стан на момент повернення.",
+          "Право на відмову від договору застосовується в обсязі, встановленому відповідними правовими нормами. Для товару, який швидко втрачає якість або псується, або для іншого товару, на який поширюється законний виняток, право на відмову може бути обмежене або виключене.",
+          "Споживач відповідає за зменшення вартості товару, що виникло внаслідок поводження з товаром понад те, що необхідно для встановлення його властивостей і функціональності, в обсязі, встановленому чинним законодавством.",
+          "Для живих рослин це може бути, наприклад, пошкодження через неналежне зберігання, недостатній або надмірний полив, мороз, перегрів, неправильне поводження чи інші неналежні умови після отримання."
+        ]
+      },
+      {
+        "heading": "6. Пошкодження під час доставки та рекламації",
+        "body": [
+          "Якщо товар доставлено пошкодженим, неповним або таким, що не відповідає замовленню, це, як правило, питання відповідальності за недоліки, а не відмова від договору без зазначення причини.",
+          "Рекомендуємо перевірити посилку під час отримання та задокументувати видимі пошкодження.",
+          "Якщо ви виявите пошкодження, недолік або невідповідність замовленню, якомога швидше зв’яжіться з нами та за можливості додайте номер замовлення й фотографії.",
+          "Ця рекомендація не обмежує законних прав споживача.",
+          "Детальнішу інформацію про рекламації наведено в [[terms|Загальні умови продажу]]."
+        ]
+      },
+      {
+        "heading": "7. Підтвердження отримання повідомлення",
+        "body": [
+          "Якщо ви надішлете повідомлення про відмову через електронну форму, ми надішлемо вам підтвердження його отримання на адресу електронної пошти, зазначену у формі.",
+          "Підтвердження містить зокрема референсний номер, дату й час отримання та дані, необхідні для ідентифікації відповідного замовлення.",
+          "Підтвердження отримання повідомлення саме по собі не означає підтвердження отримання повернутого товару чи здійснення повернення платежу."
+        ]
+      },
+      {
+        "heading": "8. Контакт",
+        "body": [
+          "Запитання щодо відмови від договору, повернення товару або рекламацій можна надсилати на:",
+          "{supportEmail}",
+          "Додаткові контактні дані наведено на сторінці [[contacts|Контакти]].",
+          "Пов’язані документи:",
+          "[[terms|Загальні умови продажу]]\n[[privacy|Політика конфіденційності та захисту персональних даних]]\n[[cookies|Політика використання cookies]]\n[[shipping|Доставка та оплата]]"
+        ]
+      }
+    ]
+  }
+]

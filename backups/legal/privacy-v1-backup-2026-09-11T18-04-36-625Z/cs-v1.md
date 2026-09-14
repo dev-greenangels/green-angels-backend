@@ -1,0 +1,46 @@
+# Privacy policy
+
+Toto prohlášení o ochraně osobních údajů plní informační povinnost podle GDPR a zákona č. 18/2018 Z. z.
+
+## 1. Data controller
+
+The data controller is the operator of the plant store (the sole trader / legal entity listed under "Contacts" and in the Terms of use).
+
+For questions about personal data processing, please use the contacts listed on the "Contacts" page.
+
+## 2. What data we process
+
+Profile data: first name, last name, patronymic, phone, email, delivery address.
+
+Order data: order contents, delivery method and address, payment method, status history.
+
+Technická data: cookies a volitelné analytické a marketingové/reklamní technologie (pouze po vašem souhlasu). Mohou zahrnovat informace o zařízení/prohlížeči, interakce se stránkou a stav souhlasu. Prostřednictvím Tag Manageru / dataLayer neodesíláme jméno, e-mail, telefon ani adresu.
+
+## 3. Purpose and legal basis
+
+Customer data is processed to place and fulfil orders and to communicate about delivery and support — based on contract performance and user consent.
+
+Volitelné analytické a marketingové/reklamní technologie používáme jen se samostatným souhlasem. Google Tag Manager používáme ke správě schválených značek; Google Analytics 4 a Google Ads momentálně nejsou aktivní. Souhlas můžete kdykoli změnit nebo odvolat na stránce Zásady cookies.
+
+## 4. Who receives the data
+
+Údaje mohou být sdíleny s dopravci, poskytovateli plateb a e-mailových/SMS notifikací — pouze v rozsahu potřebném k vyřízení objednávky.
+
+Techničtí poskytovatelé IT/hostingu mohou zahrnovat Vercel (hosting a Vercel Analytics při souhlasu s analytikou) a Google Tag Manager jako infrastrukturu značek — to samo o sobě neaktivuje Google Ads ani GA4.
+
+Osobní údaje třetím stranám neprodáváme.
+
+## 5. Retention period
+
+Profile data is kept while the account is active. Order data is kept for the period required for accounting and tax records.
+
+You can delete your account at any time from account settings — see the section below.
+
+## 6. Your rights
+
+You have the right to access, correct, delete (anonymize), restrict, and object to the processing of your data.
+
+You can download a copy of your data or delete your account from your dashboard, under "Settings" → "Data & privacy".
+
+E-mail pro uplatnění práv (GDPR): {supportEmail}
+

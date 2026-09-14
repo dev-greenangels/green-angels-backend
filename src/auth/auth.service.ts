@@ -14,6 +14,11 @@ import * as bcrypt from 'bcrypt'
 import { Request, Response } from 'express'
 
 import { PrismaService } from '../prisma/prisma.service'
+import {
+  CustomerErrorCode,
+  customerBadRequest,
+  customerUnauthorized,
+} from '../common/customer-error'
 import { isOtpChannelEnabled, type OtpPurpose } from '../settings/market.types'
 import { SettingsService } from '../settings/settings.service'
 import { UsersService } from '../users/users.service'
@@ -269,16 +274,25 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { email } })
 
     if (!user || !this.isStaffRole(user.role)) {
-      throw new UnauthorizedException('Невірний email або пароль.')
+      throw customerUnauthorized(
+        CustomerErrorCode.AUTH_INVALID_CREDENTIALS,
+        'Невірний email або пароль.',
+      )
     }
 
     if (!user.passwordHash) {
-      throw new UnauthorizedException('Невірний email або пароль.')
+      throw customerUnauthorized(
+        CustomerErrorCode.AUTH_INVALID_CREDENTIALS,
+        'Невірний email або пароль.',
+      )
     }
 
     const valid = await bcrypt.compare(dto.password, user.passwordHash)
     if (!valid) {
-      throw new UnauthorizedException('Невірний email або пароль.')
+      throw customerUnauthorized(
+        CustomerErrorCode.AUTH_INVALID_CREDENTIALS,
+        'Невірний email або пароль.',
+      )
     }
 
     const sessionUser = this.toSessionUser(user)
@@ -341,16 +355,25 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { email } })
 
     if (!user) {
-      throw new UnauthorizedException('Невірний email або пароль.')
+      throw customerUnauthorized(
+        CustomerErrorCode.AUTH_INVALID_CREDENTIALS,
+        'Невірний email або пароль.',
+      )
     }
 
     if (!user.passwordHash) {
-      throw new UnauthorizedException('Невірний email або пароль.')
+      throw customerUnauthorized(
+        CustomerErrorCode.AUTH_INVALID_CREDENTIALS,
+        'Невірний email або пароль.',
+      )
     }
 
     const valid = await bcrypt.compare(dto.password, user.passwordHash)
     if (!valid) {
-      throw new UnauthorizedException('Невірний email або пароль.')
+      throw customerUnauthorized(
+        CustomerErrorCode.AUTH_INVALID_CREDENTIALS,
+        'Невірний email або пароль.',
+      )
     }
 
     const sessionUser = this.toSessionUser(user)
@@ -458,17 +481,17 @@ export class AuthService {
       if (!isOtpChannelEnabled(market, 'sms', purpose)) {
         throw new BadRequestException('SMS OTP вимкнено для цієї поверхні.')
       }
-      await this.otp.sendPhoneOtp(dto.phone, market.authPhonePolicy, ip, purpose)
+      await this.otp.sendPhoneOtp(dto.phone, market.authPhonePolicy, ip, purpose, dto.locale)
       return { ok: true }
     }
     if (dto.email?.trim()) {
       if (!isOtpChannelEnabled(market, 'email', purpose)) {
         throw new BadRequestException('Email OTP вимкнено для цієї поверхні.')
       }
-      await this.otp.sendEmailOtp(dto.email, ip, purpose, dto.countrySiteCode)
+      await this.otp.sendEmailOtp(dto.email, ip, purpose, dto.countrySiteCode, dto.locale)
       return { ok: true }
     }
-    throw new BadRequestException('Вкажіть телефон або email.')
+    throw customerBadRequest(CustomerErrorCode.OTP_REQUIRED_CONTACT, 'Вкажіть телефон або email.')
   }
 
   async verifyOtp(dto: VerifyOtpDto, ip?: string) {
@@ -480,7 +503,7 @@ export class AuthService {
     if (dto.email?.trim()) {
       return this.otp.verifyEmailOtp(dto.email, dto.code, ip, purpose)
     }
-    throw new BadRequestException('Вкажіть телефон або email.')
+    throw customerBadRequest(CustomerErrorCode.OTP_REQUIRED_CONTACT, 'Вкажіть телефон або email.')
   }
 
   async resolveCheckoutIdentityHint(
@@ -575,7 +598,7 @@ export class AuthService {
     }
 
     if (!phoneCandidate && !emailCandidate) {
-      throw new BadRequestException('Вкажіть телефон або email.')
+      throw customerBadRequest(CustomerErrorCode.OTP_REQUIRED_CONTACT, 'Вкажіть телефон або email.')
     }
 
     // OTP proves exactly one channel. Ignore unproven sibling contacts for identity.

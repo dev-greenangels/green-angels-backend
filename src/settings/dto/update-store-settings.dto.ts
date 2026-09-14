@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsEmail,
   IsIn,
+  IsObject,
   IsOptional,
   IsString,
   MinLength,
@@ -227,4 +228,9 @@ export class UpdateStoreSettingsDto {
   @IsOptional()
   @IsBoolean()
   showCompanyOnContacts?: boolean
+
+  /** Per-locale CMS (address / contact blocks / schedules). Merged by locale key. */
+  @IsOptional()
+  @IsObject()
+  byLocale?: Record<string, unknown>
 }

@@ -4,6 +4,8 @@ export const PAYMENT_METHOD_TO_FLEXI_CODE: Record<string, string> = {
   'bank-transfer': 'PREVOD',
   'bank-transfer-legal': 'PREVOD',
   dobierka: 'DOBIERKA',
+  // pay-on-pickup: do NOT map to DOBIERKA (carrier COD). Until ABRA has a dedicated
+  // forma úhrady (e.g. HOTOV / OSOBNI — create in Flexi first), omit formaUhradyCis.
 }
 
 /**
@@ -62,6 +64,66 @@ export type FlexiOrderExportMappingInput = {
   deliveryMethod: string
   deliveryBranch?: string | null
   deliveryMethodCodes: Record<string, string>
+}
+
+export type FlexiDocumentStatInput = {
+  taxRegime?: string | null
+  taxCountryCode?: string | null
+  /** Ship-to only — must not drive VAT `stat` for seller/destination. */
+  deliveryCountryCode?: string | null
+  currency?: string | null
+}
+
+/**
+ * Flexi validates line `szbDph` against document `stat` (country).
+ * For B2C seller / OSS destination, `stat` must follow taxCountryCode from checkout
+ * snapshot — never ship-to alone (AT delivery + SK 23% would fail sazbaDphNotFound…).
+ *
+ * Legacy fallback when taxCountryCode is null on seller/destination orders: SK for
+ * non-UAH (seller warehouse), UA for UAH. Do not fall back to deliveryCountryCode
+ * for those regimes — that reintroduces the AT+23 bug.
+ *
+ * reverse_charge / unknown: keep pre-fix delivery-first selection unchanged.
+ */
+export function resolveFlexiDocumentStatCode(input: FlexiDocumentStatInput): string {
+  const currency = (input.currency || 'EUR').trim().toUpperCase()
+  if (currency === 'UAH') return 'UA'
+
+  const regime = (input.taxRegime ?? '').trim()
+  const taxCc = (input.taxCountryCode ?? '').trim().toLowerCase()
+  const deliveryCc = (input.deliveryCountryCode ?? '').trim().toLowerCase()
+
+  let countryCode: string
+  if (regime === 'seller' || regime === 'destination') {
+    // Prefer tax snapshot; never use ship-to as VAT country for these regimes.
+    countryCode = taxCc || 'sk'
+  } else {
+    // reverse_charge / empty / unknown — preserve previous delivery-first behavior.
+    countryCode = deliveryCc || taxCc || 'sk'
+  }
+
+  if (countryCode === 'hu') return 'HU'
+  if (countryCode === 'at') return 'AT'
+  if (countryCode === 'cz') return 'CZ'
+  if (countryCode === 'sk' || !countryCode) return 'SK'
+  return countryCode.toUpperCase()
+}
+
+/** Mirrors exportOrder line VAT fields for unit tests / shared mapping. */
+export function resolveFlexiLineVatFields(input: {
+  taxRegime?: string | null
+  taxRatePercent?: number | null
+}): { szbDph?: number; typSzbDph?: string } {
+  const taxRegime = (input.taxRegime ?? '').trim()
+  const taxRate =
+    input.taxRatePercent != null ? Number(input.taxRatePercent) : null
+  if (taxRegime === 'reverse_charge') {
+    return { szbDph: 0, typSzbDph: 'typSzbDph.dphOsv' }
+  }
+  if (taxRate != null && Number.isFinite(taxRate)) {
+    return { szbDph: taxRate }
+  }
+  return {}
 }
 
 /**

@@ -2,19 +2,21 @@ import { Type } from 'class-transformer'
 import {
   IsArray,
   IsBoolean,
+  IsEmail,
   IsIn,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator'
 
 import type { BelowMinOrderBehavior } from '../cart-checkout.types'
 import {
   CHECKOUT_DELIVERY_METHODS,
-  CHECKOUT_PAYMENT_METHODS,
+  TOGGLEABLE_PAYMENT_METHODS,
 } from '../checkout-methods.constants'
 
 export class CheckoutBankDetailsDto {
@@ -248,7 +250,7 @@ export class UpdateCartCheckoutSettingsDto {
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  @IsIn([...CHECKOUT_PAYMENT_METHODS], { each: true })
+  @IsIn([...TOGGLEABLE_PAYMENT_METHODS], { each: true })
   enabledPaymentMethods?: string[]
 
   @IsOptional()
@@ -364,4 +366,18 @@ export class UpdateCartCheckoutSettingsDto {
   @IsOptional()
   @IsString()
   orderPdfTitle?: string
+
+  @IsOptional()
+  @IsBoolean()
+  allowPayOnPickup?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  newOrderNotifyEmailEnabled?: boolean
+
+  @IsOptional()
+  @IsString()
+  @ValidateIf((_, value) => typeof value === 'string' && value.trim().length > 0)
+  @IsEmail()
+  newOrderNotifyEmail?: string
 }

@@ -1,0 +1,456 @@
+import type { LegalSeedEntry } from '../legal-seed.types'
+
+/** First production COOKIES Version 1 — EU-neutral; no per-cookie inventory table claim. */
+export const COOKIES_PRODUCTION_V1: LegalSeedEntry[] = [
+  {
+    type: 'COOKIES',
+    locale: 'sk',
+    title: "Politika súborov cookie",
+    intro: "Táto politika vysvetľuje, aké cookies a podobné technológie používame, na aké účely sa používajú a ako môžete spravovať svoj súhlas.",
+    sections: [
+      {
+        heading: "1. Kategórie cookies",
+        body: [
+          "Nevyhnutné cookies a technológie",
+          "Tieto cookies a technológie sú potrebné na základné fungovanie internetového obchodu, napríklad na zachovanie obsahu košíka, prihlásenie a reláciu používateľa, bezpečnosť, nastavenie jazyka a uloženie vašich preferencií súhlasu.",
+          "Nevyhnutné cookies sa používajú bez osobitného súhlasu, pretože bez nich by internetový obchod alebo požadovaná služba nemohli správne fungovať. Túto kategóriu nie je možné vypnúť prostredníctvom nastavení súhlasu.",
+          "Analytické cookies a technológie",
+          "Analytické technológie sú voliteľné a pomáhajú nám porozumieť tomu, ako návštevníci používajú internetový obchod, napríklad ktoré stránky navštevujú a ako so stránkou interagujú.",
+          "Analytické technológie, ktoré vyžadujú súhlas, používame iba po udelení súhlasu s kategóriou Analytické.",
+          "V nastaveniach cookies môžete spravovať súhlas s kategóriou Analytické. Konkrétne analytické služby sa aktivujú podľa aktuálnej konfigurácie značiek a vášho súhlasu.",
+          "Marketingové cookies a technológie",
+          "Marketingové technológie sú voliteľné a môžu sa používať najmä na meranie účinnosti reklamy, konverzií, remarketing a ďalšie reklamné funkcie.",
+          "Technológie, ktoré vyžadujú marketingový súhlas, používame iba po udelení súhlasu s kategóriou Marketingové.",
+          "V nastaveniach cookies môžete spravovať súhlas s kategóriou Marketingové. Konkrétne marketingové a reklamné služby sa aktivujú podľa aktuálnej konfigurácie značiek a vášho súhlasu.",
+        ],
+      },
+      {
+        heading: "2. Google Tag Manager a Google Consent Mode",
+        body: [
+          "Na technickú správu značiek môžeme používať Google Tag Manager. Google Tag Manager slúži predovšetkým ako nástroj na správu a spúšťanie ďalších značiek; konkrétne spracúvanie údajov závisí od služieb a značiek, ktoré sú prostredníctvom neho aktivované.",
+          "Ak používame služby Google Analytics alebo Google Ads, ich správanie riadime aj prostredníctvom Google Consent Mode v súlade s vašou voľbou súhlasu.",
+          "Pred udelením príslušného súhlasu sú voliteľné analytické a marketingové consent signály nastavené tak, aby obmedzovali používanie analytického alebo reklamného úložiska a údajov podľa aktuálnej konfigurácie služby.",
+          "Po zmene vašej voľby sa príslušné consent signály aktualizujú podľa zvolených kategórií.",
+        ],
+      },
+      {
+        heading: "3. Správa súhlasu",
+        body: [
+          "Pri prvej návšteve môžete:",
+          "- prijať všetky voliteľné cookies a technológie;",
+          "- ponechať iba nevyhnutné cookies;",
+          "- samostatne nastaviť analytické a marketingové technológie.",
+          "Svoj výber môžete kedykoľvek zmeniť prostredníctvom nastavení cookies na tejto stránke.",
+          "Vašu voľbu súhlasu uchovávame počas obdobia nastaveného v cookie mechanizme alebo dovtedy, kým ju nezmeníte, neodvoláte alebo kým sa nevyžaduje nové rozhodnutie.",
+          "Informáciu o vašej voľbe súhlasu môžeme uchovávať na účely preukázania súladu a správy vašich preferencií.",
+        ],
+      },
+      {
+        heading: "4. Doba používania cookies",
+        body: [
+          "Doba platnosti jednotlivých cookies alebo podobných technológií sa môže líšiť podľa ich účelu a poskytovateľa.",
+          "Presné obdobia platnosti závisia od konkrétnej technológie a jej poskytovateľa.",
+        ],
+      },
+      {
+        heading: "5. Tretie strany",
+        body: [
+          "Niektoré analytické, marketingové, platobné alebo technické služby môžu byť poskytované tretími stranami.",
+          "Tieto služby môžu pri aktivácii používať vlastné cookies alebo podobné technológie a spracúvať technické údaje o zariadení, prehliadači, interakcii so stránkou alebo reklamné identifikátory v rozsahu povolenom vaším súhlasom a platnými právnymi predpismi.",
+          "Podrobnosti o spracúvaní osobných údajov sú uvedené v [[privacy|Podmienkach ochrany osobných údajov]].",
+        ],
+      },
+      {
+        heading: "6. Odvolanie a zmena súhlasu",
+        body: [
+          "Súhlas s voliteľnými analytickými alebo marketingovými technológiami môžete kedykoľvek zmeniť alebo odvolať prostredníctvom nastavení cookies.",
+          "Odvolanie súhlasu nemá vplyv na zákonnosť spracúvania vykonaného pred jeho odvolaním.",
+          "V prípade otázok nás môžete kontaktovať na {supportEmail}.",
+        ],
+      },
+      {
+        heading: "7. Vaše práva",
+        body: [
+          "Ak v súvislosti s cookies alebo podobnými technológiami dochádza k spracúvaniu osobných údajov, máte za podmienok GDPR práva uvedené v [[privacy|Podmienkach ochrany osobných údajov]], najmä právo na prístup, opravu, vymazanie, obmedzenie spracúvania, námietku a odvolanie súhlasu, ak je spracúvanie založené na súhlase.",
+          "Máte tiež právo podať sťažnosť príslušnému dozornému orgánu na ochranu osobných údajov.",
+        ],
+      },
+    ],
+  },
+  {
+    type: 'COOKIES',
+    locale: 'en',
+    title: "Cookie Policy",
+    intro: "This cookie policy explains what cookies and similar technologies we use, the purposes for which they are used and how you can manage your consent.",
+    sections: [
+      {
+        heading: "1. Cookie categories",
+        body: [
+          "Necessary cookies and technologies",
+          "These cookies and technologies are required for the basic operation of the online store, for example to keep the contents of the shopping cart, user login and session, security, language settings and storing your consent preferences.",
+          "Necessary cookies are used without a separate consent because without them the online store or the requested service could not function properly. This category cannot be switched off through the consent settings.",
+          "Analytics cookies and technologies",
+          "Analytics technologies are optional and help us understand how visitors use the online store, for example which pages they visit and how they interact with the site.",
+          "Analytics technologies that require consent are used only after consent has been given for the Analytics category.",
+          "In the cookie settings you can manage consent for the Analytics category. Specific analytics services are activated according to the current tag configuration and your consent.",
+          "Marketing cookies and technologies",
+          "Marketing technologies are optional and may be used in particular to measure advertising effectiveness, conversions, remarketing and other advertising functions.",
+          "Technologies that require marketing consent are used only after consent has been given for the Marketing category.",
+          "In the cookie settings you can manage consent for the Marketing category. Specific marketing and advertising services are activated according to the current tag configuration and your consent.",
+        ],
+      },
+      {
+        heading: "2. Google Tag Manager and Google Consent Mode",
+        body: [
+          "We may use Google Tag Manager for the technical management of tags. Google Tag Manager primarily serves as a tool to manage and fire other tags; the specific processing of data depends on the services and tags activated through it.",
+          "Where we use Google Analytics or Google Ads services, we also control their behaviour through Google Consent Mode in line with your consent choice.",
+          "Before the relevant consent is given, optional analytics and marketing consent signals are set so as to restrict the use of analytics or advertising storage and data according to the current service configuration.",
+          "After you change your choice, the relevant consent signals are updated according to the selected categories.",
+        ],
+      },
+      {
+        heading: "3. Managing consent",
+        body: [
+          "On your first visit you can:",
+          "- accept all optional cookies and technologies;",
+          "- keep only necessary cookies;",
+          "- set analytics and marketing technologies separately.",
+          "You may change your choice at any time through the cookie settings on this page.",
+          "We retain your consent choice for the period set in the cookie mechanism or until you change or withdraw it or a new decision is required.",
+          "We may retain information about your consent choice for the purposes of demonstrating compliance and managing your preferences.",
+        ],
+      },
+      {
+        heading: "4. Cookie lifetime",
+        body: [
+          "The lifetime of individual cookies or similar technologies may vary depending on their purpose and provider.",
+          "Exact validity periods depend on the particular technology and its provider.",
+        ],
+      },
+      {
+        heading: "5. Third parties",
+        body: [
+          "Some analytics, marketing, payment or technical services may be provided by third parties.",
+          "When activated, these services may use their own cookies or similar technologies and process technical data about the device, browser, interaction with the site or advertising identifiers to the extent permitted by your consent and applicable law.",
+          "Details on the processing of personal data are set out in the [[privacy|Privacy Policy]].",
+        ],
+      },
+      {
+        heading: "6. Withdrawal and change of consent",
+        body: [
+          "You may change or withdraw your consent to optional analytics or marketing technologies at any time through the cookie settings.",
+          "Withdrawal of consent does not affect the lawfulness of processing carried out before its withdrawal.",
+          "If you have questions, you may contact us at {supportEmail}.",
+        ],
+      },
+      {
+        heading: "7. Your rights",
+        body: [
+          "Where personal data are processed in connection with cookies or similar technologies, you have, under the conditions of the GDPR, the rights set out in the [[privacy|Privacy Policy]], in particular the right of access, rectification, erasure, restriction of processing, objection and withdrawal of consent where processing is based on consent.",
+          "You also have the right to lodge a complaint with the competent data protection supervisory authority.",
+        ],
+      },
+    ],
+  },
+  {
+    type: 'COOKIES',
+    locale: 'hu',
+    title: "Cookie-szabályzat",
+    intro: "Ez a szabályzat ismerteti, hogy milyen cookie-kat és hasonló technológiákat használunk, milyen célból, valamint hogyan kezelheti a hozzájárulását.",
+    sections: [
+      {
+        heading: "1. Cookie-kategóriák",
+        body: [
+          "Szükséges cookie-k és technológiák",
+          "Ezek a cookie-k és technológiák az webáruház alapvető működéséhez szükségesek, például a kosár tartalmának megőrzéséhez, a bejelentkezéshez és a felhasználói munkamenethez, a biztonsághoz, a nyelvi beállításokhoz, valamint a hozzájárulási preferenciák tárolásához.",
+          "A szükséges cookie-kat külön hozzájárulás nélkül használjuk, mert nélkülük a webáruház vagy a kért szolgáltatás nem működne megfelelően. Ezt a kategóriát a hozzájárulási beállításokon keresztül nem lehet kikapcsolni.",
+          "Analitikai cookie-k és technológiák",
+          "Az analitikai technológiák opcionálisak, és segítenek megérteni, hogyan használják a látogatók a webáruházat, például mely oldalakat nézik meg, és hogyan lépnek kapcsolatba az oldallal.",
+          "A hozzájárulást igénylő analitikai technológiákat csak az Analitikai kategóriára adott hozzájárulás után használjuk.",
+          "A cookie-beállításokban kezelheti az Analitikai kategóriára vonatkozó hozzájárulást. Az egyes analitikai szolgáltatások az aktuális címkekonfiguráció és az Ön hozzájárulása szerint aktiválódnak.",
+          "Marketing cookie-k és technológiák",
+          "A marketingtechnológiák opcionálisak, és különösen a reklámhatékonyság, a konverziók, a remarketing és egyéb reklámfunkciók mérésére használhatók.",
+          "A marketing hozzájárulást igénylő technológiákat csak a Marketing kategóriára adott hozzájárulás után használjuk.",
+          "A cookie-beállításokban kezelheti a Marketing kategóriára vonatkozó hozzájárulást. Az egyes marketing- és reklámszolgáltatások az aktuális címkekonfiguráció és az Ön hozzájárulása szerint aktiválódnak.",
+        ],
+      },
+      {
+        heading: "2. Google Tag Manager és Google Consent Mode",
+        body: [
+          "A címkék technikai kezelésére Google Tag Managert használhatunk. A Google Tag Manager elsősorban más címkék kezelésére és indítására szolgál; az adatok konkrét kezelése az azon keresztül aktivált szolgáltatásoktól és címkéktől függ.",
+          "Amennyiben Google Analytics vagy Google Ads szolgáltatásokat használunk, azok működését a Google Consent Mode segítségével is szabályozzuk az Ön hozzájárulási választásának megfelelően.",
+          "A vonatkozó hozzájárulás megadása előtt az opcionális analitikai és marketing consent jelek úgy vannak beállítva, hogy az aktuális szolgáltatáskonfigurációnak megfelelően korlátozzák az analitikai vagy reklámcélú tárolás és adatok használatát.",
+          "Választása módosítása után a vonatkozó consent jelek a kiválasztott kategóriák szerint frissülnek.",
+        ],
+      },
+      {
+        heading: "3. A hozzájárulás kezelése",
+        body: [
+          "Első látogatásakor Ön:",
+          "- elfogadhatja az összes opcionális cookie-t és technológiát;",
+          "- megőrizheti csak a szükséges cookie-kat;",
+          "- külön beállíthatja az analitikai és marketing technológiákat.",
+          "Választását bármikor módosíthatja az ezen az oldalon található cookie-beállításokban.",
+          "Hozzájárulási választását a cookie-mechanizmusban beállított ideig, illetve amíg meg nem változtatja, vissza nem vonja, vagy új döntés nem válik szükségessé, megőrizzük.",
+          "Hozzájárulási választásáról szóló információt a megfelelés igazolása és a preferenciák kezelése céljából megőrizhetjük.",
+        ],
+      },
+      {
+        heading: "4. A cookie-k élettartama",
+        body: [
+          "Az egyes cookie-k vagy hasonló technológiák érvényességi ideje céljuktól és szolgáltatójuktól függően eltérhet.",
+          "A pontos érvényességi idők az adott technológiától és annak szolgáltatójától függnek.",
+        ],
+      },
+      {
+        heading: "5. Harmadik felek",
+        body: [
+          "Egyes analitikai, marketing, fizetési vagy műszaki szolgáltatásokat harmadik felek nyújthatnak.",
+          "Aktiváláskor ezek a szolgáltatások saját cookie-kat vagy hasonló technológiákat használhatnak, és az Ön hozzájárulása, valamint az alkalmazandó jogszabályok által megengedett mértékben technikai adatokat kezelhetnek az eszközről, a böngészőről, az oldallal való interakcióról vagy reklám-azonosítókról.",
+          "A személyes adatok kezelésének részleteit az [[privacy|Adatvédelmi tájékoztató]] tartalmazza.",
+        ],
+      },
+      {
+        heading: "6. A hozzájárulás visszavonása és módosítása",
+        body: [
+          "Az opcionális analitikai vagy marketing technológiákhoz adott hozzájárulását bármikor módosíthatja vagy visszavonhatja a cookie-beállításokban.",
+          "A hozzájárulás visszavonása nem érinti a visszavonást megelőző adatkezelés jogszerűségét.",
+          "Kérdés esetén a {supportEmail} címen érhet el minket.",
+        ],
+      },
+      {
+        heading: "7. Az Ön jogai",
+        body: [
+          "Amennyiben a cookie-k vagy hasonló technológiák kapcsán személyes adatok kezelésére kerül sor, a GDPR feltételei szerint Önnek az [[privacy|Adatvédelmi tájékoztatóban]] meghatározott jogai vannak, különösen a hozzáférés, helyesbítés, törlés, az adatkezelés korlátozása, tiltakozás, valamint a hozzájárulás visszavonásának joga, ha az adatkezelés hozzájáruláson alapul.",
+          "Ön jogosult panaszt tenni az illetékes adatvédelmi felügyeleti hatóságnál is.",
+        ],
+      },
+    ],
+  },
+  {
+    type: 'COOKIES',
+    locale: 'de',
+    title: "Cookie-Richtlinie",
+    intro: "Diese Richtlinie erläutert, welche Cookies und ähnliche Technologien wir verwenden, zu welchen Zwecken sie eingesetzt werden und wie Sie Ihre Einwilligung verwalten können.",
+    sections: [
+      {
+        heading: "1. Cookie-Kategorien",
+        body: [
+          "Notwendige Cookies und Technologien",
+          "Diese Cookies und Technologien sind für den grundlegenden Betrieb des Online-Shops erforderlich, beispielsweise zur Speicherung des Warenkorbs, zur Anmeldung und Nutzersitzung, zur Sicherheit, zur Spracheinstellung und zur Speicherung Ihrer Einwilligungspräferenzen.",
+          "Notwendige Cookies werden ohne gesonderte Einwilligung verwendet, weil der Online-Shop oder die angeforderte Leistung ohne sie nicht ordnungsgemäß funktionieren könnte. Diese Kategorie kann in den Einwilligungseinstellungen nicht deaktiviert werden.",
+          "Analyse-Cookies und Technologien",
+          "Analysetechnologien sind optional und helfen uns zu verstehen, wie Besucher den Online-Shop nutzen, beispielsweise welche Seiten sie aufrufen und wie sie mit der Seite interagieren.",
+          "Analysetechnologien, die eine Einwilligung erfordern, verwenden wir nur nach Erteilung der Einwilligung für die Kategorie Analyse.",
+          "In den Cookie-Einstellungen können Sie die Einwilligung für die Kategorie Analyse verwalten. Konkrete Analysedienste werden entsprechend der aktuellen Tag-Konfiguration und Ihrer Einwilligung aktiviert.",
+          "Marketing-Cookies und Technologien",
+          "Marketingtechnologien sind optional und können insbesondere zur Messung der Werbewirksamkeit, von Conversions, für Remarketing und weitere Werbefunktionen verwendet werden.",
+          "Technologien, die eine Marketing-Einwilligung erfordern, verwenden wir nur nach Erteilung der Einwilligung für die Kategorie Marketing.",
+          "In den Cookie-Einstellungen können Sie die Einwilligung für die Kategorie Marketing verwalten. Konkrete Marketing- und Werbedienste werden entsprechend der aktuellen Tag-Konfiguration und Ihrer Einwilligung aktiviert.",
+        ],
+      },
+      {
+        heading: "2. Google Tag Manager und Google Consent Mode",
+        body: [
+          "Zur technischen Verwaltung von Tags können wir Google Tag Manager verwenden. Google Tag Manager dient in erster Linie als Werkzeug zur Verwaltung und Auslösung weiterer Tags; die konkrete Datenverarbeitung hängt von den darüber aktivierten Diensten und Tags ab.",
+          "Soweit wir Google Analytics oder Google Ads verwenden, steuern wir deren Verhalten auch über Google Consent Mode entsprechend Ihrer Einwilligungsentscheidung.",
+          "Vor Erteilung der jeweiligen Einwilligung sind optionale Analyse- und Marketing-Consent-Signale so gesetzt, dass die Nutzung von Analyse- oder Werbespeicher und -daten gemäß der aktuellen Dienstkonfiguration eingeschränkt wird.",
+          "Nach Änderung Ihrer Auswahl werden die betreffenden Consent-Signale entsprechend den gewählten Kategorien aktualisiert.",
+        ],
+      },
+      {
+        heading: "3. Verwaltung der Einwilligung",
+        body: [
+          "Beim ersten Besuch können Sie:",
+          "- alle optionalen Cookies und Technologien akzeptieren;",
+          "- nur notwendige Cookies behalten;",
+          "- Analyse- und Marketingtechnologien gesondert einstellen.",
+          "Ihre Auswahl können Sie jederzeit über die Cookie-Einstellungen auf dieser Seite ändern.",
+          "Wir speichern Ihre Einwilligungsentscheidung für den im Cookie-Mechanismus festgelegten Zeitraum oder bis Sie sie ändern, widerrufen oder eine neue Entscheidung erforderlich wird.",
+          "Informationen über Ihre Einwilligungsentscheidung können wir zum Nachweis der Compliance und zur Verwaltung Ihrer Präferenzen speichern.",
+        ],
+      },
+      {
+        heading: "4. Speicherdauer von Cookies",
+        body: [
+          "Die Gültigkeitsdauer einzelner Cookies oder ähnlicher Technologien kann je nach Zweck und Anbieter unterschiedlich sein.",
+          "Genaue Gültigkeitszeiträume hängen von der jeweiligen Technologie und deren Anbieter ab.",
+        ],
+      },
+      {
+        heading: "5. Dritte",
+        body: [
+          "Einige Analyse-, Marketing-, Zahlungs- oder technische Dienste können von Dritten bereitgestellt werden.",
+          "Bei Aktivierung können diese Dienste eigene Cookies oder ähnliche Technologien verwenden und technische Daten über Gerät, Browser, Interaktion mit der Seite oder Werbekennungen im durch Ihre Einwilligung und geltendes Recht zulässigen Umfang verarbeiten.",
+          "Einzelheiten zur Verarbeitung personenbezogener Daten finden Sie in der [[privacy|Datenschutzerklärung]].",
+        ],
+      },
+      {
+        heading: "6. Widerruf und Änderung der Einwilligung",
+        body: [
+          "Ihre Einwilligung in optionale Analyse- oder Marketingtechnologien können Sie jederzeit über die Cookie-Einstellungen ändern oder widerrufen.",
+          "Der Widerruf der Einwilligung berührt nicht die Rechtmäßigkeit der vor dem Widerruf erfolgten Verarbeitung.",
+          "Bei Fragen können Sie uns unter {supportEmail} kontaktieren.",
+        ],
+      },
+      {
+        heading: "7. Ihre Rechte",
+        body: [
+          "Soweit im Zusammenhang mit Cookies oder ähnlichen Technologien personenbezogene Daten verarbeitet werden, haben Sie unter den Voraussetzungen der DSGVO die in der [[privacy|Datenschutzerklärung]] genannten Rechte, insbesondere auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Widerspruch und Widerruf der Einwilligung, soweit die Verarbeitung auf einer Einwilligung beruht.",
+          "Sie haben außerdem das Recht, Beschwerde bei der zuständigen Datenschutzaufsichtsbehörde einzulegen.",
+        ],
+      },
+    ],
+  },
+  {
+    type: 'COOKIES',
+    locale: 'cs',
+    title: "Zásady používání cookies",
+    intro: "Tyto zásady vysvětlují, jaké cookies a podobné technologie používáme, k jakým účelům slouží a jak můžete spravovat svůj souhlas.",
+    sections: [
+      {
+        heading: "1. Kategorie cookies",
+        body: [
+          "Nezbytné cookies a technologie",
+          "Tyto cookies a technologie jsou potřebné pro základní fungování internetového obchodu, například pro zachování obsahu košíku, přihlášení a relaci uživatele, bezpečnost, nastavení jazyka a uložení vašich preferencí souhlasu.",
+          "Nezbytné cookies se používají bez zvláštního souhlasu, protože bez nich by internetový obchod nebo požadovaná služba nemohly správně fungovat. Tuto kategorii nelze vypnout prostřednictvím nastavení souhlasu.",
+          "Analytické cookies a technologie",
+          "Analytické technologie jsou volitelné a pomáhají nám porozumět tomu, jak návštěvníci používají internetový obchod, například které stránky navštěvují a jak se stránkou interagují.",
+          "Analytické technologie, které vyžadují souhlas, používáme pouze po udělení souhlasu s kategorií Analytické.",
+          "V nastavení cookies můžete spravovat souhlas s kategorií Analytické. Konkrétní analytické služby se aktivují podle aktuální konfigurace značek a vašeho souhlasu.",
+          "Marketingové cookies a technologie",
+          "Marketingové technologie jsou volitelné a mohou se používat zejména k měření účinnosti reklamy, konverzí, remarketingu a dalších reklamních funkcí.",
+          "Technologie, které vyžadují marketingový souhlas, používáme pouze po udělení souhlasu s kategorií Marketingové.",
+          "V nastavení cookies můžete spravovat souhlas s kategorií Marketingové. Konkrétní marketingové a reklamní služby se aktivují podle aktuální konfigurace značek a vašeho souhlasu.",
+        ],
+      },
+      {
+        heading: "2. Google Tag Manager a Google Consent Mode",
+        body: [
+          "Ke technické správě značek můžeme používat Google Tag Manager. Google Tag Manager slouží především jako nástroj ke správě a spouštění dalších značek; konkrétní zpracování údajů závisí na službách a značkách, které jsou jeho prostřednictvím aktivovány.",
+          "Pokud používáme služby Google Analytics nebo Google Ads, jejich chování řídíme také prostřednictvím Google Consent Mode v souladu s vaší volbou souhlasu.",
+          "Před udělením příslušného souhlasu jsou volitelné analytické a marketingové consent signály nastaveny tak, aby omezovaly používání analytického nebo reklamního úložiště a údajů podle aktuální konfigurace služby.",
+          "Po změně vaší volby se příslušné consent signály aktualizují podle zvolených kategorií.",
+        ],
+      },
+      {
+        heading: "3. Správa souhlasu",
+        body: [
+          "Při první návštěvě můžete:",
+          "- přijmout všechny volitelné cookies a technologie;",
+          "- ponechat pouze nezbytné cookies;",
+          "- samostatně nastavit analytické a marketingové technologie.",
+          "Svou volbu můžete kdykoli změnit prostřednictvím nastavení cookies na této stránce.",
+          "Vaši volbu souhlasu uchováváme po dobu nastavenou v cookie mechanismu nebo do doby, než ji změníte, odvoláte nebo dokud nebude vyžadováno nové rozhodnutí.",
+          "Informaci o vaší volbě souhlasu můžeme uchovávat za účelem prokázání souladu a správy vašich preferencí.",
+        ],
+      },
+      {
+        heading: "4. Doba používání cookies",
+        body: [
+          "Doba platnosti jednotlivých cookies nebo podobných technologií se může lišit podle jejich účelu a poskytovatele.",
+          "Přesné doby platnosti závisí na konkrétní technologii a jejím poskytovateli.",
+        ],
+      },
+      {
+        heading: "5. Třetí strany",
+        body: [
+          "Některé analytické, marketingové, platební nebo technické služby mohou být poskytovány třetími stranami.",
+          "Tyto služby mohou při aktivaci používat vlastní cookies nebo podobné technologie a zpracovávat technické údaje o zařízení, prohlížeči, interakci se stránkou nebo reklamní identifikátory v rozsahu povoleném vaším souhlasem a platnými právními předpisy.",
+          "Podrobnosti o zpracování osobních údajů jsou uvedeny v [[privacy|Zásadách ochrany osobních údajů]].",
+        ],
+      },
+      {
+        heading: "6. Odvolání a změna souhlasu",
+        body: [
+          "Souhlas s volitelnými analytickými nebo marketingovými technologiemi můžete kdykoli změnit nebo odvolat prostřednictvím nastavení cookies.",
+          "Odvolání souhlasu nemá vliv na zákonnost zpracování provedeného před jeho odvoláním.",
+          "V případě otázek nás můžete kontaktovat na {supportEmail}.",
+        ],
+      },
+      {
+        heading: "7. Vaše práva",
+        body: [
+          "Pokud v souvislosti s cookies nebo podobnými technologiemi dochází ke zpracování osobních údajů, máte za podmínek GDPR práva uvedená v [[privacy|Zásadách ochrany osobních údajů]], zejména právo na přístup, opravu, výmaz, omezení zpracování, námitku a odvolání souhlasu, je-li zpracování založeno na souhlasu.",
+          "Máte rovněž právo podat stížnost u příslušného dozorového úřadu pro ochranu osobních údajů.",
+        ],
+      },
+    ],
+  },
+  {
+    type: 'COOKIES',
+    locale: 'uk',
+    title: "Політика використання cookies",
+    intro: "Ця політика пояснює, які cookies та подібні технології ми використовуємо, з якою метою та як ви можете керувати своєю згодою.",
+    sections: [
+      {
+        heading: "1. Категорії cookies",
+        body: [
+          "Необхідні cookies і технології",
+          "Ці cookies і технології потрібні для базової роботи інтернет-магазину, зокрема для збереження вмісту кошика, входу та сесії користувача, безпеки, налаштування мови та збереження ваших уподобань щодо згоди.",
+          "Необхідні cookies використовуються без окремої згоди, бо без них інтернет-магазин або запитувана послуга не могли б працювати належним чином. Цю категорію неможливо вимкнути в налаштуваннях згоди.",
+          "Аналітичні cookies і технології",
+          "Аналітичні технології є необов’язковими і допомагають нам зрозуміти, як відвідувачі користуються інтернет-магазином, наприклад які сторінки переглядають і як взаємодіють із сайтом.",
+          "Аналітичні технології, що потребують згоди, ми використовуємо лише після надання згоди на категорію «Аналітичні».",
+          "У налаштуваннях cookies ви можете керувати згодою на категорію «Аналітичні». Конкретні аналітичні сервіси активуються відповідно до поточної конфігурації тегів і вашої згоди.",
+          "Маркетингові cookies і технології",
+          "Маркетингові технології є необов’язковими і можуть використовуватися зокрема для вимірювання ефективності реклами, конверсій, ремаркетингу та інших рекламних функцій.",
+          "Технології, що потребують маркетингової згоди, ми використовуємо лише після надання згоди на категорію «Маркетингові».",
+          "У налаштуваннях cookies ви можете керувати згодою на категорію «Маркетингові». Конкретні маркетингові та рекламні сервіси активуються відповідно до поточної конфігурації тегів і вашої згоди.",
+        ],
+      },
+      {
+        heading: "2. Google Tag Manager і Google Consent Mode",
+        body: [
+          "Для технічного керування тегами ми можемо використовувати Google Tag Manager. Google Tag Manager насамперед слугує інструментом для керування та запуску інших тегів; конкретна обробка даних залежить від сервісів і тегів, активованих через нього.",
+          "Якщо ми використовуємо сервіси Google Analytics або Google Ads, їхню поведінку також регулюємо через Google Consent Mode відповідно до вашого вибору згоди.",
+          "До надання відповідної згоди необов’язкові аналітичні та маркетингові consent-сигнали налаштовані так, щоб обмежувати використання аналітичного чи рекламного сховища та даних згідно з поточною конфігурацією сервісу.",
+          "Після зміни вашого вибору відповідні consent-сигнали оновлюються згідно з обраними категоріями.",
+        ],
+      },
+      {
+        heading: "3. Керування згодою",
+        body: [
+          "Під час першого відвідування ви можете:",
+          "- прийняти всі необов’язкові cookies і технології;",
+          "- залишити лише необхідні cookies;",
+          "- окремо налаштувати аналітичні та маркетингові технології.",
+          "Свій вибір ви можете будь-коли змінити через налаштування cookies на цій сторінці.",
+          "Ми зберігаємо ваш вибір згоди протягом строку, встановленого в cookie-механізмі, або доки ви його не зміните, не відкличете чи поки не знадобиться нове рішення.",
+          "Інформацію про ваш вибір згоди ми можемо зберігати для підтвердження відповідності вимогам і керування вашими вподобаннями.",
+        ],
+      },
+      {
+        heading: "4. Строк дії cookies",
+        body: [
+          "Строк дії окремих cookies або подібних технологій може відрізнятися залежно від їхньої мети та постачальника.",
+          "Точні строки дії залежать від конкретної технології та її постачальника.",
+        ],
+      },
+      {
+        heading: "5. Треті сторони",
+        body: [
+          "Деякі аналітичні, маркетингові, платіжні або технічні послуги можуть надаватися третіми сторонами.",
+          "Під час активації ці сервіси можуть використовувати власні cookies або подібні технології та обробляти технічні дані про пристрій, браузер, взаємодію зі сторінкою або рекламні ідентифікатори в обсязі, дозволеному вашою згодою та застосовним законодавством.",
+          "Подробиці про обробку персональних даних наведені в [[privacy|Політиці конфіденційності та захисту персональних даних]].",
+        ],
+      },
+      {
+        heading: "6. Відкликання та зміна згоди",
+        body: [
+          "Згоду на необов’язкові аналітичні або маркетингові технології ви можете будь-коли змінити або відкликати через налаштування cookies.",
+          "Відкликання згоди не впливає на законність обробки, здійсненої до її відкликання.",
+          "З питань звертайтеся на {supportEmail}.",
+        ],
+      },
+      {
+        heading: "7. Ваші права",
+        body: [
+          "Якщо у зв’язку з cookies або подібними технологіями відбувається обробка персональних даних, за умов GDPR ви маєте права, зазначені в [[privacy|Політиці конфіденційності та захисту персональних даних]], зокрема право на доступ, виправлення, видалення, обмеження обробки, заперечення та відкликання згоди, якщо обробка ґрунтується на згоді.",
+          "Ви також маєте право подати скаргу до компетентного наглядового органу із захисту персональних даних.",
+        ],
+      },
+    ],
+  },
+]
+

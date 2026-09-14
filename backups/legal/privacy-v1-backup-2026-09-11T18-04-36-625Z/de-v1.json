@@ -1,0 +1,60 @@
+{
+  "id": "7b7e41dd-7bd5-49fe-832d-77cacb51757b",
+  "locale": "de",
+  "version": 1,
+  "status": "PUBLISHED",
+  "title": "Datenschutzerklärung",
+  "intro": "Diese Datenschutzerklärung erfüllt die Informationspflicht nach der DSGVO und dem Gesetz Nr. 18/2018 Z. z. über den Schutz personenbezogener Daten.",
+  "content": [
+    {
+      "heading": "1. Verantwortlicher",
+      "body": [
+        "Verantwortlicher ist der Betreiber des Pflanzenshops (Einzelunternehmer / juristische Person unter „Kontakt“ und in den Nutzungsbedingungen aufgeführt).",
+        "Bei Fragen zur Verarbeitung personenbezogener Daten nutzen Sie bitte die Kontakte auf der Seite „Kontakt“."
+      ]
+    },
+    {
+      "heading": "2. Welche Daten wir verarbeiten",
+      "body": [
+        "Profildaten: Vorname, Nachname, Vatersname, Telefon, E-Mail, Lieferadresse.",
+        "Bestelldaten: Bestellinhalt, Lieferart und -adresse, Zahlungsart, Statusverlauf.",
+        "Technische Daten: Cookies sowie optionale Analyse- und Marketing-/Werbetechnologien (nur nach Ihrer Einwilligung). Dazu können Geräte-/Browserinformationen, Seiteninteraktionen und der Einwilligungsstatus gehören. Über Tag Manager / dataLayer senden wir keine Namen, E-Mails, Telefonnummern oder Adressen."
+      ]
+    },
+    {
+      "heading": "3. Zweck und Rechtsgrundlage",
+      "body": [
+        "Kundendaten werden zur Aufgabe und Abwicklung von Bestellungen sowie zur Kommunikation über Lieferung und Support verarbeitet — auf Basis der Vertragserfüllung und Nutzereinwilligung.",
+        "Optionale Analyse- und Marketing-/Werbetechnologien werden nur mit separater Einwilligung verwendet. Wir nutzen Google Tag Manager zur Steuerung freigegebener Tags; Google Analytics 4 und Google Ads sind derzeit nicht aktiv. Einwilligungen können Sie jederzeit auf der Cookie-Richtlinien-Seite ändern oder widerrufen."
+      ]
+    },
+    {
+      "heading": "4. Wer die Daten erhält",
+      "body": [
+        "Daten können an Versanddienstleister, Zahlungsanbieter und E-Mail-/SMS-Benachrichtigungsdienste weitergegeben werden — nur in dem Umfang, der zur Bestellabwicklung erforderlich ist.",
+        "Technische IT-/Hosting-Anbieter können Vercel (Hosting und Vercel Analytics, sofern Analytics-Einwilligung vorliegt) sowie Google Tag Manager als Tag-Infrastruktur umfassen — ohne dass dadurch Google Ads oder GA4 aktiv werden.",
+        "Wir verkaufen keine personenbezogenen Daten an Dritte."
+      ]
+    },
+    {
+      "heading": "5. Aufbewahrungsdauer",
+      "body": [
+        "Profildaten werden gespeichert, solange das Konto aktiv ist. Bestelldaten werden für die für Buchhaltung und Steuerunterlagen erforderliche Dauer aufbewahrt.",
+        "Sie können Ihr Konto jederzeit in den Kontoeinstellungen löschen — siehe Abschnitt unten."
+      ]
+    },
+    {
+      "heading": "6. Ihre Rechte",
+      "body": [
+        "Sie haben das Recht auf Auskunft, Berichtigung, Löschung (Anonymisierung), Einschränkung und Widerspruch gegen die Verarbeitung Ihrer Daten.",
+        "Sie können eine Kopie Ihrer Daten herunterladen oder Ihr Konto in Ihrer Übersicht unter „Einstellungen“ → „Daten & Datenschutz“ löschen.",
+        "E-Mail zur Ausübung Ihrer Rechte (DSGVO): {supportEmail}"
+      ]
+    }
+  ],
+  "contentHash": "7b5c4268a301bb74b33a86203f0a59fff25ada39170297f981ed311f294abe6b",
+  "publishedAt": "2026-09-01T12:30:34.449Z",
+  "effectiveAt": "2026-09-01T12:30:34.449Z",
+  "createdAt": "2026-09-01T12:30:34.496Z",
+  "updatedAt": "2026-09-03T15:19:31.055Z"
+}

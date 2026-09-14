@@ -10,6 +10,7 @@ import {
   parseCountryHostMap,
 } from './country-hosts'
 import { buildMailIdentity } from './mail-identity.rules'
+import { resolveSupportEmail as resolvePublicSupportEmail } from '../legal/legal-seller'
 
 export type MailIdentityKind = 'otp' | 'order' | 'stock' | 'wholesale'
 
@@ -26,33 +27,6 @@ export type MailIdentity = {
   replyTo: string | null
   domain: string
   countrySiteCode: CountrySiteCode | null
-}
-
-const SUPPORT_LABEL_HINTS = ['підтримка', 'support', 'kontakt', 'contact']
-
-function pickStoreSupportEmail(store: StoreContactSettings): string | null {
-  const emails = store.emails.filter((item) => item.email.trim())
-  if (emails.length === 0) {
-    for (const block of store.contactBlocks) {
-      for (const line of block.lines) {
-        if (line.type !== 'email' || !line.value.trim()) continue
-        const hay = `${block.title} ${line.label ?? ''}`.toLowerCase()
-        if (SUPPORT_LABEL_HINTS.some((h) => hay.includes(h))) {
-          return line.value.trim()
-        }
-      }
-    }
-    for (const block of store.contactBlocks) {
-      const emailLine = block.lines.find((l) => l.type === 'email' && l.value.trim())
-      if (emailLine) return emailLine.value.trim()
-    }
-    return null
-  }
-
-  const byLabel = emails.find((item) =>
-    SUPPORT_LABEL_HINTS.some((h) => item.label.trim().toLowerCase().includes(h)),
-  )
-  return (byLabel ?? emails[0])?.email.trim() || null
 }
 
 function normalizeCountrySiteCode(raw: string | null | undefined): CountrySiteCode | null {
@@ -107,12 +81,8 @@ export class MailIdentityService {
     store: StoreContactSettings,
     countrySiteCode: CountrySiteCode | null,
   ): string | null {
-    if (market.region === 'sk' && countrySiteCode) {
-      const site = market.countrySites.find((s) => s.code === countrySiteCode && s.enabled)
-      const fromSite = site?.supportEmail?.trim() || null
-      if (fromSite) return fromSite
-    }
-    return pickStoreSupportEmail(store)
+    const resolved = resolvePublicSupportEmail(store, market, countrySiteCode).trim()
+    return resolved || null
   }
 
   private resolveMailDomain(

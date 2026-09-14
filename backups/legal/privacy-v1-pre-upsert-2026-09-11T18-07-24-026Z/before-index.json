@@ -1,0 +1,56 @@
+[
+  {
+    "id": "09f26b7c-a2e9-4bae-9a21-2ab7adb65e6f",
+    "locale": "cs",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Privacy policy",
+    "publishedAt": "2026-09-01T12:30:34.449Z",
+    "contentHash": "534548937677376310a5ffc9e14e91b9ae0323cb410cc25efeb82241bf4c1326"
+  },
+  {
+    "id": "7b7e41dd-7bd5-49fe-832d-77cacb51757b",
+    "locale": "de",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Datenschutzerklärung",
+    "publishedAt": "2026-09-01T12:30:34.449Z",
+    "contentHash": "7b5c4268a301bb74b33a86203f0a59fff25ada39170297f981ed311f294abe6b"
+  },
+  {
+    "id": "fa65828f-40ca-42b1-a93f-902b821204ee",
+    "locale": "en",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Privacy policy",
+    "publishedAt": "2026-08-21T22:17:47.800Z",
+    "contentHash": "bb1cfeedcfc90e43f34f11616860dea6cf640d13d2b81767dd8de1f271315e08"
+  },
+  {
+    "id": "d7289afc-b79c-4580-9c79-2e725fae0806",
+    "locale": "hu",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Adatvédelmi irányelvek",
+    "publishedAt": "2026-09-01T12:30:34.449Z",
+    "contentHash": "3a43f20bdaa1ca5bd4baa79aeb28edc16d34d56d9247e9d1ceba527cf14357c7"
+  },
+  {
+    "id": "298bc013-40bb-444b-920b-293506624400",
+    "locale": "sk",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Podmienky ochrany osobných údajov",
+    "publishedAt": "2026-08-21T22:17:47.800Z",
+    "contentHash": "db4cd7595db7a5fa0ccd2c788a586cf0ab637e5f68bbfee729342a8c2d31c77b"
+  },
+  {
+    "id": "950250e4-ebed-4631-84fb-9deda6a21b8c",
+    "locale": "uk",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Політика конфіденційності",
+    "publishedAt": "2026-08-21T22:17:47.800Z",
+    "contentHash": "d8f79e71c9a72debbaf48d0a676f5df9afdcbccc296ab1811a5c688f3b40b9fb"
+  }
+]

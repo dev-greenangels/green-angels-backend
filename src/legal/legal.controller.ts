@@ -22,7 +22,7 @@ export class LegalController {
 
   @Get('current')
   getCurrent(@Query() query: LegalLocaleQueryDto) {
-    return this.legal.getCurrent(query.locale)
+    return this.legal.getCurrent(query.locale, query.countrySiteCode)
   }
 
   @Get('admin')
@@ -95,6 +95,6 @@ export class LegalController {
 
   @Get(':type')
   getByType(@Param('type') type: string, @Query() query: LegalLocaleQueryDto) {
-    return this.legal.getByType(type, query.locale)
+    return this.legal.getByType(type, query.locale, query.countrySiteCode)
   }
 }

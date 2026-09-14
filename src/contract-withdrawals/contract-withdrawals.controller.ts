@@ -12,7 +12,7 @@ import {
   ContractWithdrawalQueryDto,
   CreateAccountContractWithdrawalDto,
   CreatePublicContractWithdrawalDto,
-  UpdateContractWithdrawalStatusDto,
+  UpdateContractWithdrawalBackstageDto,
 } from './dto/contract-withdrawal.dto'
 
 @Controller('contract-withdrawals')
@@ -74,7 +74,11 @@ export class ContractWithdrawalsController {
   @Patch('backstage/:id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)
-  updateStatusBackstage(@Param('id') id: string, @Body() dto: UpdateContractWithdrawalStatusDto) {
-    return this.withdrawals.updateStatusBackstage(id, dto.status)
+  updateBackstage(
+    @Param('id') id: string,
+    @Body() dto: UpdateContractWithdrawalBackstageDto,
+    @Req() req: Request & { user?: SessionJwtPayload },
+  ) {
+    return this.withdrawals.updateBackstage(id, dto, req.user?.userId ?? null)
   }
 }

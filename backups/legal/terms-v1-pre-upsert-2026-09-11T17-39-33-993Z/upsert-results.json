@@ -1,0 +1,56 @@
+[
+  {
+    "action": "UPDATE",
+    "locale": "sk",
+    "version": 1,
+    "id": "520c1904-5af8-490b-8503-cc674986b204",
+    "status": "PUBLISHED",
+    "publishedAt": "2026-08-21T22:17:47.800Z",
+    "contentHash": "60aa666a018283e80eb5a4922c59a5f212262d25a3dd93bc973838b810c8122a"
+  },
+  {
+    "action": "UPDATE",
+    "locale": "en",
+    "version": 1,
+    "id": "607728b1-b65f-4540-8dda-0389ccbad657",
+    "status": "PUBLISHED",
+    "publishedAt": "2026-08-21T22:17:47.800Z",
+    "contentHash": "05c811733c267a5f4fb4114bca4e11df5824124330b0009987ce495283b36376"
+  },
+  {
+    "action": "UPDATE",
+    "locale": "hu",
+    "version": 1,
+    "id": "d201c9b1-60cb-48b9-ba64-1f7ea6e6fbee",
+    "status": "PUBLISHED",
+    "publishedAt": "2026-09-01T12:30:34.449Z",
+    "contentHash": "b15fbff8bcffe938ce77bb1c63b6bb0b4ace7ce0b1cee0f08e588e2640a67689"
+  },
+  {
+    "action": "UPDATE",
+    "locale": "de",
+    "version": 1,
+    "id": "0ef49240-7f46-4799-a79e-e11d32152188",
+    "status": "PUBLISHED",
+    "publishedAt": "2026-09-01T12:30:34.449Z",
+    "contentHash": "68fccfa6b1836c7827f5fa07a2cec7aa22eca0c5b76b5ebf21f508c3ef637f3e"
+  },
+  {
+    "action": "UPDATE",
+    "locale": "cs",
+    "version": 1,
+    "id": "3ce29a90-3945-4159-98ee-de8250867141",
+    "status": "PUBLISHED",
+    "publishedAt": "2026-09-01T12:30:34.449Z",
+    "contentHash": "bbcce139280dda4476dc7944e2f595fc39828ff77b99a0a995305eaf37e4b1c8"
+  },
+  {
+    "action": "UPDATE",
+    "locale": "uk",
+    "version": 1,
+    "id": "4f754c2b-8fef-4f73-adc0-3529f15154e4",
+    "status": "PUBLISHED",
+    "publishedAt": "2026-08-21T22:17:47.800Z",
+    "contentHash": "2f9b9c49ead1ea946dd1feacbe949209420d27b3d9e537cb228419d57c07518f"
+  }
+]

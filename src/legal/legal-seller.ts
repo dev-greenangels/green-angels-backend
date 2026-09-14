@@ -1,4 +1,5 @@
 import type { CartCheckoutSettings } from '../settings/cart-checkout.types'
+import type { CountrySiteCode, MarketSettings } from '../settings/market.types'
 import type { StoreContactSettings } from '../settings/settings.constants'
 
 export type LegalSellerIdentity = {
@@ -23,6 +24,8 @@ const EMPTY_SELLER: LegalSellerIdentity = {
   taxStatus: '',
 }
 
+const SUPPORT_LABELS = ['підтримка', 'support', 'kontakt', 'contact'] as const
+
 function trimField(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -37,16 +40,38 @@ function findLabeledContact<T extends { label: string }>(
   )
 }
 
-/** Public support email from store.contact (label «support» / «kontakt» / first entry). */
-export function resolveSupportEmail(
-  store: Pick<StoreContactSettings, 'emails'>,
-): string {
+function normalizeCountrySiteCode(raw: string | null | undefined): CountrySiteCode | null {
+  const code = (raw ?? '').trim().toLowerCase()
+  if (code === 'sk' || code === 'hu' || code === 'at') return code
+  return null
+}
+
+function pickStoreSupportEmail(store: Pick<StoreContactSettings, 'emails'>): string {
   const emails = (store.emails ?? []).filter((item) => item.email?.trim())
   return (
-    findLabeledContact(emails, ['підтримка', 'support', 'kontakt', 'contact'])?.email.trim() ??
+    findLabeledContact(emails, [...SUPPORT_LABELS])?.email.trim() ??
     emails[0]?.email.trim() ??
     ''
   )
+}
+
+/**
+ * Customer-facing support email.
+ * SK multi-domain: countrySites.{sk|hu|at}.supportEmail when set; else store.contact.
+ * Never hardcodes a domain mailbox.
+ */
+export function resolveSupportEmail(
+  store: Pick<StoreContactSettings, 'emails'>,
+  market?: Pick<MarketSettings, 'region' | 'countrySites'> | null,
+  countrySiteCode?: string | null,
+): string {
+  const code = normalizeCountrySiteCode(countrySiteCode)
+  if (market?.region === 'sk' && code) {
+    const site = market.countrySites?.find((row) => row.code === code && row.enabled)
+    const fromSite = site?.supportEmail?.trim() || ''
+    if (fromSite) return fromSite
+  }
+  return pickStoreSupportEmail(store)
 }
 
 export function resolveLegalSeller(

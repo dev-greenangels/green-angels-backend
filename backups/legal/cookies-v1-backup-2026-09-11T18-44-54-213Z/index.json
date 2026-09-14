@@ -1,0 +1,83 @@
+{
+  "documentId": "251badca-7c6a-45b3-8857-0804be8656ee",
+  "revisions": [
+    {
+      "id": "8964e525-e5e9-4a6d-b4c4-28d2c538d651",
+      "locale": "cs",
+      "version": 1,
+      "status": "PUBLISHED",
+      "title": "Cookie policy",
+      "publishedAt": "2026-09-01T12:30:34.449Z",
+      "effectiveAt": "2026-09-01T12:30:34.449Z",
+      "createdAt": "2026-09-01T12:30:34.541Z",
+      "updatedAt": "2026-09-03T15:19:31.079Z",
+      "contentHash": "af4b2047d62072c33f957114713b9d1c9d784f674d9c96d68952edcd7fd42381",
+      "introPreview": "This page explains which cookies the site uses, for what purpose, and how to manage your consent."
+    },
+    {
+      "id": "3a3eb38f-0a1d-4758-b9de-3cbf187351a9",
+      "locale": "de",
+      "version": 1,
+      "status": "PUBLISHED",
+      "title": "Cookie-Richtlinie",
+      "publishedAt": "2026-09-01T12:30:34.449Z",
+      "effectiveAt": "2026-09-01T12:30:34.449Z",
+      "createdAt": "2026-09-01T12:30:34.502Z",
+      "updatedAt": "2026-09-03T15:19:31.058Z",
+      "contentHash": "8be9701a2a37dcfb9053ceb2df5643f64ab9068577a789221ac46f74c964f97c",
+      "introPreview": "Diese Seite erläutert, welche Cookies die Website verwendet, zu welchem Zweck und wie Sie Ihre Einwilligung verwalten."
+    },
+    {
+      "id": "ee4ccd1f-912a-4135-843e-a7ab9cef9a36",
+      "locale": "en",
+      "version": 1,
+      "status": "PUBLISHED",
+      "title": "Cookie policy",
+      "publishedAt": "2026-08-21T22:17:47.800Z",
+      "effectiveAt": "2026-08-21T22:17:47.800Z",
+      "createdAt": "2026-08-21T22:17:47.817Z",
+      "updatedAt": "2026-09-03T15:19:31.048Z",
+      "contentHash": "c44e52aea715ca9cef77b19ba69916787282705339a8cfceb3e83cfb91fe619c",
+      "introPreview": "Cookies are small text files. This policy explains which categories we use and how you can manage consent under ePrivacy"
+    },
+    {
+      "id": "d1ddb9f2-e252-4614-ab81-3532e096f739",
+      "locale": "hu",
+      "version": 1,
+      "status": "PUBLISHED",
+      "title": "Süti szabályzat",
+      "publishedAt": "2026-09-01T12:30:34.449Z",
+      "effectiveAt": "2026-09-01T12:30:34.449Z",
+      "createdAt": "2026-09-01T12:30:34.524Z",
+      "updatedAt": "2026-09-03T15:19:31.070Z",
+      "contentHash": "85d6254e0a4f9566b062c3893b3ba85918a95a740266a7f31aa70947ef65ff75",
+      "introPreview": "Ez az oldal ismerteti, milyen sütiket használ az oldal, milyen célból, és hogyan kezelheti hozzájárulását."
+    },
+    {
+      "id": "b7d30a4d-e790-442f-8a80-dfc45d38b58a",
+      "locale": "sk",
+      "version": 1,
+      "status": "PUBLISHED",
+      "title": "Politika súborov cookie",
+      "publishedAt": "2026-08-21T22:17:47.800Z",
+      "effectiveAt": "2026-08-21T22:17:47.800Z",
+      "createdAt": "2026-08-21T22:17:47.816Z",
+      "updatedAt": "2026-09-03T15:19:31.022Z",
+      "contentHash": "255afa456ee0d2551b482e7bc457821b9f6068142793375a190389cc5148796f",
+      "introPreview": "Cookies sú malé textové súbory. Táto politika vysvetľuje, ktoré kategórie používame a ako spravovať súhlas podľa ePrivac"
+    },
+    {
+      "id": "eb93eee3-c908-44b6-8cb0-2f516cd425eb",
+      "locale": "uk",
+      "version": 1,
+      "status": "PUBLISHED",
+      "title": "Політика Cookie",
+      "publishedAt": "2026-08-21T22:17:47.800Z",
+      "effectiveAt": "2026-08-21T22:17:47.800Z",
+      "createdAt": "2026-08-21T22:17:47.815Z",
+      "updatedAt": "2026-09-03T15:19:31.095Z",
+      "contentHash": "52e84a200e30483ec552e73a42c9ff434c06e93dc9d280f8019cae04f458d262",
+      "introPreview": "Файли cookie та згода відповідно до ePrivacy та законодавства ЄС. Контролер: {sellerName}, IČO {ico}."
+    }
+  ]
+}

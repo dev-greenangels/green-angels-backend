@@ -109,7 +109,10 @@ export {
 } from './catalog-filters.types'
 
 export type { CartCheckoutSettings, BelowMinOrderBehavior } from './cart-checkout.types'
-export { DEFAULT_CART_CHECKOUT_SETTINGS } from './cart-checkout.types'
+export {
+  DEFAULT_CART_CHECKOUT_SETTINGS,
+  toPublicCartCheckoutSettings,
+} from './cart-checkout.types'
 
 export type StorePhoneContact = {
   label: string
@@ -216,6 +219,7 @@ export type StoreContactSettings = {
   companyDetails: StoreCompanyDetails
   /** Показувати реквізити на сторінці «Контакти» */
   showCompanyOnContacts: boolean
+  byLocale: Partial<Record<import('./localization.types').AppLocale, import('./store-contact-cms').StoreContactCmsCopy>>
 }
 
 export type HomeHighlight = {
@@ -312,6 +316,7 @@ export type HomePageSettings = {
     limit: number
     sort: HomeReviewSort
   }
+  byLocale: Partial<Record<import('./localization.types').AppLocale, import('./home-cms').HomePageCmsCopy>>
 }
 
 export const DEFAULT_MAPS_URL = ''
@@ -330,6 +335,7 @@ export const DEFAULT_STORE_SETTINGS: StoreContactSettings = {
   social: { ...DEFAULT_SOCIAL_LINKS },
   companyDetails: { ...DEFAULT_CHECKOUT_BANK_DETAILS },
   showCompanyOnContacts: false,
+  byLocale: {},
 }
 
 export const DEFAULT_CATALOG_SETTINGS: CatalogPageSettings = {
@@ -439,4 +445,5 @@ export const DEFAULT_HOME_SETTINGS: HomePageSettings = {
     limit: 8,
     sort: 'newest',
   },
+  byLocale: {},
 }

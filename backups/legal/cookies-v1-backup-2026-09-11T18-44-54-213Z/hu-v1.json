@@ -1,0 +1,50 @@
+{
+  "id": "d1ddb9f2-e252-4614-ab81-3532e096f739",
+  "locale": "hu",
+  "version": 1,
+  "status": "PUBLISHED",
+  "title": "Süti szabályzat",
+  "intro": "Ez az oldal ismerteti, milyen sütiket használ az oldal, milyen célból, és hogyan kezelheti hozzájárulását.",
+  "content": [
+    {
+      "heading": "Mik azok a sütik",
+      "body": [
+        "A sütik kis szöveges fájlok, amelyeket a böngésző tárol, amikor meglátogatja az oldalt. Segítenek a helyes működésben és a beállítások megjegyzésében."
+      ]
+    },
+    {
+      "heading": "Hogyan használjuk a sütiket",
+      "body": [
+        "Szükséges sütik: az oldal alapműködéséhez kellenek (pl. kosár, bejelentkezés/munkamenet, nyelv és a sütihozzájárulás mentése). Ezt a kategóriát a hozzájárulás-kezelőben nem lehet kikapcsolni.",
+        "Analitikai sütik/technológiák: opcionálisak. Segítenek megérteni, hogyan használják a látogatók az oldalt (jelenleg beleértve a Vercel Analytics szolgáltatást). Csak az Analitika hozzájárulás után aktívak. A Google Analytics 4 jelenleg nem aktív.",
+        "Marketing sütik/technológiák: opcionálisak. Hirdetésmérésre, konverziómérésre és kapcsolódó hirdetési funkciókra használhatók, ha be vannak kapcsolva. Csak a Marketing hozzájárulás után aktívak. A Google Ads és a Google Ads konverziók jelenleg nincsenek implementálva, és nem gyűjtenek adatokat.",
+        "A Google Tag Managert címkekezelő eszközként használjuk. Maga a Tag Manager nem hirdetési szolgáltatás; a jóváhagyott mérési és marketing címkéket a hozzájárulása szerint vezérli."
+      ]
+    },
+    {
+      "heading": "Az Ön választása",
+      "body": [
+        "Döntése előtt az Analitika és a Marketing ki van kapcsolva; csak a szükséges sütik maradnak aktívak.",
+        "Az első látogatáskor elfogadhatja az összeset, megtarthatja csak a szükségeseket, vagy külön be-/kikapcsolhatja az Analitikát és a Marketinget.",
+        "Választását bármikor módosíthatja ezen az oldalon. A mentett hozzájárulás (ga-cookie-consent süti) körülbelül 180 napig érvényes, amíg nem változtatja meg. A hozzájárulási döntéseket megfelelőségi és audit célból rögzítjük."
+      ]
+    },
+    {
+      "heading": "Az Ön jogai",
+      "body": [
+        "Az analitikai vagy marketing technológiákhoz adott hozzájárulást bármikor visszavonhatja. Részletek: [[privacy|Adatvédelmi irányelvek]]."
+      ]
+    },
+    {
+      "heading": "Kapcsolat",
+      "body": [
+        "Visszavonás vagy kérelmek: {supportEmail}"
+      ]
+    }
+  ],
+  "contentHash": "85d6254e0a4f9566b062c3893b3ba85918a95a740266a7f31aa70947ef65ff75",
+  "publishedAt": "2026-09-01T12:30:34.449Z",
+  "effectiveAt": "2026-09-01T12:30:34.449Z",
+  "createdAt": "2026-09-01T12:30:34.524Z",
+  "updatedAt": "2026-09-03T15:19:31.070Z"
+}

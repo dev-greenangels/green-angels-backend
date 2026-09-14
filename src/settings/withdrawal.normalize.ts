@@ -41,7 +41,7 @@ function normalizeTemplates(raw: unknown): WithdrawalSettings['acknowledgementTe
   for (const locale of [...SUPPORTED_LOCALES]) {
     const fallback =
       DEFAULT_WITHDRAWAL_SETTINGS.acknowledgementTemplates[locale] ??
-      DEFAULT_WITHDRAWAL_SETTINGS.acknowledgementTemplates.sk!
+      DEFAULT_WITHDRAWAL_SETTINGS.acknowledgementTemplates.en!
     out[locale] = normalizeTemplate(row[locale], fallback)
   }
   return out

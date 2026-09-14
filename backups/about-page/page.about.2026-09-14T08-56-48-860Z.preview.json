@@ -1,0 +1,418 @@
+{
+  "action": "noop",
+  "marketRegion": "sk",
+  "next": {
+    "schemaVersion": 2,
+    "euApprovedContentVersion": 1,
+    "byLocale": {
+      "uk": {
+        "schemaVersion": 2,
+        "seo": {
+          "title": "Про нас | Green Angels",
+          "description": "Розсадник декоративних рослин і інтернет-магазин Green Angels — власне вирощування, зрозумілі розміри та доставка в Центральній Європі."
+        },
+        "hero": {
+          "enabled": true,
+          "title": "Про Green Angels"
+        },
+        "intro": {
+          "enabled": true,
+          "body": "<p><strong>Green Angels — розсадник декоративних рослин та інтернет-магазин, яким керує компанія Green Angels International s.r.o. зі штаб-квартирою у Словаччині.</strong></p>\n<p>Ми займаємося вирощуванням і продажем декоративних рослин для приватних садів, терас, проєктів озеленення та професійних клієнтів. Власне вирощування є важливою частиною Green Angels — ми вирощуємо рослини з особливою увагою до їхньої якості, здорового розвитку та готовності до подальшого дорощування і висаджування.</p>\n<p>У нашому асортименті є хвойні та листяні декоративні рослини, кущі, багаторічники й інші рослини, придатні для садів в умовах Центральної Європи. Асортимент постійно розширюємо відповідно до сезону та актуальної наявності.</p>\n<p>Green Angels поєднує вирощування рослин із сучасною онлайн-торгівлею. Ми прагнемо зробити купівлю рослин через інтернет зрозумілою та зручною, тому для товарів указуємо доступні розміри й варіанти, ціни, актуальну наявність та інші важливі параметри.</p>\n<p><strong>Рослини — живий товар</strong></p>\n<p>Кожна рослина унікальна. Її зовнішній вигляд, густота, забарвлення та поточна стадія росту можуть природно змінюватися залежно від пори року й конкретного екземпляра.</p>\n<p>Ми приділяємо увагу рослинам під час вирощування, зберігання та підготовки замовлень. Перед відправленням готуємо їх до транспортування з урахуванням виду, розміру та способу доставки.</p>\n<p>Наша мета — пропонувати якісні рослини разом із чіткою та практичною інформацією, щоб покупець точно розумів, рослину якого розміру та варіанта він замовляє.</p>",
+          "imageUrl": "",
+          "imageAlt": "",
+          "imageStyle": "rounded"
+        },
+        "stats": {
+          "enabled": false,
+          "title": "",
+          "subtitle": "",
+          "items": [],
+          "theses": []
+        },
+        "whyUs": {
+          "enabled": true,
+          "title": "Чому Green Angels?",
+          "body": "",
+          "benefits": [
+            "Власне вирощування — Ми вирощуємо рослини у власному розсаднику, приділяючи особливу увагу їхній якості та здоровому розвитку.",
+            "Зрозумілі розміри та варіанти — Для рослин указуємо конкретні доступні розміри, контейнери та інші параметри, щоб було зрозуміло, що саме ви замовляєте.",
+            "Актуальна наявність — Інтернет-магазин відображає актуальну пропозицію, щоб покупець отримував якомога точнішу інформацію про наявність рослин.",
+            "Широкий асортимент декоративних рослин — Хвойні, листяні декоративні рослини, кущі, багаторічники та інші рослини для різних типів садів і насаджень.",
+            "Для садів і професійних проєктів — Асортимент призначений для приватних садів, терас, проєктів озеленення та професійних клієнтів.",
+            "Ретельна підготовка до транспортування — Рослини готуємо та пакуємо з урахуванням їхнього виду, розміру та обраного способу доставки."
+          ]
+        },
+        "production": {
+          "enabled": false,
+          "title": "",
+          "cards": []
+        },
+        "markets": {
+          "enabled": true,
+          "title": "Green Angels у Європі",
+          "body": "<p>Інтернет-магазини <strong>green-angels.sk</strong>, <strong>green-angels.hu</strong> та <strong>green-angels.at</strong> працюють під управлінням компанії <strong>Green Angels International s.r.o. зі штаб-квартирою у Словаччині</strong>.</p>\n<p>Кожен інтернет-магазин адаптований до відповідного ринку за мовою, валютою та доступними способами оплати й доставки. Через наші інтернет-магазини ми обслуговуємо покупців у Словаччині, Чехії, Угорщині, Австрії та Німеччині.</p>\n<p>Незалежно від використовуваного домену оператором інтернет-магазину та продавцем залишається <strong>Green Angels International s.r.o.</strong></p>"
+        },
+        "delivery": {
+          "enabled": true,
+          "title": "Доставка рослин",
+          "body": "<p>Ми готуємо рослини до транспортування відповідно до їхнього виду, розміру та актуального стану. Для невеликих контейнерних рослин і великих екземплярів можуть використовуватися різні способи пакування та доставки.</p>\n<p>Доступні способи доставки, ціни та варіанти оплати відображаються відповідно до країни доставки та конкретного замовлення.</p>\n<p>Детальну й актуальну інформацію наведено на сторінці <strong>Доставка та оплата</strong>.</p>",
+          "cities": [],
+          "imageUrl": "",
+          "imageAlt": "",
+          "ctaLabel": "Доставка та оплата"
+        },
+        "video": {
+          "enabled": false,
+          "title": "",
+          "subtitle": "",
+          "embedUrl": ""
+        },
+        "cta": {
+          "enabled": true,
+          "primaryLabel": "Перейти до каталогу",
+          "secondaryLabel": "Контакти"
+        }
+      },
+      "en": {
+        "schemaVersion": 2,
+        "seo": {
+          "title": "About us | Green Angels",
+          "description": "Ornamental plant nursery and online store Green Angels — own production, clear sizes and delivery across Central Europe."
+        },
+        "hero": {
+          "enabled": true,
+          "title": "About Green Angels"
+        },
+        "intro": {
+          "enabled": true,
+          "body": "<p><strong>Green Angels is an ornamental plant nursery and online store operated by Green Angels International s.r.o., a company based in Slovakia.</strong></p>\n<p>We grow and sell ornamental plants for private gardens, terraces, landscaping projects and professional customers. Our own nursery production is an important part of Green Angels — we grow plants with a focus on quality, healthy development and their readiness for further cultivation and planting.</p>\n<p>Our range includes conifers, deciduous trees and shrubs, ornamental shrubs, perennials and other plants suitable for gardens in Central European conditions. We continuously expand our range according to the season and current availability.</p>\n<p>Green Angels combines plant cultivation with modern online retail. We want buying plants online to be clear and straightforward, so our product pages show available sizes and variants, prices, current availability and other important parameters.</p>\n<p><strong>Plants are living products</strong></p>\n<p>Every plant is unique. Its appearance, density, colour and current stage of growth can naturally vary depending on the season and the individual specimen.</p>\n<p>We take care of our plants throughout cultivation, storage and order preparation. Before dispatch, plants are prepared for transport according to their type, size and delivery method.</p>\n<p>Our goal is to offer quality plants together with clear and practical information, so customers can understand exactly which size and variant of plant they are ordering.</p>",
+          "imageUrl": "",
+          "imageAlt": "",
+          "imageStyle": "rounded"
+        },
+        "stats": {
+          "enabled": false,
+          "title": "",
+          "subtitle": "",
+          "items": [],
+          "theses": []
+        },
+        "whyUs": {
+          "enabled": true,
+          "title": "Why Green Angels?",
+          "body": "",
+          "benefits": [
+            "Own nursery production — We grow plants in our own nursery with a focus on quality and healthy development.",
+            "Clear sizes and variants — We show the specific available sizes, containers and other relevant parameters so that customers know what they are ordering.",
+            "Current availability — Our online store reflects the current range so customers receive the most accurate possible information about plant availability.",
+            "Wide range of ornamental plants — Conifers, deciduous trees and shrubs, ornamental shrubs, perennials and other plants for different types of gardens and plantings.",
+            "For gardens and professional projects — Our range is suitable for private gardens, terraces, landscaping projects and professional customers.",
+            "Careful preparation for transport — Plants are prepared and packed according to their type, size and selected delivery method."
+          ]
+        },
+        "production": {
+          "enabled": false,
+          "title": "",
+          "cards": []
+        },
+        "markets": {
+          "enabled": true,
+          "title": "Green Angels in Europe",
+          "body": "<p>The online stores <strong>green-angels.sk</strong>, <strong>green-angels.hu</strong> and <strong>green-angels.at</strong> are operated by <strong>Green Angels International s.r.o., a company based in Slovakia</strong>.</p>\n<p>Each online store is adapted to its respective market in terms of language, currency and available payment and delivery options. Through these stores, we serve customers in Slovakia, Czechia, Hungary, Austria and Germany.</p>\n<p>Regardless of which domain is used, the operator of the online store and the seller remains <strong>Green Angels International s.r.o.</strong></p>"
+        },
+        "delivery": {
+          "enabled": true,
+          "title": "Plant delivery",
+          "body": "<p>We prepare plants for transport according to their type, size and current condition. Smaller container-grown plants and larger specimens may require different packing and transport methods.</p>\n<p>Available delivery methods, prices and payment options are shown according to the delivery country and the individual order.</p>\n<p>Detailed and up-to-date information is available on the <strong>Shipping and payment</strong> page.</p>",
+          "cities": [],
+          "imageUrl": "",
+          "imageAlt": "",
+          "ctaLabel": "Shipping and payment"
+        },
+        "video": {
+          "enabled": false,
+          "title": "",
+          "subtitle": "",
+          "embedUrl": ""
+        },
+        "cta": {
+          "enabled": true,
+          "primaryLabel": "Browse the catalogue",
+          "secondaryLabel": "Contact us"
+        }
+      },
+      "sk": {
+        "schemaVersion": 2,
+        "seo": {
+          "title": "O nás | Green Angels",
+          "description": "Škôlka okrasných rastlín a internetový obchod Green Angels — vlastná produkcia, jasné veľkosti a doručenie v strednej Európe."
+        },
+        "hero": {
+          "enabled": true,
+          "title": "O Green Angels"
+        },
+        "intro": {
+          "enabled": true,
+          "body": "<p><strong>Green Angels je škôlka okrasných rastlín a internetový obchod prevádzkovaný spoločnosťou Green Angels International s.r.o. so sídlom na Slovensku.</strong></p>\n<p>Venujeme sa pestovaniu a predaju okrasných rastlín pre súkromné záhrady, terasy, záhradné realizácie aj profesionálnych zákazníkov. Vlastná produkcia je dôležitou súčasťou Green Angels — rastliny pestujeme s dôrazom na ich kvalitu, zdravý vývoj a pripravenosť na ďalšie pestovanie a výsadbu.</p>\n<p>V ponuke nájdete ihličnany, listnaté dreviny, okrasné kry, trvalky a ďalšie rastliny vhodné pre záhrady v podmienkach strednej Európy. Sortiment priebežne rozširujeme podľa sezóny a aktuálnej dostupnosti.</p>\n<p>Green Angels spája pestovanie rastlín s moderným online predajom. Chceme, aby bol nákup rastlín cez internet prehľadný a zrozumiteľný — pri produktoch preto uvádzame dostupné veľkosti a varianty, ceny, aktuálnu dostupnosť a ďalšie dôležité parametre.</p>\n<p><strong>Rastliny sú živý produkt</strong></p>\n<p>Každá rastlina je jedinečná. Jej vzhľad, hustota, vyfarbenie či aktuálna fáza rastu sa môžu prirodzene meniť podľa ročného obdobia a konkrétneho kusu.</p>\n<p>Rastlinám venujeme pozornosť počas pestovania, skladovania aj prípravy objednávok. Pred odoslaním ich pripravujeme na prepravu s ohľadom na druh, veľkosť a spôsob doručenia.</p>\n<p>Naším cieľom je ponúkať kvalitné rastliny spolu s jasnými a praktickými informáciami, ktoré zákazníkovi umožnia presne vedieť, akú veľkosť a variant rastliny si objednáva.</p>",
+          "imageUrl": "",
+          "imageAlt": "",
+          "imageStyle": "rounded"
+        },
+        "stats": {
+          "enabled": false,
+          "title": "",
+          "subtitle": "",
+          "items": [],
+          "theses": []
+        },
+        "whyUs": {
+          "enabled": true,
+          "title": "Prečo Green Angels?",
+          "body": "",
+          "benefits": [
+            "Vlastná produkcia — Pestovaniu rastlín sa venujeme priamo v našej škôlke s dôrazom na ich kvalitu a zdravý vývoj.",
+            "Jasné veľkosti a varianty — Pri rastlinách zobrazujeme konkrétne dostupné veľkosti, kontajnery a ďalšie parametre, aby bolo zrejmé, čo si objednávate.",
+            "Aktuálna dostupnosť — Internetový obchod prepájame s aktuálnou ponukou, aby mal zákazník čo najpresnejšiu informáciu o dostupných rastlinách.",
+            "Široký sortiment okrasných rastlín — Ihličnany, listnaté dreviny, okrasné kry, trvalky a ďalšie rastliny pre rôzne typy záhrad a výsadieb.",
+            "Pre záhrady aj profesionálne realizácie — Sortiment je určený pre súkromné záhrady, terasy, záhradné realizácie aj profesionálnych zákazníkov.",
+            "Starostlivá príprava na prepravu — Rastliny pripravujeme a balíme s ohľadom na ich druh, veľkosť a zvolený spôsob dopravy."
+          ]
+        },
+        "production": {
+          "enabled": false,
+          "title": "",
+          "cards": []
+        },
+        "markets": {
+          "enabled": true,
+          "title": "Green Angels v Európe",
+          "body": "<p>Internetové obchody <strong>green-angels.sk</strong>, <strong>green-angels.hu</strong> a <strong>green-angels.at</strong> prevádzkuje spoločnosť <strong>Green Angels International s.r.o. so sídlom na Slovensku</strong>.</p>\n<p>Jednotlivé internetové obchody sú prispôsobené príslušnému trhu — jazykom, menou a dostupnými možnosťami platby a doručenia. Prostredníctvom nich obsluhujeme zákazníkov na Slovensku, v Česku, Maďarsku, Rakúsku a Nemecku.</p>\n<p>Bez ohľadu na použitú doménu zostáva prevádzkovateľom internetového obchodu a predávajúcim <strong>Green Angels International s.r.o.</strong></p>"
+        },
+        "delivery": {
+          "enabled": true,
+          "title": "Dodávka rastlín",
+          "body": "<p>Rastliny pripravujeme na prepravu podľa ich druhu, veľkosti a aktuálneho stavu. Menšie kontajnerované rastliny a väčšie exempláre môžu vyžadovať odlišný spôsob balenia a dopravy.</p>\n<p>Dostupné spôsoby dopravy, ceny a možnosti platby sa zobrazujú podľa krajiny doručenia a konkrétnej objednávky.</p>\n<p>Podrobné a aktuálne informácie nájdete na stránke <strong>Doprava a platba</strong>.</p>",
+          "cities": [],
+          "imageUrl": "",
+          "imageAlt": "",
+          "ctaLabel": "Doprava a platba"
+        },
+        "video": {
+          "enabled": false,
+          "title": "",
+          "subtitle": "",
+          "embedUrl": ""
+        },
+        "cta": {
+          "enabled": true,
+          "primaryLabel": "Prejsť do katalógu",
+          "secondaryLabel": "Kontaktujte nás"
+        }
+      },
+      "hu": {
+        "schemaVersion": 2,
+        "seo": {
+          "title": "Rólunk | Green Angels",
+          "description": "Dísznövény-iskola és webáruház — Green Angels saját termesztéssel, átlátható méretekkel és szállítással Közép-Európában."
+        },
+        "hero": {
+          "enabled": true,
+          "title": "A Green Angelsről"
+        },
+        "intro": {
+          "enabled": true,
+          "body": "<p><strong>A Green Angels dísznövény-iskola és webáruház, amelyet a szlovákiai székhelyű Green Angels International s.r.o. üzemeltet.</strong></p>\n<p>Dísznövények termesztésével és értékesítésével foglalkozunk magánkertek, teraszok, kertépítési projektek és professzionális vásárlók számára. A saját termesztés a Green Angels fontos része — növényeinket a minőségre, az egészséges fejlődésre, valamint a további nevelésre és kiültetésre való megfelelő felkészítésre összpontosítva termesztjük.</p>\n<p>Kínálatunkban tűlevelűek, lombhullató fák és cserjék, díszcserjék, évelők és más, közép-európai körülmények között megfelelő kerti növények találhatók. Kínálatunkat folyamatosan bővítjük a szezonnak és az aktuális elérhetőségnek megfelelően.</p>\n<p>A Green Angels a növénytermesztést modern online értékesítéssel kapcsolja össze. Fontos számunkra, hogy az online növényvásárlás átlátható és érthető legyen, ezért a termékeknél feltüntetjük az elérhető méreteket és változatokat, az árakat, az aktuális készletinformációkat és más fontos paramétereket.</p>\n<p><strong>A növény élő termék</strong></p>\n<p>Minden növény egyedi. Megjelenése, sűrűsége, színe és aktuális fejlődési állapota természetes módon változhat az évszaktól és az adott példánytól függően.</p>\n<p>A növényekre a termesztés, a tárolás és a rendelések előkészítése során is figyelmet fordítunk. Feladás előtt a növényeket fajuknak, méretüknek és a szállítás módjának megfelelően készítjük elő.</p>\n<p>Célunk, hogy minőségi növényeket kínáljunk világos és praktikus információkkal együtt, hogy vásárlóink pontosan tudják, milyen méretű és változatú növényt rendelnek.</p>",
+          "imageUrl": "",
+          "imageAlt": "",
+          "imageStyle": "rounded"
+        },
+        "stats": {
+          "enabled": false,
+          "title": "",
+          "subtitle": "",
+          "items": [],
+          "theses": []
+        },
+        "whyUs": {
+          "enabled": true,
+          "title": "Miért a Green Angels?",
+          "body": "",
+          "benefits": [
+            "Saját termesztés — Növényeinket saját faiskolánkban termesztjük, különös figyelmet fordítva a minőségre és az egészséges fejlődésre.",
+            "Egyértelmű méretek és változatok — A növényeknél feltüntetjük a konkrétan elérhető méreteket, konténereket és egyéb paramétereket, hogy egyértelmű legyen, mit rendel.",
+            "Aktuális elérhetőség — Webáruházunk az aktuális kínálatot tükrözi, hogy vásárlóink minél pontosabb információt kapjanak a növények elérhetőségéről.",
+            "Dísznövények széles választéka — Tűlevelűek, lombhullató fák és cserjék, díszcserjék, évelők és más növények különböző kertekhez és kiültetésekhez.",
+            "Kertekhez és professzionális projektekhez — Kínálatunk magánkertekhez, teraszokhoz, kertépítési projektekhez és professzionális vásárlók számára egyaránt alkalmas.",
+            "Gondos előkészítés a szállításra — A növényeket fajuknak, méretüknek és a választott szállítási módnak megfelelően készítjük elő és csomagoljuk."
+          ]
+        },
+        "production": {
+          "enabled": false,
+          "title": "",
+          "cards": []
+        },
+        "markets": {
+          "enabled": true,
+          "title": "Green Angels Európában",
+          "body": "<p>A <strong>green-angels.sk</strong>, <strong>green-angels.hu</strong> és <strong>green-angels.at</strong> webáruházakat a <strong>Green Angels International s.r.o., szlovákiai székhelyű társaság</strong> üzemelteti.</p>\n<p>Az egyes webáruházak nyelve, pénzneme, valamint elérhető fizetési és szállítási lehetőségei az adott piachoz igazodnak. Webáruházainkon keresztül Szlovákiában, Csehországban, Magyarországon, Ausztriában és Németországban szolgálunk ki vásárlókat.</p>\n<p>A használt domaintől függetlenül a webáruház üzemeltetője és az eladó a <strong>Green Angels International s.r.o.</strong></p>"
+        },
+        "delivery": {
+          "enabled": true,
+          "title": "Növények szállítása",
+          "body": "<p>A növényeket fajuk, méretük és aktuális állapotuk alapján készítjük elő a szállításra. A kisebb konténeres növények és a nagyobb példányok eltérő csomagolási és szállítási módot igényelhetnek.</p>\n<p>Az elérhető szállítási módok, árak és fizetési lehetőségek a szállítási ország és az adott rendelés alapján jelennek meg.</p>\n<p>Részletes és aktuális információk a <strong>Szállítás és fizetés</strong> oldalon találhatók.</p>",
+          "cities": [],
+          "imageUrl": "",
+          "imageAlt": "",
+          "ctaLabel": "Szállítás és fizetés"
+        },
+        "video": {
+          "enabled": false,
+          "title": "",
+          "subtitle": "",
+          "embedUrl": ""
+        },
+        "cta": {
+          "enabled": true,
+          "primaryLabel": "Tovább a katalógushoz",
+          "secondaryLabel": "Kapcsolat"
+        }
+      },
+      "de": {
+        "schemaVersion": 2,
+        "seo": {
+          "title": "Über uns | Green Angels",
+          "description": "Baumschule für Zierpflanzen und Online-Shop Green Angels — eigene Produktion, klare Größen und Versand in Mitteleuropa."
+        },
+        "hero": {
+          "enabled": true,
+          "title": "Über Green Angels"
+        },
+        "intro": {
+          "enabled": true,
+          "body": "<p><strong>Green Angels ist eine Baumschule für Zierpflanzen und ein Online-Shop, betrieben von der Green Angels International s.r.o. mit Sitz in der Slowakei.</strong></p>\n<p>Wir beschäftigen uns mit der Anzucht und dem Verkauf von Zierpflanzen für private Gärten, Terrassen, Garten- und Landschaftsbauprojekte sowie professionelle Kunden. Die eigene Pflanzenproduktion ist ein wichtiger Bestandteil von Green Angels — bei der Anzucht legen wir besonderen Wert auf Qualität, eine gesunde Entwicklung und die gute Vorbereitung der Pflanzen für die weitere Kultur und Pflanzung.</p>\n<p>Unser Sortiment umfasst Nadelgehölze, Laubgehölze, Ziersträucher, Stauden und weitere Pflanzen, die für mitteleuropäische Gartenbedingungen geeignet sind. Das Sortiment wird entsprechend der Saison und der aktuellen Verfügbarkeit laufend erweitert.</p>\n<p>Green Angels verbindet Pflanzenkultur mit modernem Online-Handel. Der Online-Kauf von Pflanzen soll übersichtlich und verständlich sein. Deshalb zeigen wir bei unseren Produkten verfügbare Größen und Varianten, Preise, die aktuelle Verfügbarkeit sowie weitere wichtige Parameter.</p>\n<p><strong>Pflanzen sind lebende Produkte</strong></p>\n<p>Jede Pflanze ist einzigartig. Aussehen, Dichte, Färbung und Entwicklungsstadium können sich je nach Jahreszeit und individuellem Exemplar auf natürliche Weise unterscheiden.</p>\n<p>Wir kümmern uns um die Pflanzen während der Kultur, Lagerung und Vorbereitung der Bestellungen. Vor dem Versand werden sie entsprechend ihrer Art, Größe und der gewählten Versandart für den Transport vorbereitet.</p>\n<p>Unser Ziel ist es, hochwertige Pflanzen mit klaren und praktischen Informationen anzubieten, damit Kunden genau erkennen können, welche Größe und Variante sie bestellen.</p>",
+          "imageUrl": "",
+          "imageAlt": "",
+          "imageStyle": "rounded"
+        },
+        "stats": {
+          "enabled": false,
+          "title": "",
+          "subtitle": "",
+          "items": [],
+          "theses": []
+        },
+        "whyUs": {
+          "enabled": true,
+          "title": "Warum Green Angels?",
+          "body": "",
+          "benefits": [
+            "Eigene Pflanzenproduktion — Wir kultivieren Pflanzen in unserer eigenen Baumschule und legen dabei besonderen Wert auf Qualität und eine gesunde Entwicklung.",
+            "Klare Größen und Varianten — Bei unseren Pflanzen zeigen wir konkret verfügbare Größen, Containergrößen und weitere Parameter, damit klar ist, was Sie bestellen.",
+            "Aktuelle Verfügbarkeit — Unser Online-Shop bildet das aktuelle Angebot ab, damit Kunden möglichst genaue Informationen über die Verfügbarkeit der Pflanzen erhalten.",
+            "Große Auswahl an Zierpflanzen — Nadelgehölze, Laubgehölze, Ziersträucher, Stauden und weitere Pflanzen für unterschiedliche Gärten und Pflanzungen.",
+            "Für Gärten und professionelle Projekte — Unser Sortiment eignet sich für private Gärten, Terrassen, Garten- und Landschaftsbauprojekte sowie professionelle Kunden.",
+            "Sorgfältige Versandvorbereitung — Die Pflanzen werden entsprechend ihrer Art, Größe und der gewählten Versandart vorbereitet und verpackt."
+          ]
+        },
+        "production": {
+          "enabled": false,
+          "title": "",
+          "cards": []
+        },
+        "markets": {
+          "enabled": true,
+          "title": "Green Angels in Europa",
+          "body": "<p>Die Online-Shops <strong>green-angels.sk</strong>, <strong>green-angels.hu</strong> und <strong>green-angels.at</strong> werden von der <strong>Green Angels International s.r.o. mit Sitz in der Slowakei</strong> betrieben.</p>\n<p>Die einzelnen Online-Shops sind hinsichtlich Sprache, Währung sowie der verfügbaren Zahlungs- und Versandmöglichkeiten an den jeweiligen Markt angepasst. Über unsere Online-Shops bedienen wir Kunden in der Slowakei, in Tschechien, Ungarn, Österreich und Deutschland.</p>\n<p>Unabhängig von der verwendeten Domain bleiben Betreiber des Online-Shops und Verkäufer die <strong>Green Angels International s.r.o.</strong></p>"
+        },
+        "delivery": {
+          "enabled": true,
+          "title": "Pflanzenversand",
+          "body": "<p>Wir bereiten die Pflanzen entsprechend ihrer Art, Größe und ihres aktuellen Zustands für den Transport vor. Kleinere Containerpflanzen und größere Exemplare können unterschiedliche Verpackungs- und Versandarten erfordern.</p>\n<p>Die verfügbaren Versandarten, Preise und Zahlungsmöglichkeiten werden abhängig vom Lieferland und der jeweiligen Bestellung angezeigt.</p>\n<p>Detaillierte und aktuelle Informationen finden Sie auf der Seite <strong>Versand und Zahlung</strong>.</p>",
+          "cities": [],
+          "imageUrl": "",
+          "imageAlt": "",
+          "ctaLabel": "Versand und Zahlung"
+        },
+        "video": {
+          "enabled": false,
+          "title": "",
+          "subtitle": "",
+          "embedUrl": ""
+        },
+        "cta": {
+          "enabled": true,
+          "primaryLabel": "Zum Katalog",
+          "secondaryLabel": "Kontakt"
+        }
+      },
+      "cs": {
+        "schemaVersion": 2,
+        "seo": {
+          "title": "O nás | Green Angels",
+          "description": "Školka okrasných rostlin a internetový obchod Green Angels — vlastní produkce, jasné velikosti a doručení ve střední Evropě."
+        },
+        "hero": {
+          "enabled": true,
+          "title": "O Green Angels"
+        },
+        "intro": {
+          "enabled": true,
+          "body": "<p><strong>Green Angels je školka okrasných rostlin a internetový obchod provozovaný společností Green Angels International s.r.o. se sídlem na Slovensku.</strong></p>\n<p>Věnujeme se pěstování a prodeji okrasných rostlin pro soukromé zahrady, terasy, zahradní realizace i profesionální zákazníky. Vlastní produkce je důležitou součástí Green Angels — rostliny pěstujeme s důrazem na jejich kvalitu, zdravý vývoj a připravenost k dalšímu pěstování a výsadbě.</p>\n<p>V nabídce najdete jehličnany, listnaté dřeviny, okrasné keře, trvalky a další rostliny vhodné pro zahrady ve středoevropských podmínkách. Sortiment průběžně rozšiřujeme podle sezóny a aktuální dostupnosti.</p>\n<p>Green Angels spojuje pěstování rostlin s moderním online prodejem. Chceme, aby byl nákup rostlin přes internet přehledný a srozumitelný — u produktů proto uvádíme dostupné velikosti a varianty, ceny, aktuální dostupnost a další důležité parametry.</p>\n<p><strong>Rostliny jsou živý produkt</strong></p>\n<p>Každá rostlina je jedinečná. Její vzhled, hustota, zbarvení i aktuální fáze růstu se mohou přirozeně měnit podle ročního období a konkrétního kusu.</p>\n<p>Rostlinám věnujeme pozornost během pěstování, skladování i přípravy objednávek. Před odesláním je připravujeme k přepravě s ohledem na jejich druh, velikost a způsob doručení.</p>\n<p>Naším cílem je nabízet kvalitní rostliny spolu s jasnými a praktickými informacemi, aby zákazník přesně věděl, jakou velikost a variantu rostliny objednává.</p>",
+          "imageUrl": "",
+          "imageAlt": "",
+          "imageStyle": "rounded"
+        },
+        "stats": {
+          "enabled": false,
+          "title": "",
+          "subtitle": "",
+          "items": [],
+          "theses": []
+        },
+        "whyUs": {
+          "enabled": true,
+          "title": "Proč Green Angels?",
+          "body": "",
+          "benefits": [
+            "Vlastní produkce — Rostliny pěstujeme přímo v naší školce s důrazem na jejich kvalitu a zdravý vývoj.",
+            "Jasné velikosti a varianty — U rostlin zobrazujeme konkrétní dostupné velikosti, kontejnery a další parametry, aby bylo zřejmé, co si objednáváte.",
+            "Aktuální dostupnost — Internetový obchod propojujeme s aktuální nabídkou, aby měl zákazník co nejpřesnější informace o dostupnosti rostlin.",
+            "Široký sortiment okrasných rostlin — Jehličnany, listnaté dřeviny, okrasné keře, trvalky a další rostliny pro různé typy zahrad a výsadeb.",
+            "Pro zahrady i profesionální realizace — Sortiment je určen pro soukromé zahrady, terasy, zahradní realizace i profesionální zákazníky.",
+            "Pečlivá příprava k přepravě — Rostliny připravujeme a balíme s ohledem na jejich druh, velikost a zvolený způsob dopravy."
+          ]
+        },
+        "production": {
+          "enabled": false,
+          "title": "",
+          "cards": []
+        },
+        "markets": {
+          "enabled": true,
+          "title": "Green Angels v Evropě",
+          "body": "<p>Internetové obchody <strong>green-angels.sk</strong>, <strong>green-angels.hu</strong> a <strong>green-angels.at</strong> provozuje společnost <strong>Green Angels International s.r.o. se sídlem na Slovensku</strong>.</p>\n<p>Jednotlivé internetové obchody jsou přizpůsobeny příslušnému trhu jazykem, měnou a dostupnými možnostmi platby a doručení. Jejich prostřednictvím obsluhujeme zákazníky na Slovensku, v Česku, Maďarsku, Rakousku a Německu.</p>\n<p>Bez ohledu na použitou doménu zůstává provozovatelem internetového obchodu a prodávajícím <strong>Green Angels International s.r.o.</strong></p>"
+        },
+        "delivery": {
+          "enabled": true,
+          "title": "Doručení rostlin",
+          "body": "<p>Rostliny připravujeme k přepravě podle jejich druhu, velikosti a aktuálního stavu. Menší kontejnerované rostliny a větší exempláře mohou vyžadovat odlišný způsob balení a dopravy.</p>\n<p>Dostupné způsoby dopravy, ceny a možnosti platby se zobrazují podle země doručení a konkrétní objednávky.</p>\n<p>Podrobné a aktuální informace najdete na stránce <strong>Doprava a platba</strong>.</p>",
+          "cities": [],
+          "imageUrl": "",
+          "imageAlt": "",
+          "ctaLabel": "Doprava a platba"
+        },
+        "video": {
+          "enabled": false,
+          "title": "",
+          "subtitle": "",
+          "embedUrl": ""
+        },
+        "cta": {
+          "enabled": true,
+          "primaryLabel": "Přejít do katalogu",
+          "secondaryLabel": "Kontaktujte nás"
+        }
+      }
+    }
+  }
+}

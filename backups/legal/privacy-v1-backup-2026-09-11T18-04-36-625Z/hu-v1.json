@@ -1,0 +1,60 @@
+{
+  "id": "d7289afc-b79c-4580-9c79-2e725fae0806",
+  "locale": "hu",
+  "version": 1,
+  "status": "PUBLISHED",
+  "title": "Adatvédelmi irányelvek",
+  "intro": "Ez az adatvédelmi tájékoztató teljesíti a GDPR és a 18/2018 Z. z. törvény szerinti tájékoztatási kötelezettséget.",
+  "content": [
+    {
+      "heading": "1. Adatkezelő",
+      "body": [
+        "Az adatkezelő a növénybolt üzemeltetője (a „Kapcsolat” oldalon és a Felhasználási feltételekben feltüntetett egyéni vállalkozó / jogi személy).",
+        "Személyes adatok kezelésével kapcsolatos kérdésekben kérjük, használja a „Kapcsolat” oldalon feltüntetett elérhetőségeket."
+      ]
+    },
+    {
+      "heading": "2. Milyen adatokat kezelünk",
+      "body": [
+        "Profiladatok: keresztnév, vezetéknév, apai név, telefon, e-mail, szállítási cím.",
+        "Rendelési adatok: rendelés tartalma, szállítási mód és cím, fizetési mód, állapotelőzmények.",
+        "Technikai adatok: sütik, valamint opcionális analitikai és marketing/hirdetési technológiák (csak hozzájárulás után). Ide tartozhatnak eszköz-/böngészőadatok, oldalinterakciók és a hozzájárulás állapota. A Tag Manager / dataLayer révén nem küldünk nevet, e-mailt, telefont vagy címet."
+      ]
+    },
+    {
+      "heading": "3. Cél és jogalap",
+      "body": [
+        "Az ügyféladatokat rendelések leadásához és teljesítéséhez, valamint a szállításról és támogatásról való kommunikációhoz kezeljük — szerződés teljesítése és felhasználói hozzájárulás alapján.",
+        "Az opcionális analitikai és marketing/hirdetési technológiákat csak külön hozzájárulással használjuk. A Google Tag Managert a jóváhagyott címkék vezérlésére használjuk; a Google Analytics 4 és a Google Ads jelenleg nem aktív. A hozzájárulást bármikor módosíthatja vagy visszavonhatja a Süti szabályzat oldalon."
+      ]
+    },
+    {
+      "heading": "4. Kinek adjuk át az adatokat",
+      "body": [
+        "Az adatokat megoszthatjuk szállítási fuvarozókkal, fizetési szolgáltatókkal és e-mail/SMS értesítési szolgáltatókkal — csak a rendelés teljesítéséhez szükséges mértékben.",
+        "A technikai IT-/hosting szolgáltatók közé tartozhat a Vercel (hosting és Vercel Analytics, ha van analitikai hozzájárulás), valamint a Google Tag Manager címkeinfrastruktúraként — ez önmagában nem aktiválja a Google Ads vagy a GA4 szolgáltatást.",
+        "Személyes adatokat harmadik feleknek nem értékesítünk."
+      ]
+    },
+    {
+      "heading": "5. Megőrzési idő",
+      "body": [
+        "A profiladatokat a fiók aktív ideje alatt őrizzük meg. A rendelési adatokat a könyvelési és adózási előírások által megkövetelt ideig tároljuk.",
+        "Fiókját bármikor törölheti a fiókbeállításokban — lásd az alábbi szakaszt."
+      ]
+    },
+    {
+      "heading": "6. Az Ön jogai",
+      "body": [
+        "Önnek joga van hozzáférni, helyesbíteni, törölni (anonimizálni), korlátozni és tiltakozni adatai kezelése ellen.",
+        "Adatai másolatát letöltheti, vagy törölheti fiókját az irányítópulton, a „Beállítások” → „Adatok és adatvédelem” menüpontban.",
+        "E-mail a jogok gyakorlásához (GDPR): {supportEmail}"
+      ]
+    }
+  ],
+  "contentHash": "3a43f20bdaa1ca5bd4baa79aeb28edc16d34d56d9247e9d1ceba527cf14357c7",
+  "publishedAt": "2026-09-01T12:30:34.449Z",
+  "effectiveAt": "2026-09-01T12:30:34.449Z",
+  "createdAt": "2026-09-01T12:30:34.519Z",
+  "updatedAt": "2026-09-03T15:19:31.067Z"
+}

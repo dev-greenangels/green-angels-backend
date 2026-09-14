@@ -1,0 +1,39 @@
+{
+  "id": "ee4ccd1f-912a-4135-843e-a7ab9cef9a36",
+  "locale": "en",
+  "version": 1,
+  "status": "PUBLISHED",
+  "title": "Cookie policy",
+  "intro": "Cookies are small text files. This policy explains which categories we use and how you can manage consent under ePrivacy rules.",
+  "content": [
+    {
+      "heading": "Cookie categories",
+      "body": [
+        "Necessary cookies: required for core site functions (for example cart, sign-in/session, language and storing your cookie choice). This category cannot be switched off in the consent controls.",
+        "Analytics cookies/technologies: optional. They help us understand how visitors use the site (currently including Vercel Analytics). They run only after Analytics consent. Google Analytics 4 is not currently active.",
+        "Marketing cookies/technologies: optional. They may be used for advertising measurement, conversion measurement and related advertising features when enabled. They run only after Marketing consent. Google Ads and Google Ads conversions are not currently implemented and are not actively collecting data.",
+        "We use Google Tag Manager as a tag-management tool. Tag Manager itself is not an advertising service; it helps load approved measurement and marketing tags according to your consent."
+      ]
+    },
+    {
+      "heading": "Managing consent",
+      "body": [
+        "Before you choose, Analytics and Marketing stay off; only Necessary cookies remain active.",
+        "On your first visit you can accept all, keep Necessary only, or turn Analytics and Marketing on or off independently.",
+        "You can change your choice at any time on this page. The stored consent preference cookie (ga-cookie-consent) lasts about 180 days unless you change it. We record consent choices for compliance and audit purposes."
+      ]
+    },
+    {
+      "heading": "Your rights and contact",
+      "body": [
+        "You may withdraw Analytics or Marketing consent at any time on this page. Details of personal-data processing are in the [[privacy|Privacy policy]].",
+        "To exercise GDPR rights or ask questions, contact {supportEmail}."
+      ]
+    }
+  ],
+  "contentHash": "c44e52aea715ca9cef77b19ba69916787282705339a8cfceb3e83cfb91fe619c",
+  "publishedAt": "2026-08-21T22:17:47.800Z",
+  "effectiveAt": "2026-08-21T22:17:47.800Z",
+  "createdAt": "2026-08-21T22:17:47.817Z",
+  "updatedAt": "2026-09-03T15:19:31.048Z"
+}

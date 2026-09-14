@@ -67,6 +67,7 @@ model User {
   pointsLedger                   PointsLedgerEntry[]
   legalConsentEvents             LegalConsentEvent[]
   contractWithdrawals            ContractWithdrawal[]
+  contractWithdrawalsProcessed   ContractWithdrawal[] @relation("ContractWithdrawalProcessedBy")
 
   @@unique([legacySource, legacyId])
   @@index([legacyId])
@@ -950,6 +951,23 @@ enum ContractWithdrawalStatus {
   ACCEPTED
   REJECTED
   CLOSED
+  /// Manual ops: waiting for customer to send goods back
+  WAITING_FOR_RETURN
+  /// Physical return received (not a monetary refund)
+  RETURN_RECEIVED
+  /// Accounting should refund manually outside the shop
+  REFUND_PENDING
+  /// Manager recorded that money was already returned manually — does NOT call payment APIs
+  REFUNDED
+  CANCELLED
+}
+
+/// How the manual refund was completed outside the shop (tracking only).
+enum ContractWithdrawalRefundMethod {
+  ORIGINAL_PAYMENT_METHOD
+  BANK_TRANSFER
+  CASH_OR_COD_MANUAL
+  OTHER
 }
 
 /// Consumer exercise of the right to withdraw from a distance contract (§20a / 108/2024).
@@ -975,6 +993,18 @@ model ContractWithdrawal {
   acknowledgementSubjectSnapshot String?
   acknowledgementBodySnapshot    String?                  @db.Text
   ipHash                         String?
+  /// When goods were marked received (manual ops).
+  returnReceivedAt               DateTime?
+  /// Manual refund tracking — never triggers Stripe/bank automation.
+  refundRequired                 Boolean                  @default(true)
+  refundAmount                   Decimal?                 @db.Decimal(12, 2)
+  refundCurrency                 String?
+  refundedAt                     DateTime?
+  refundMethod                   ContractWithdrawalRefundMethod?
+  refundReference                String?
+  internalNote                   String?                  @db.Text
+  processedByUserId              String?
+  processedBy                    User?                    @relation("ContractWithdrawalProcessedBy", fields: [processedByUserId], references: [id], onDelete: SetNull)
   lineItems                      ContractWithdrawalLineItem[]
   createdAt                      DateTime                 @default(now())
   updatedAt                      DateTime                 @updatedAt
@@ -985,6 +1015,7 @@ model ContractWithdrawal {
   @@index([submittedOrderNumber])
   @@index([status, submittedAt(sort: Desc)])
   @@index([submittedAt(sort: Desc)])
+  @@index([processedByUserId])
 }
 
 model ContractWithdrawalLineItem {

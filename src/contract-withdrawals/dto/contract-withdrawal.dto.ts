@@ -1,19 +1,46 @@
 import {
   IsArray,
+  IsBoolean,
   IsEmail,
   IsEnum,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
   Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator'
 import { Type } from 'class-transformer'
-import { ContractWithdrawalScope } from '@prisma/client'
+import {
+  ContractWithdrawalRefundMethod,
+  ContractWithdrawalScope,
+  ContractWithdrawalStatus,
+} from '@prisma/client'
+
+const WITHDRAWAL_STATUSES = [
+  'SUBMITTED',
+  'UNDER_REVIEW',
+  'ACCEPTED',
+  'REJECTED',
+  'CLOSED',
+  'WAITING_FOR_RETURN',
+  'RETURN_RECEIVED',
+  'REFUND_PENDING',
+  'REFUNDED',
+  'CANCELLED',
+] as const
+
+const REFUND_METHODS = [
+  'ORIGINAL_PAYMENT_METHOD',
+  'BANK_TRANSFER',
+  'CASH_OR_COD_MANUAL',
+  'OTHER',
+] as const
 
 export class CreatePublicContractWithdrawalDto {
   @IsString()
@@ -86,8 +113,8 @@ export class CreateAccountContractWithdrawalDto {
 
 export class ContractWithdrawalQueryDto {
   @IsOptional()
-  @IsIn(['SUBMITTED', 'UNDER_REVIEW', 'ACCEPTED', 'REJECTED', 'CLOSED'])
-  status?: 'SUBMITTED' | 'UNDER_REVIEW' | 'ACCEPTED' | 'REJECTED' | 'CLOSED'
+  @IsIn([...WITHDRAWAL_STATUSES])
+  status?: (typeof WITHDRAWAL_STATUSES)[number]
 
   @IsOptional()
   @Type(() => Number)
@@ -103,7 +130,42 @@ export class ContractWithdrawalQueryDto {
   pageSize?: number
 }
 
-export class UpdateContractWithdrawalStatusDto {
-  @IsIn(['SUBMITTED', 'UNDER_REVIEW', 'ACCEPTED', 'REJECTED', 'CLOSED'])
-  status!: 'SUBMITTED' | 'UNDER_REVIEW' | 'ACCEPTED' | 'REJECTED' | 'CLOSED'
+/** Manual ops update — never triggers payment provider refunds. */
+export class UpdateContractWithdrawalBackstageDto {
+  @IsIn([...WITHDRAWAL_STATUSES])
+  status!: ContractWithdrawalStatus
+
+  @IsOptional()
+  @IsBoolean()
+  refundRequired?: boolean
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  refundAmount?: number | null
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  refundCurrency?: string | null
+
+  @IsOptional()
+  @IsIn([...REFUND_METHODS])
+  refundMethod?: ContractWithdrawalRefundMethod | null
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  refundReference?: string | null
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  internalNote?: string | null
+
+  /** Explicit confirm when marking REFUNDED (manual money already returned). */
+  @ValidateIf((o: UpdateContractWithdrawalBackstageDto) => o.status === 'REFUNDED')
+  @IsBoolean()
+  confirmRefundCompleted?: boolean
 }

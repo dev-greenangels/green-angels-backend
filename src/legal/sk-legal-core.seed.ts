@@ -3,6 +3,10 @@ import type { LegalSeedEntry } from './legal-seed.types'
 const ACT_108 = 'zákona č. 108/2024 Z. z. o ochrane spotrebiteľa'
 const ACT_391 = 'zákona č. 391/2015 Z. z. o alternatívnom riešení spotrebiteľských sporov'
 
+/**
+ * TERMS entries below are legacy pre-launch drafts.
+ * SK market seed uses `terms-production-v1/content.ts` (filtered in legal-seed-registry).
+ */
 export const SK_CORE_LEGAL_SEED: LegalSeedEntry[] = [
   {
     type: 'TERMS',

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common'
 
 import { CommerceService } from '../commerce/commerce.service'
 import { PrismaService } from '../prisma/prisma.service'
@@ -24,6 +24,7 @@ import {
 import { normalizeLocalizationSettings } from './localization.normalize'
 import { normalizeRecentlyViewedSettings } from './recently-viewed.normalize'
 import { normalizeCartCheckoutSettings } from './cart-checkout.normalize'
+import { toPublicCartCheckoutSettings } from './cart-checkout.types'
 import { normalizeCatalogPageSettings } from './catalog.normalize'
 import { normalizeVariantLabelSettings } from './variant-label.normalize'
 import { normalizeMarketSettings, taxIncludedFromPriceBasis, isPhonePolicy } from './market.types'
@@ -31,6 +32,7 @@ import type { InventoryAuthorityMode } from './market.types'
 import { DispatchCalendarService } from './dispatch-calendar.service'
 import { UpdateStoreSettingsDto } from './dto/update-store-settings.dto'
 import { normalizeStoreContactSettings } from './store-contact.normalize'
+import { normalizeHomeSettings } from './home.normalize'
 import { normalizeNavigationSettings } from './navigation.normalize'
 import {
   DEFAULT_NAVIGATION_SETTINGS,
@@ -53,11 +55,15 @@ import {
   type WholesalePageCmsCopy,
   type WholesalePageSettings,
 } from './wholesale-page.types'
-import { normalizeAboutPageSettings } from './about-page.normalize'
+import { normalizeAboutPageSettings, parseStoredAboutPageSettings } from './about-page.normalize'
 import {
   type AboutPageCmsCopy,
   type AboutPageSettings,
 } from './about-page.types'
+import {
+  decideEuAboutBootstrap,
+  rawAboutLooksLikeV1,
+} from './about-eu-bootstrap'
 import type { AppLocale } from './localization.types'
 import { normalizeWithdrawalSettings } from './withdrawal.normalize'
 import {
@@ -90,12 +96,68 @@ export type BackstageSiteSettings = Omit<PublicSiteSettings, 'wholesale'> & {
   withdrawalFull: WithdrawalSettings
 }
 @Injectable()
-export class SettingsService {
+export class SettingsService implements OnModuleInit {
+  private readonly logger = new Logger(SettingsService.name)
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly commerce: CommerceService,
     private readonly dispatchCalendar: DispatchCalendarService,
   ) {}
+
+  async onModuleInit() {
+    try {
+      await this.ensureEuAboutApprovedBootstrap()
+    } catch (error) {
+      this.logger.error(
+        'About EU bootstrap failed (API continues)',
+        error instanceof Error ? error.stack : String(error),
+      )
+    }
+  }
+
+  /**
+   * SK/EU only: idempotent seed of approved About v2 into Settings.key = page.about.
+   * Never overwrites when euApprovedContentVersion matches current pack.
+   * UA region is a no-op.
+   */
+  async ensureEuAboutApprovedBootstrap(): Promise<void> {
+    const market = await this.getMarketSettings()
+    if (market.region !== 'sk') {
+      this.logger.log(`About EU bootstrap: skip-ua (region=${market.region})`)
+      return
+    }
+
+    const row = await this.prisma.settings.findUnique({
+      where: { key: SETTINGS_KEYS.ABOUT_PAGE },
+    })
+    let raw: unknown = null
+    if (row?.value?.trim()) {
+      try {
+        raw = JSON.parse(row.value) as unknown
+      } catch {
+        raw = null
+      }
+    }
+
+    const stored = parseStoredAboutPageSettings(raw ?? {}, 'sk')
+    const decision = decideEuAboutBootstrap('sk', stored, {
+      rawWasV1: rawAboutLooksLikeV1(raw),
+    })
+
+    if (decision.action === 'noop' || decision.action === 'skip-ua') {
+      this.logger.log(`About EU bootstrap: ${decision.action}`)
+      return
+    }
+
+    await this.writeSetting(
+      SETTINGS_KEYS.ABOUT_PAGE,
+      decision.next as unknown as Record<string, unknown>,
+    )
+    this.logger.log(
+      `About EU bootstrap: ${decision.action} (euApprovedContentVersion=${decision.next.euApprovedContentVersion})`,
+    )
+  }
 
   private parseJson<T extends Record<string, unknown>>(raw: string | null | undefined, fallback: T): T {
     if (!raw?.trim()) return fallback
@@ -153,8 +215,15 @@ export class SettingsService {
   }
 
   private async readStoreSettings(): Promise<StoreContactSettings> {
+    const market = await this.getMarketSettings()
     const raw = await this.readSetting(SETTINGS_KEYS.STORE, DEFAULT_STORE_SETTINGS)
-    return normalizeStoreContactSettings(raw)
+    return normalizeStoreContactSettings(raw, market.region)
+  }
+
+  private async readHomeSettings(): Promise<HomePageSettings> {
+    const market = await this.getMarketSettings()
+    const raw = await this.readSetting(SETTINGS_KEYS.HOME_PAGE, DEFAULT_HOME_SETTINGS)
+    return normalizeHomeSettings(raw, market.region)
   }
 
   async getStoreContactSettings(): Promise<StoreContactSettings> {
@@ -236,7 +305,7 @@ export class SettingsService {
     const [store, home, cart, catalog, recentlyViewed, localization, navigation, market, dispatch] =
       await Promise.all([
         this.readStoreSettings(),
-        this.readSetting(SETTINGS_KEYS.HOME_PAGE, DEFAULT_HOME_SETTINGS),
+        this.readHomeSettings(),
         this.getCartCheckoutSettings(),
         this.getCatalogPageSettings(),
         this.getRecentlyViewedSettings(),
@@ -254,7 +323,7 @@ export class SettingsService {
     return {
       store,
       home,
-      cart,
+      cart: toPublicCartCheckoutSettings(cart),
       catalog,
       recentlyViewed,
       localization,
@@ -285,15 +354,23 @@ export class SettingsService {
   }
 
   async getBackstageSettings(): Promise<BackstageSiteSettings> {
-    const [publicSettings, prestaImport, mediaWatermark, wholesale, withdrawalFull] =
+    const [publicSettings, cart, prestaImport, mediaWatermark, wholesale, withdrawalFull] =
       await Promise.all([
         this.getPublicSettings(),
+        this.getCartCheckoutSettings(),
         this.getPrestaImportSettings(),
         this.getMediaWatermarkSettings(),
         this.getWholesalePageSettings(),
         this.getWithdrawalSettings(),
       ])
-    return { ...publicSettings, wholesale, prestaImport, mediaWatermark, withdrawalFull }
+    return {
+      ...publicSettings,
+      cart,
+      wholesale,
+      prestaImport,
+      mediaWatermark,
+      withdrawalFull,
+    }
   }
 
   async getMediaWatermarkSettings(): Promise<MediaWatermarkSettings> {
@@ -324,56 +401,94 @@ export class SettingsService {
   }
 
   async updateStore(dto: UpdateStoreSettingsDto): Promise<StoreContactSettings> {
+    const market = await this.getMarketSettings()
     const current = await this.readStoreSettings()
-    const next = normalizeStoreContactSettings({
-      ...current,
-      addressLine1: dto.addressLine1 ?? current.addressLine1,
-      addressLine2: dto.addressLine2 ?? current.addressLine2,
-      mapsUrl: dto.mapsUrl ?? current.mapsUrl,
-      mapsEmbedUrl: dto.mapsEmbedUrl ?? current.mapsEmbedUrl,
-      contactBlocks: dto.contactBlocks
-        ? dto.contactBlocks.map((block) => ({
-            title: (block.title ?? '').trim(),
-            lines: block.lines.map((line) => ({
-              type: line.type,
-              label: line.label,
-              value: line.value ?? '',
-            })),
-          }))
-        : current.contactBlocks,
-      phones: dto.phones ?? current.phones,
-      emails: dto.emails ?? current.emails,
-      schedules: dto.schedules ?? current.schedules,
-      footer: dto.footer ? { ...current.footer, ...dto.footer } : current.footer,
-      social: dto.social
-        ? {
-            instagram: { ...current.social.instagram, ...dto.social.instagram },
-            facebook: { ...current.social.facebook, ...dto.social.facebook },
-            youtube: { ...current.social.youtube, ...dto.social.youtube },
-            viberCommunity: { ...current.social.viberCommunity, ...dto.social.viberCommunity },
-            telegramCommunity: {
-              ...current.social.telegramCommunity,
-              ...dto.social.telegramCommunity,
-            },
-          }
-        : current.social,
-      companyDetails: dto.companyDetails
-        ? { ...current.companyDetails, ...dto.companyDetails }
-        : current.companyDetails,
-      showCompanyOnContacts:
-        dto.showCompanyOnContacts !== undefined
-          ? dto.showCompanyOnContacts
-          : current.showCompanyOnContacts,
-    })
+    const mergedByLocale: StoreContactSettings['byLocale'] = {
+      ...current.byLocale,
+    }
+    if (dto.byLocale && typeof dto.byLocale === 'object') {
+      for (const [loc, copy] of Object.entries(dto.byLocale)) {
+        if (!copy || typeof copy !== 'object') continue
+        mergedByLocale[loc as AppLocale] = copy as import('./store-contact-cms').StoreContactCmsCopy
+      }
+    }
+
+    const next = normalizeStoreContactSettings(
+      {
+        ...current,
+        addressLine1: dto.addressLine1 ?? current.addressLine1,
+        addressLine2: dto.addressLine2 ?? current.addressLine2,
+        mapsUrl: dto.mapsUrl ?? current.mapsUrl,
+        mapsEmbedUrl: dto.mapsEmbedUrl ?? current.mapsEmbedUrl,
+        contactBlocks: dto.contactBlocks
+          ? dto.contactBlocks.map((block) => ({
+              title: (block.title ?? '').trim(),
+              lines: block.lines.map((line) => ({
+                type: line.type,
+                label: line.label,
+                value: line.value ?? '',
+              })),
+            }))
+          : current.contactBlocks,
+        phones: dto.phones ?? current.phones,
+        emails: dto.emails ?? current.emails,
+        schedules: dto.schedules ?? current.schedules,
+        footer: dto.footer ? { ...current.footer, ...dto.footer } : current.footer,
+        social: dto.social
+          ? {
+              instagram: { ...current.social.instagram, ...dto.social.instagram },
+              facebook: { ...current.social.facebook, ...dto.social.facebook },
+              youtube: { ...current.social.youtube, ...dto.social.youtube },
+              viberCommunity: { ...current.social.viberCommunity, ...dto.social.viberCommunity },
+              telegramCommunity: {
+                ...current.social.telegramCommunity,
+                ...dto.social.telegramCommunity,
+              },
+            }
+          : current.social,
+        companyDetails: dto.companyDetails
+          ? { ...current.companyDetails, ...dto.companyDetails }
+          : current.companyDetails,
+        showCompanyOnContacts:
+          dto.showCompanyOnContacts !== undefined
+            ? dto.showCompanyOnContacts
+            : current.showCompanyOnContacts,
+        byLocale: mergedByLocale,
+      },
+      market.region,
+    )
     return this.writeSetting(SETTINGS_KEYS.STORE, next)
   }
 
   async updateHomePage(patch: Partial<HomePageSettings>): Promise<HomePageSettings> {
-    const current = await this.readSetting(SETTINGS_KEYS.HOME_PAGE, DEFAULT_HOME_SETTINGS)
-    const next = this.deepMerge(
+    const market = await this.getMarketSettings()
+    const current = normalizeHomeSettings(
+      await this.readSetting(SETTINGS_KEYS.HOME_PAGE, DEFAULT_HOME_SETTINGS),
+      market.region,
+    )
+    const { byLocale: patchByLocale, ...sharedPatch } = patch
+    const mergedShared = this.deepMerge(
       current as unknown as Record<string, unknown>,
-      patch as unknown as Record<string, unknown>,
+      sharedPatch as unknown as Record<string, unknown>,
     ) as HomePageSettings
+
+    const mergedByLocale: HomePageSettings['byLocale'] = {
+      ...current.byLocale,
+    }
+    if (patchByLocale && typeof patchByLocale === 'object') {
+      for (const [loc, copy] of Object.entries(patchByLocale)) {
+        if (!copy || typeof copy !== 'object') continue
+        mergedByLocale[loc as AppLocale] = copy as import('./home-cms').HomePageCmsCopy
+      }
+    }
+
+    const next = normalizeHomeSettings(
+      {
+        ...mergedShared,
+        byLocale: mergedByLocale,
+      },
+      market.region,
+    )
     return this.writeSetting(SETTINGS_KEYS.HOME_PAGE, next)
   }
 
@@ -458,7 +573,13 @@ export class SettingsService {
       }
     }
 
-    const next = normalizeAboutPageSettings({ byLocale: mergedByLocale }, market.region)
+    const next = normalizeAboutPageSettings(
+      {
+        byLocale: mergedByLocale,
+        euApprovedContentVersion: current.euApprovedContentVersion,
+      },
+      market.region,
+    )
     return this.writeSetting(SETTINGS_KEYS.ABOUT_PAGE, next)
   }
 
@@ -470,6 +591,11 @@ export class SettingsService {
         patch as unknown as Record<string, unknown>,
       ) as CartCheckoutSettings,
     )
+    if (next.newOrderNotifyEmailEnabled && !next.newOrderNotifyEmail) {
+      throw new BadRequestException(
+        'Вкажіть коректний email для сповіщень про нове замовлення.',
+      )
+    }
     return this.writeSetting(SETTINGS_KEYS.CART_CHECKOUT, next)
   }
 

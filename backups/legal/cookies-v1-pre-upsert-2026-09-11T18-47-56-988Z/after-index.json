@@ -1,0 +1,56 @@
+[
+  {
+    "id": "8964e525-e5e9-4a6d-b4c4-28d2c538d651",
+    "locale": "cs",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Zásady používání cookies",
+    "publishedAt": "2026-09-01T12:30:34.449Z",
+    "contentHash": "42b32b507b1b9558dea7a78bb8a07ffc7671d85e3ff6a548062e553308b9bf36"
+  },
+  {
+    "id": "3a3eb38f-0a1d-4758-b9de-3cbf187351a9",
+    "locale": "de",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Cookie-Richtlinie",
+    "publishedAt": "2026-09-01T12:30:34.449Z",
+    "contentHash": "6897d3ea57c8346fd96b131905f4e472dc1d828efc55925211a51434d2ca02cc"
+  },
+  {
+    "id": "ee4ccd1f-912a-4135-843e-a7ab9cef9a36",
+    "locale": "en",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Cookie Policy",
+    "publishedAt": "2026-08-21T22:17:47.800Z",
+    "contentHash": "ca34eb243fce0c528d9f1ff318fc6dcbcbbe3490ae2823ac69914ffc2e068f89"
+  },
+  {
+    "id": "d1ddb9f2-e252-4614-ab81-3532e096f739",
+    "locale": "hu",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Cookie-szabályzat",
+    "publishedAt": "2026-09-01T12:30:34.449Z",
+    "contentHash": "624c70dea3aafdf6990fc49f85795c5958a60141cf0fc501f04aba686fbae9d8"
+  },
+  {
+    "id": "b7d30a4d-e790-442f-8a80-dfc45d38b58a",
+    "locale": "sk",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Politika súborov cookie",
+    "publishedAt": "2026-08-21T22:17:47.800Z",
+    "contentHash": "12761f8e934ad3bfbf528bba0b1ef2a6fc72cf45dce193ec0b3e62d284b9eb0a"
+  },
+  {
+    "id": "eb93eee3-c908-44b6-8cb0-2f516cd425eb",
+    "locale": "uk",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Політика використання cookies",
+    "publishedAt": "2026-08-21T22:17:47.800Z",
+    "contentHash": "6fe09af1f5740df88e261da783c8d12a8162fdf21284126774bceea1cf80cd4d"
+  }
+]

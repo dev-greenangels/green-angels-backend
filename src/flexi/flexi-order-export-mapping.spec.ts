@@ -8,6 +8,8 @@ import {
   mapPaymentMethodToFlexiCode,
   normalizeDeliveryMethodCodes,
   resolveDeliveryFlexiAbbreviation,
+  resolveFlexiDocumentStatCode,
+  resolveFlexiLineVatFields,
   toFlexiRelationCode,
 } from './flexi-order-export-mapping'
 
@@ -31,6 +33,7 @@ describe('flexi order export mapping', () => {
       'code:PREVOD',
     )
     assert.equal(toFlexiRelationCode(mapPaymentMethodToFlexiCode('dobierka')), 'code:DOBIERKA')
+    assert.equal(mapPaymentMethodToFlexiCode('pay-on-pickup'), undefined)
     assert.equal(mapPaymentMethodToFlexiCode('unknown-pay'), undefined)
   })
 
@@ -156,5 +159,82 @@ describe('flexi order export mapping', () => {
     assert.equal(document.formaDopravy, undefined)
     assert.equal(document.doprava, 'packeta-courier — Prazska 12, Praha, 877555')
     assert.equal(document.formaUhradyCis, 'code:PREVOD')
+  })
+})
+
+describe('Flexi document VAT country (stat) vs ship-to', () => {
+  it('A. SK B2C seller: stat=SK, szbDph=23', () => {
+    const stat = resolveFlexiDocumentStatCode({
+      taxRegime: 'seller',
+      taxCountryCode: 'sk',
+      deliveryCountryCode: 'sk',
+      currency: 'EUR',
+    })
+    const vat = resolveFlexiLineVatFields({
+      taxRegime: 'seller',
+      taxRatePercent: 23,
+    })
+    assert.equal(stat, 'SK')
+    assert.equal(vat.szbDph, 23)
+    assert.equal(vat.typSzbDph, undefined)
+  })
+
+  it('B. AT B2C OSS inactive: stat=SK (not AT), szbDph=23; ship-to stays deliveryCountryCode', () => {
+    const deliveryCountryCode = 'at'
+    const stat = resolveFlexiDocumentStatCode({
+      taxRegime: 'seller',
+      taxCountryCode: 'sk',
+      deliveryCountryCode,
+      currency: 'EUR',
+    })
+    const vat = resolveFlexiLineVatFields({
+      taxRegime: 'seller',
+      taxRatePercent: 23,
+    })
+    assert.equal(stat, 'SK')
+    assert.equal(vat.szbDph, 23)
+    // Address/shipping country is a separate field — exporter must keep AT for delivery.
+    assert.equal(deliveryCountryCode, 'at')
+    assert.notEqual(stat, 'AT')
+  })
+
+  it('C. DE B2C OSS inactive: stat=SK', () => {
+    assert.equal(
+      resolveFlexiDocumentStatCode({
+        taxRegime: 'seller',
+        taxCountryCode: 'sk',
+        deliveryCountryCode: 'de',
+        currency: 'EUR',
+      }),
+      'SK',
+    )
+  })
+
+  it('D. AT B2C OSS active (destination): stat=AT, szbDph from order snapshot', () => {
+    const destinationRate = 20
+    const stat = resolveFlexiDocumentStatCode({
+      taxRegime: 'destination',
+      taxCountryCode: 'at',
+      deliveryCountryCode: 'at',
+      currency: 'EUR',
+    })
+    const vat = resolveFlexiLineVatFields({
+      taxRegime: 'destination',
+      taxRatePercent: destinationRate,
+    })
+    assert.equal(stat, 'AT')
+    assert.equal(vat.szbDph, destinationRate)
+  })
+
+  it('legacy seller without taxCountryCode falls back to SK, not ship-to', () => {
+    assert.equal(
+      resolveFlexiDocumentStatCode({
+        taxRegime: 'seller',
+        taxCountryCode: null,
+        deliveryCountryCode: 'at',
+        currency: 'EUR',
+      }),
+      'SK',
+    )
   })
 })

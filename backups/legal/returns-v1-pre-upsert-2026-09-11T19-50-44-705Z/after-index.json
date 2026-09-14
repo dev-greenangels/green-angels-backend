@@ -1,0 +1,56 @@
+[
+  {
+    "id": "71c5a876-263d-4b6c-9721-5e1bf9408daa",
+    "locale": "cs",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Vrácení zboží a odstoupení od smlouvy",
+    "publishedAt": "2026-09-01T08:34:24.604Z",
+    "contentHash": "a9612ce8fba4bf8b8c0836a5af958be351c0ce5d55fb128a91880ef0b55d1d7d"
+  },
+  {
+    "id": "5fd4ea2f-541e-43f9-942c-60ad50fc464e",
+    "locale": "de",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Rückgabe und Widerrufsrecht",
+    "publishedAt": "2026-09-01T08:34:24.604Z",
+    "contentHash": "bc18d6455b51e6de48f9747dfaffcb43f7fbb3e74c101d2bc81bb8f848dfff1e"
+  },
+  {
+    "id": "a1b49fc1-5b4e-4f9e-859b-f2bee36aeb32",
+    "locale": "en",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Returns and Right of Withdrawal",
+    "publishedAt": "2026-08-21T22:17:47.800Z",
+    "contentHash": "f98602e57d5734caa73cee25af7662e3dabf364806df1a2e44b25b27e4bb6ce5"
+  },
+  {
+    "id": "1fe598a0-31a7-4bdf-bc44-b59bd9b1a61a",
+    "locale": "hu",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Termékvisszaküldés és elállási jog",
+    "publishedAt": "2026-09-01T08:34:24.604Z",
+    "contentHash": "c6eb8b243ff2d02d414a646fedab6892797adb294d55402c9f2d30f3b6130beb"
+  },
+  {
+    "id": "17d701bd-33a8-41ee-b78c-e2e0e39d058a",
+    "locale": "sk",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Vrátenie tovaru a odstúpenie od zmluvy",
+    "publishedAt": "2026-08-21T22:17:47.800Z",
+    "contentHash": "5710ebfc9ca600ee0c2b4fa2d2e8a92d2b158f7a95a865ffe72073ceb8df0f47"
+  },
+  {
+    "id": "d65734f5-4cd0-48e5-bd04-96a2dabfd51f",
+    "locale": "uk",
+    "version": 1,
+    "status": "PUBLISHED",
+    "title": "Повернення товару та відмова від договору",
+    "publishedAt": "2026-08-21T22:17:47.800Z",
+    "contentHash": "c1f4886a61b25816a64949a4694b0d422fdfe34cf245b123a7afca9e23532cf4"
+  }
+]

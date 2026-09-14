@@ -10,9 +10,15 @@ import { ConfigService } from '@nestjs/config'
 import { randomInt, randomUUID } from 'crypto'
 
 import { MailService } from '../mail/mail.service'
+import { getOtpSmsText, resolveOtpSmsLocale } from '../mail/otp-sms-labels'
 import { RedisService } from '../redis/redis.service'
 import type { OtpPurpose, PhonePolicy } from '../settings/market.types'
 import { TurboSmsService } from '../turbosms/turbosms.service'
+import {
+  CustomerErrorCode,
+  customerBadRequest,
+  customerUnauthorized,
+} from '../common/customer-error'
 import { phoneE164ToTurboSms } from './auth.utils'
 import { validatePhoneForPolicy } from './market-phone.util'
 
@@ -222,6 +228,7 @@ export class OtpService {
     phonePolicy: PhonePolicy,
     ip?: string,
     purpose: OtpPurpose = 'login',
+    locale?: string | null,
   ): Promise<void> {
     const normalizedPurpose = this.normalizePurpose(purpose)
     const normalized = this.requirePhone(phone, phonePolicy)
@@ -231,7 +238,7 @@ export class OtpService {
     const code = generateOtpCode()
     await this.storeOtp('phone', normalizedPurpose, normalized, code)
 
-    const text = `Код для Зелені Янголи: ${code}. Дійсний 5 хв. Нікому не повідомляйте.`
+    const text = getOtpSmsText(resolveOtpSmsLocale(locale), code)
 
     if (this.turboSms.isConfigured()) {
       await this.turboSms.sendSms(phoneE164ToTurboSms(normalized), text)
@@ -245,6 +252,7 @@ export class OtpService {
     ip?: string,
     purpose: OtpPurpose = 'login',
     countrySiteCode?: 'sk' | 'hu' | 'at' | null,
+    locale?: string | null,
   ): Promise<void> {
     const normalizedPurpose = this.normalizePurpose(purpose)
     const normalized = this.requireEmail(email)
@@ -255,7 +263,7 @@ export class OtpService {
     await this.storeOtp('email', normalizedPurpose, normalized, code)
 
     if (this.mail.isConfigured()) {
-      await this.mail.sendOtpEmail(normalized, code, countrySiteCode)
+      await this.mail.sendOtpEmail(normalized, code, countrySiteCode, locale)
     } else {
       this.logger.log(`[OTP dev email ${normalizedPurpose}] code stored (mail off)`)
     }
@@ -276,7 +284,10 @@ export class OtpService {
 
     const storedCode = await client.get(codeKey)
     if (!storedCode) {
-      throw new UnauthorizedException('Код прострочений або не надісланий.')
+      throw customerUnauthorized(
+        CustomerErrorCode.OTP_EXPIRED,
+        'Код прострочений або не надісланий.',
+      )
     }
 
     const attempts = Number.parseInt((await client.get(attemptsKey)) ?? '0', 10)
@@ -293,7 +304,7 @@ export class OtpService {
       if (nextAttempts === 1) {
         await client.expire(attemptsKey, this.otpTtlSec)
       }
-      throw new UnauthorizedException('Невірний код.')
+      throw customerUnauthorized(CustomerErrorCode.OTP_INVALID, 'Невірний код.')
     }
 
     await client.del(codeKey)

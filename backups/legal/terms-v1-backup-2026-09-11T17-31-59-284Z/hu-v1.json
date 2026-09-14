@@ -1,0 +1,66 @@
+{
+  "id": "d201c9b1-60cb-48b9-ba64-1f7ea6e6fbee",
+  "locale": "hu",
+  "version": 1,
+  "status": "PUBLISHED",
+  "title": "Felhasználási feltételek",
+  "intro": "These terms govern purchases at {sellerName} (IČO {ico}, DIČ {dic}, IČ DPH {icDph}, {legalAddress}) under Slovak and EU consumer law.",
+  "content": [
+    {
+      "heading": "1. General",
+      "body": [
+        "These Terms govern purchases between {sellerName} (“Seller”) and customers of the online shop.",
+        "By submitting an order you confirm you have read and accept these Terms."
+      ]
+    },
+    {
+      "heading": "2. Ordering",
+      "body": [
+        "Orders may be placed via the website, phone, or email.",
+        "We send an order confirmation to the email provided.",
+        "The Seller may refuse an order if goods are unavailable or the customer cannot be contacted."
+      ]
+    },
+    {
+      "heading": "3. Prices and payment",
+      "body": [
+        "Prices are shown in the store currency (EUR / HUF) and include VAT unless stated otherwise.",
+        "The price is fixed when the order is placed.",
+        "Available payment methods appear at checkout (e.g. card via Stripe, bank transfer, cash on delivery — as configured)."
+      ]
+    },
+    {
+      "heading": "4. Delivery",
+      "body": [
+        "Delivery uses methods available at checkout (e.g. Packeta, GLS, pickup — as configured).",
+        "Timing depends on the method and destination country.",
+        "Delivery cost follows carrier tariffs and weight / dimensions."
+      ]
+    },
+    {
+      "heading": "5. Withdrawal and complaints",
+      "body": [
+        "Consumers may withdraw from a distance contract within 14 days under EU/SK law — with possible exceptions for perishable goods (including live plants), per the returns policy.",
+        "Report transport damage promptly with photos.",
+        "Return shipping is paid by the buyer except for defective goods."
+      ]
+    },
+    {
+      "heading": "6. Warranty",
+      "body": [
+        "The Seller is responsible for planting material quality at sale.",
+        "Warranty excludes post-collection damage from improper care or weather."
+      ]
+    },
+    {
+      "heading": "7. Privacy",
+      "body": [
+        "Personal data is processed under the Privacy Policy and applicable EU/SK law.",
+        "We use data to fulfil orders and communicate; we share it with third parties only as necessary."
+      ]
+    }
+  ],
+  "contentHash": "4cdddbef1e22a3563e757ba4222ee491f0f19c4516aba044dc5d9fba8dc0b0b2",
+  "publishedAt": "2026-09-01T12:30:34.449Z",
+  "effectiveAt": "2026-09-01T12:30:34.449Z"
+}

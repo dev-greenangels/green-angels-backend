@@ -11,6 +11,11 @@ import { VariantLabelService } from '../products/variant-label.service'
 import { VARIANT_LABEL_ATTRIBUTE_SELECT } from '../products/variant-label.util'
 import { PrismaService } from '../prisma/prisma.service'
 import {
+  CustomerErrorCode,
+  customerBadRequest,
+  customerNotFound,
+} from '../common/customer-error'
+import {
   GUEST_CART_COOKIE_NAME,
   GUEST_CART_MAX_AGE_SEC,
   type CartLineDto,
@@ -173,7 +178,10 @@ export class CartsService {
     })
 
     if (rows.length !== variantIds.length) {
-      throw new BadRequestException('Один або кілька товарів недоступні для кошика.')
+      throw customerBadRequest(
+        CustomerErrorCode.CART_ITEMS_UNAVAILABLE,
+        'Один або кілька товарів недоступні для кошика.',
+      )
     }
   }
 
@@ -404,7 +412,9 @@ export class CartsService {
       },
     })
 
-    if (!cart) throw new NotFoundException('Кошик не знайдено.')
+    if (!cart) {
+      throw customerNotFound(CustomerErrorCode.CART_NOT_FOUND, 'Кошик не знайдено.')
+    }
 
     return {
       id: cart.id,

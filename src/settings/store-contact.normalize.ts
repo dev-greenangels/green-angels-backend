@@ -18,6 +18,12 @@ import {
   type StoreSocialLinks,
 } from './settings.constants'
 import { normalizeCheckoutBankDetails } from './cart-checkout.normalize'
+import type { MarketRegion } from './market.types'
+import {
+  applyStoreContactCmsCopy,
+  normalizeStoreContactByLocale,
+  primaryStoreCmsLocale,
+} from './store-contact-cms'
 
 type LegacyFooter = Partial<StoreFooterVisibility> & {
   showPhones?: boolean
@@ -201,13 +207,17 @@ function normalizeSocial(raw: LegacyStoreContact): StoreSocialLinks {
   }
 }
 
-export function normalizeStoreContactSettings(raw: LegacyStoreContact): StoreContactSettings {
+export function normalizeStoreContactSettings(
+  raw: LegacyStoreContact,
+  region: MarketRegion = 'ua',
+): StoreContactSettings {
   let contactBlocks = normalizeContactBlocks(raw)
   if (!contactBlocks.length) {
     contactBlocks = DEFAULT_CONTACT_BLOCKS
   }
 
-  return {
+  const schedules = normalizeSchedules(raw)
+  const flat: StoreContactSettings = {
     addressLine1: raw.addressLine1?.trim() || DEFAULT_STORE_SETTINGS.addressLine1,
     addressLine2: raw.addressLine2?.trim() || DEFAULT_STORE_SETTINGS.addressLine2,
     mapsUrl: raw.mapsUrl?.trim() || DEFAULT_MAPS_URL,
@@ -215,12 +225,25 @@ export function normalizeStoreContactSettings(raw: LegacyStoreContact): StoreCon
     contactBlocks,
     phones: derivePhonesFromContactBlocks(contactBlocks),
     emails: deriveEmailsFromContactBlocks(contactBlocks),
-    schedules: normalizeSchedules(raw),
+    schedules,
     footer: normalizeFooter(raw),
     social: normalizeSocial(raw),
     companyDetails: normalizeCheckoutBankDetails(
       raw.companyDetails ?? DEFAULT_STORE_COMPANY_DETAILS,
     ) as StoreCompanyDetails,
     showCompanyOnContacts: raw.showCompanyOnContacts === true,
+    byLocale: {},
+  }
+
+  const byLocale = normalizeStoreContactByLocale(raw.byLocale, flat, region)
+  const primary = primaryStoreCmsLocale(region)
+  const primaryCopy = byLocale[primary]
+  const withPrimary = primaryCopy ? applyStoreContactCmsCopy(flat, primaryCopy) : flat
+
+  return {
+    ...withPrimary,
+    phones: derivePhonesFromContactBlocks(withPrimary.contactBlocks),
+    emails: deriveEmailsFromContactBlocks(withPrimary.contactBlocks),
+    byLocale,
   }
 }

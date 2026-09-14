@@ -218,6 +218,15 @@ export type CartCheckoutSettings = {
   orderPdfEmailEnabled: boolean
   /** Заголовок PDF; порожньо — дефолт за market.region */
   orderPdfTitle: string
+  /**
+   * Дозволити «Оплата при отриманні» (`pay-on-pickup`) лише для самовивозу (`pickup`).
+   * Default OFF — не з’являється на checkout після deploy без явного увімкнення.
+   */
+  allowPayOnPickup: boolean
+  /** Email менеджеру про нове замовлення (не клієнту). */
+  newOrderNotifyEmailEnabled: boolean
+  /** Отримувач manager notification; не віддається в public settings. */
+  newOrderNotifyEmail: string
 }
 
 export const DEFAULT_CHECKOUT_BANK_DETAILS: CheckoutBankDetails = {
@@ -351,4 +360,18 @@ export const DEFAULT_CART_CHECKOUT_SETTINGS: CartCheckoutSettings = {
   orderPdfDownloadEnabled: true,
   orderPdfEmailEnabled: true,
   orderPdfTitle: '',
+  allowPayOnPickup: false,
+  newOrderNotifyEmailEnabled: false,
+  newOrderNotifyEmail: '',
+}
+
+/** Strip internal manager-notification fields from public /settings/public cart. */
+export function toPublicCartCheckoutSettings(
+  cart: CartCheckoutSettings,
+): CartCheckoutSettings {
+  return {
+    ...cart,
+    newOrderNotifyEmailEnabled: false,
+    newOrderNotifyEmail: '',
+  }
 }

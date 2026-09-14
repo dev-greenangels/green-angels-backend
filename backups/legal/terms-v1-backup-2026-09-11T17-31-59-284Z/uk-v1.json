@@ -1,0 +1,66 @@
+{
+  "id": "4f754c2b-8fef-4f73-adc0-3529f15154e4",
+  "locale": "uk",
+  "version": 1,
+  "status": "PUBLISHED",
+  "title": "Умови використання",
+  "intro": "Ці умови регулюють купівлю в інтернет-магазині {sellerName} (IČO {ico}, DIČ {dic}, IČ DPH {icDph}, {legalAddress}) відповідно до права Словацької республіки та ЄС.",
+  "content": [
+    {
+      "heading": "1. Všeobecné ustanovenia",
+      "body": [
+        "Tieto obchodné podmienky upravujú kúpu tovaru v internetovom obchode medzi {sellerName} (ďalej „Predávajúci“) a kupujúcimi.",
+        "Odoslaním objednávky kupujúci potvrdzuje, že sa s podmienkami oboznámil a súhlasí s nimi."
+      ]
+    },
+    {
+      "heading": "2. Objednávka",
+      "body": [
+        "Objednávky sa uzatvárajú cez web, telefón alebo e-mail.",
+        "Po odoslaní objednávky zasielame potvrdenie na uvedený e-mail.",
+        "Predávajúci môže objednávku odmietnuť pri nedostupnosti tovaru alebo nemožnosti kontaktovať kupujúceho."
+      ]
+    },
+    {
+      "heading": "3. Ceny a platba",
+      "body": [
+        "Ceny sú uvedené v mene obchodu (EUR / HUF) a zahŕňajú DPH, ak nie je uvedené inak.",
+        "Cena sa fixuje v okamihu odoslania objednávky.",
+        "Dostupné spôsoby platby sú zobrazené v pokladni (napr. karta online cez Stripe, bankový prevod, dobierka — podľa nastavení)."
+      ]
+    },
+    {
+      "heading": "4. Doprava",
+      "body": [
+        "Doprava prebieha spôsobmi dostupnými v pokladni (napr. Packeta, GLS, osobný odber — podľa nastavení obchodu).",
+        "Termíny závisia od zvoleného spôsobu a krajiny doručenia.",
+        "Cena dopravy sa počíta podľa taríf dopravcu a hmotnosti / rozmerov."
+      ]
+    },
+    {
+      "heading": "5. Odstúpenie a reklamácie",
+      "body": [
+        "Spotrebiteľ má právo odstúpiť od zmluvy uzatvorenej na diaľku v lehote 14 dní v súlade s právom EÚ/SR — s možnými výnimkami pre tovar podliehajúci skaze (vrátane živých rastlín), podľa aktuálneho reklamačného poriadku.",
+        "Poškodenie pri preprave hláste čo najskôr s fotodokumentáciou.",
+        "Náklady na vrátenie znáša kupujúci, okrem vád tovaru."
+      ]
+    },
+    {
+      "heading": "6. Záruka",
+      "body": [
+        "Predávajúci zodpovedá za kvalitu sadbového materiálu v čase predaja.",
+        "Záruka sa nevzťahuje na poškodenie po prevzatí vplyvom nesprávnej starostlivosti alebo počasia."
+      ]
+    },
+    {
+      "heading": "7. Ochrana údajov",
+      "body": [
+        "Spracúvanie osobných údajov upravuje Politika ochrany osobných údajov a platné právne predpisy EÚ/SR.",
+        "Údaje používame na splnenie objednávky a komunikáciu; tretím stranám ich poskytujeme len v nevyhnutnom rozsahu."
+      ]
+    }
+  ],
+  "contentHash": "515f0d86fbd9c855722cc5caaff74111b1c039d47a2133f13fc105188894bd58",
+  "publishedAt": "2026-08-21T22:17:47.800Z",
+  "effectiveAt": "2026-08-21T22:17:47.800Z"
+}

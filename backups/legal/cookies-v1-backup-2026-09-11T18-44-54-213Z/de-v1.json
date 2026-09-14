@@ -1,0 +1,50 @@
+{
+  "id": "3a3eb38f-0a1d-4758-b9de-3cbf187351a9",
+  "locale": "de",
+  "version": 1,
+  "status": "PUBLISHED",
+  "title": "Cookie-Richtlinie",
+  "intro": "Diese Seite erläutert, welche Cookies die Website verwendet, zu welchem Zweck und wie Sie Ihre Einwilligung verwalten.",
+  "content": [
+    {
+      "heading": "Was sind Cookies",
+      "body": [
+        "Cookies sind kleine Textdateien, die in Ihrem Browser gespeichert werden, wenn Sie die Website besuchen. Sie helfen der Website korrekt zu funktionieren und Ihre Einstellungen zu speichern."
+      ]
+    },
+    {
+      "heading": "Wie wir Cookies verwenden",
+      "body": [
+        "Notwendige Cookies: erforderlich für Kernfunktionen (z. B. Warenkorb, Anmeldung/Sitzung, Sprache und Speicherung Ihrer Cookie-Wahl). Diese Kategorie kann in den Einwilligungseinstellungen nicht deaktiviert werden.",
+        "Analyse-Cookies/Technologien: optional. Sie helfen uns zu verstehen, wie Besucher die Website nutzen (derzeit einschließlich Vercel Analytics). Sie werden erst nach Einwilligung zur Kategorie Analyse aktiv. Google Analytics 4 ist derzeit nicht aktiv.",
+        "Marketing-Cookies/Technologien: optional. Sie können für Werbemessung, Conversion-Messung und verwandte Werbefunktionen genutzt werden, wenn sie aktiviert sind. Sie werden erst nach Einwilligung zur Kategorie Marketing aktiv. Google Ads und Google-Ads-Conversions sind derzeit nicht implementiert und erheben keine Daten.",
+        "Wir nutzen Google Tag Manager als Tag-Management-Werkzeug. Tag Manager selbst ist keine Werbedienstleistung; er steuert freigegebene Mess- und Marketing-Tags gemäß Ihrer Einwilligung."
+      ]
+    },
+    {
+      "heading": "Ihre Wahl",
+      "body": [
+        "Vor Ihrer Entscheidung bleiben Analyse und Marketing ausgeschaltet; nur notwendige Cookies sind aktiv.",
+        "Beim ersten Besuch können Sie alles akzeptieren, nur Notwendige behalten oder Analyse und Marketing unabhängig ein- oder ausschalten.",
+        "Sie können Ihre Wahl jederzeit unten auf dieser Seite ändern. Die gespeicherte Einwilligung (Cookie ga-cookie-consent) gilt etwa 180 Tage, sofern Sie sie nicht ändern. Wir speichern Einwilligungsentscheidungen zu Compliance- und Audit-Zwecken."
+      ]
+    },
+    {
+      "heading": "Ihre Rechte",
+      "body": [
+        "Sie können Ihre Einwilligung zu Analyse- oder Marketing-Technologien jederzeit widerrufen. Details in der [[privacy|Datenschutzerklärung]]."
+      ]
+    },
+    {
+      "heading": "Kontakt",
+      "body": [
+        "Widerruf oder Anfragen: {supportEmail}"
+      ]
+    }
+  ],
+  "contentHash": "8be9701a2a37dcfb9053ceb2df5643f64ab9068577a789221ac46f74c964f97c",
+  "publishedAt": "2026-09-01T12:30:34.449Z",
+  "effectiveAt": "2026-09-01T12:30:34.449Z",
+  "createdAt": "2026-09-01T12:30:34.502Z",
+  "updatedAt": "2026-09-03T15:19:31.058Z"
+}

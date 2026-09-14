@@ -5,6 +5,16 @@ import type { CountrySiteCode } from '../settings/market.types'
 import { resolveShopPublicOrigin } from './country-hosts'
 import { MailIdentityService } from './mail-identity.service'
 import {
+  fillOtpEmailTemplate,
+  getOtpEmailCopy,
+  resolveOtpEmailLocale,
+} from './otp-email-labels'
+import {
+  fillOrderConfirmationEmailTemplate,
+  getOrderConfirmationEmailCopy,
+  resolveOrderConfirmationEmailLocale,
+} from './order-confirmation-email-labels'
+import {
   fillLifecycleEmailTemplate,
   getLifecycleEmailLabels,
   resolveLifecycleEmailLocale,
@@ -42,14 +52,12 @@ export class MailService {
     to: string,
     code: string,
     countrySiteCode?: CountrySiteCode | null,
+    locale?: string | null,
   ): Promise<void> {
-    const subject = 'Код для входу — Зелені Янголи'
-    const text = `Код для входу в Зелені Янголи: ${code}\n\nДійсний 5 хвилин. Нікому не повідомляйте цей код.`
-    const html = `
-      <p>Код для входу в <strong>Зелені Янголи</strong>:</p>
-      <p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p>
-      <p>Дійсний 5 хвилин. Нікому не повідомляйте цей код.</p>
-    `.trim()
+    const copy = getOtpEmailCopy(resolveOtpEmailLocale(locale))
+    const subject = fillOtpEmailTemplate(copy.subject, code)
+    const text = fillOtpEmailTemplate(copy.text, code)
+    const html = fillOtpEmailTemplate(copy.html, code)
 
     if (!this.isConfigured()) {
       this.logger.warn('Resend не налаштовано — OTP лист не надіслано')
@@ -93,22 +101,12 @@ export class MailService {
     })
     if (!identity) return
 
-    const isSk = input.region === 'sk'
-    const subject = isSk
-      ? `Potvrdenie objednávky ${input.orderNumber} / Order confirmation`
-      : `Підтвердження замовлення ${input.orderNumber}`
-    const text = isSk
-      ? `Ďakujeme za objednávku ${input.orderNumber}. V prílohe nájdete PDF potvrdenie.`
-      : `Дякуємо за замовлення ${input.orderNumber}. У вкладенні — PDF-підтвердження.`
-    const html = isSk
-      ? `
-      <p>Ďakujeme za objednávku <strong>${input.orderNumber}</strong>.</p>
-      <p>V prílohe nájdete PDF potvrdenie podľa požiadaviek SK/EU.</p>
-    `.trim()
-      : `
-      <p>Дякуємо за замовлення <strong>${input.orderNumber}</strong>.</p>
-      <p>У вкладенні — PDF-підтвердження замовлення.</p>
-    `.trim()
+    const copy = getOrderConfirmationEmailCopy(
+      resolveOrderConfirmationEmailLocale(input.locale),
+    )
+    const subject = fillOrderConfirmationEmailTemplate(copy.subject, input.orderNumber)
+    const text = fillOrderConfirmationEmailTemplate(copy.text, input.orderNumber)
+    const html = fillOrderConfirmationEmailTemplate(copy.html, input.orderNumber)
 
     await this.resend.send({
       from: identity.from,
@@ -412,4 +410,132 @@ export class MailService {
       html: copy.html,
     })
   }
+
+  async sendNewOrderManagerEmail(input: {
+    to: string
+    countrySiteCode?: CountrySiteCode | null
+    isTest?: boolean
+    order: {
+      orderId: string
+      orderNumber: string
+      createdAt: Date
+      totalAmount: number
+      productsSubtotal: number
+      deliveryAmount: number
+      taxAmount: number
+      currency: string
+      paymentMethod: string
+      paymentStatus: string | null
+      deliveryMethod: string
+      deliveryCountryCode: string | null
+      countrySiteCode: string | null
+      customerFirstName: string
+      customerLastName: string
+      customerEmail: string | null
+      customerPhone: string
+      itemCount: number
+      erpSyncStatus: string | null
+    }
+  }): Promise<void> {
+    if (!this.isConfigured()) {
+      this.logger.warn('Resend не налаштовано — сповіщення менеджеру про замовлення не надіслано')
+      return
+    }
+
+    const siteCode =
+      (input.countrySiteCode ?? input.order.countrySiteCode) as CountrySiteCode | null | undefined
+
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: siteCode,
+    })
+    if (!identity) return
+
+    const origin = this.getShopPublicUrl(siteCode)
+    const backstageUrl = `${origin}/backstage/orders/${input.order.orderId}`
+    const money = (n: number) =>
+      `${n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${input.order.currency}`
+    const customerName =
+      `${input.order.customerFirstName} ${input.order.customerLastName}`.trim()
+    const subjectPrefix = input.isTest ? '[TEST] ' : ''
+    const subject = `${subjectPrefix}Нове замовлення #${input.order.orderNumber} — ${money(input.order.totalAmount)}`
+
+    const lines = [
+      input.isTest ? 'Це тестове сповіщення з Backstage settings.' : 'Нове замовлення на сайті',
+      '',
+      `Замовлення: #${input.order.orderNumber}`,
+      `Дата: ${input.order.createdAt.toISOString()}`,
+      `Сайт: ${origin.replace(/^https?:\/\//, '')}`,
+      input.order.deliveryCountryCode
+        ? `Країна доставки: ${input.order.deliveryCountryCode}`
+        : null,
+      '',
+      'Клієнт:',
+      customerName,
+      input.order.customerEmail ? input.order.customerEmail : null,
+      input.order.customerPhone,
+      '',
+      `Оплата: ${input.order.paymentMethod}`,
+      `Статус оплати: ${input.order.paymentStatus ?? 'unpaid'}`,
+      `Доставка: ${input.order.deliveryMethod}`,
+      '',
+      `Товари: ${input.order.itemCount} позиції`,
+      `Сума товарів: ${money(input.order.productsSubtotal)}`,
+      `Доставка: ${money(input.order.deliveryAmount)}`,
+      `VAT: ${money(input.order.taxAmount)}`,
+      `Всього: ${money(input.order.totalAmount)}`,
+      input.order.erpSyncStatus ? `ERP: ${input.order.erpSyncStatus}` : null,
+      '',
+      `Відкрити замовлення: ${backstageUrl}`,
+    ].filter((line) => line != null)
+
+    const text = lines.join('\n')
+    const html = `
+      <div style="font-family:system-ui,sans-serif;font-size:14px;line-height:1.5;color:#111">
+        <p>${input.isTest ? 'Це тестове сповіщення з Backstage settings.' : 'Нове замовлення на сайті'}</p>
+        <p><strong>Замовлення:</strong> #${escapeHtml(input.order.orderNumber)}<br/>
+        <strong>Дата:</strong> ${escapeHtml(input.order.createdAt.toISOString())}<br/>
+        <strong>Сайт:</strong> ${escapeHtml(origin.replace(/^https?:\/\//, ''))}${
+          input.order.deliveryCountryCode
+            ? `<br/><strong>Країна доставки:</strong> ${escapeHtml(input.order.deliveryCountryCode)}`
+            : ''
+        }</p>
+        <p><strong>Клієнт</strong><br/>
+        ${escapeHtml(customerName)}<br/>
+        ${input.order.customerEmail ? `${escapeHtml(input.order.customerEmail)}<br/>` : ''}
+        ${escapeHtml(input.order.customerPhone)}</p>
+        <p><strong>Оплата:</strong> ${escapeHtml(input.order.paymentMethod)}<br/>
+        <strong>Статус оплати:</strong> ${escapeHtml(input.order.paymentStatus ?? 'unpaid')}<br/>
+        <strong>Доставка:</strong> ${escapeHtml(input.order.deliveryMethod)}</p>
+        <p>Товари: ${input.order.itemCount}<br/>
+        Сума товарів: ${escapeHtml(money(input.order.productsSubtotal))}<br/>
+        Доставка: ${escapeHtml(money(input.order.deliveryAmount))}<br/>
+        VAT: ${escapeHtml(money(input.order.taxAmount))}<br/>
+        <strong>Всього: ${escapeHtml(money(input.order.totalAmount))}</strong></p>
+        <p style="margin:24px 0">
+          <a href="${escapeHtml(backstageUrl)}"
+             style="display:inline-block;background:#4c9d1a;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none">
+            Відкрити замовлення
+          </a>
+        </p>
+      </div>
+    `
+
+    await this.resend.send({
+      from: identity.from,
+      to: input.to,
+      replyTo: identity.replyTo,
+      subject,
+      text,
+      html,
+    })
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }

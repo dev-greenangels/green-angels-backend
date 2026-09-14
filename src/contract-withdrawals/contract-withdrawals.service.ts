@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import {
+  ContractWithdrawalRefundMethod,
   ContractWithdrawalScope,
   ContractWithdrawalSource,
   ContractWithdrawalStatus,
@@ -14,6 +15,7 @@ import {
 } from '@prisma/client'
 import { createHash } from 'crypto'
 
+import { resolveSupportEmail } from '../legal/legal-seller'
 import { resolveOtpRateLimitPeerIp } from '../auth/otp.service'
 import { MailService } from '../mail/mail.service'
 import { PrismaService } from '../prisma/prisma.service'
@@ -23,16 +25,19 @@ import { SUPPORTED_LOCALES } from '../settings/localization.types'
 import type { CountrySiteCode } from '../settings/market.types'
 import { SettingsService } from '../settings/settings.service'
 import { isAccountWithdrawalActionVisible } from './contract-withdrawal-eligibility'
+import { validateManualRefundUpdate } from './contract-withdrawal-manual-refund'
 import { generateContractWithdrawalReference } from './contract-withdrawal-reference.util'
 import {
   escapeTemplateValue,
   fillWithdrawalTemplate,
   resolveWithdrawalReturnAddress,
 } from './contract-withdrawal-template'
+import { resolveWithdrawalAckTemplate } from '../settings/withdrawal.types'
 import type {
   ContractWithdrawalQueryDto,
   CreateAccountContractWithdrawalDto,
   CreatePublicContractWithdrawalDto,
+  UpdateContractWithdrawalBackstageDto,
 } from './dto/contract-withdrawal.dto'
 
 const EMAIL_RATE_MAX = 5
@@ -77,6 +82,23 @@ export type ContractWithdrawalListItem = {
   source: ContractWithdrawalSource
   locale: string
   acknowledgementSentAt: string | null
+  returnReceivedAt: string | null
+  refundRequired: boolean
+  refundAmount: number | null
+  refundCurrency: string | null
+  refundedAt: string | null
+  refundMethod: ContractWithdrawalRefundMethod | null
+  refundReference: string | null
+  internalNote: string | null
+  processedByUserId: string | null
+  /** Suggested refund snapshot from linked order (full withdrawal); informational only. */
+  orderTotals: {
+    totalAmount: number
+    productsSubtotal: number | null
+    deliveryAmount: number | null
+    currency: string
+    paymentMethod: string
+  } | null
   lineItems: Array<{
     orderItemId: string | null
     quantity: number
@@ -170,7 +192,7 @@ export class ContractWithdrawalsService {
   }
 
   private scopeLabel(scope: ContractWithdrawalScope, locale: AppLocale): string {
-    return SCOPE_LABELS[scope][locale] ?? SCOPE_LABELS[scope].sk
+    return SCOPE_LABELS[scope][locale] ?? SCOPE_LABELS[scope].en
   }
 
   private formatSubmittedAt(date: Date, locale: AppLocale): string {
@@ -193,19 +215,23 @@ export class ContractWithdrawalsService {
     scope: ContractWithdrawalScope
     partialItemsText: string | null
     lineItems: Array<{ titleSnapshot: string; quantity: number }>
+    countrySiteCode?: string | null
   }): Promise<{ subject: string; bodyText: string; bodyHtml: string }> {
     const withdrawalSettings = await this.settings.getWithdrawalSettings()
-    const store = await this.settings.getStoreContactSettings()
-    const template =
-      withdrawalSettings.acknowledgementTemplates[input.locale] ??
-      withdrawalSettings.acknowledgementTemplates.sk!
+    const [store, market] = await Promise.all([
+      this.settings.getStoreContactSettings(),
+      this.settings.getMarketSettings(),
+    ])
+    const template = resolveWithdrawalAckTemplate(
+      withdrawalSettings.acknowledgementTemplates,
+      input.locale,
+    )
     const returnAddress = resolveWithdrawalReturnAddress({
       mode: withdrawalSettings.returnAddressMode,
       customAddress: withdrawalSettings.customReturnAddress,
       store,
     })
-    const supportEmail =
-      store.emails.find((row) => row.email.trim())?.email.trim() || ''
+    const supportEmail = resolveSupportEmail(store, market, input.countrySiteCode)
     const sellerName = store.companyDetails?.organizationName?.trim() || ''
 
     let partialItems = ''
@@ -299,7 +325,23 @@ export class ContractWithdrawalsService {
     source: ContractWithdrawalSource
     locale: string
     acknowledgementSentAt: Date | null
-    order: { orderNumber: number } | null
+    returnReceivedAt: Date | null
+    refundRequired: boolean
+    refundAmount: Prisma.Decimal | null
+    refundCurrency: string | null
+    refundedAt: Date | null
+    refundMethod: ContractWithdrawalRefundMethod | null
+    refundReference: string | null
+    internalNote: string | null
+    processedByUserId: string | null
+    order: {
+      orderNumber: number
+      totalAmount: Prisma.Decimal
+      productsSubtotal: Prisma.Decimal | null
+      deliveryAmount: Prisma.Decimal | null
+      currency: string
+      paymentMethod: string
+    } | null
     lineItems: Array<{
       orderItemId: string | null
       quantity: number
@@ -323,6 +365,26 @@ export class ContractWithdrawalsService {
       source: row.source,
       locale: row.locale,
       acknowledgementSentAt: row.acknowledgementSentAt?.toISOString() ?? null,
+      returnReceivedAt: row.returnReceivedAt?.toISOString() ?? null,
+      refundRequired: row.refundRequired,
+      refundAmount: row.refundAmount != null ? Number(row.refundAmount) : null,
+      refundCurrency: row.refundCurrency,
+      refundedAt: row.refundedAt?.toISOString() ?? null,
+      refundMethod: row.refundMethod,
+      refundReference: row.refundReference,
+      internalNote: row.internalNote,
+      processedByUserId: row.processedByUserId,
+      orderTotals: row.order
+        ? {
+            totalAmount: Number(row.order.totalAmount),
+            productsSubtotal:
+              row.order.productsSubtotal != null ? Number(row.order.productsSubtotal) : null,
+            deliveryAmount:
+              row.order.deliveryAmount != null ? Number(row.order.deliveryAmount) : null,
+            currency: row.order.currency,
+            paymentMethod: row.order.paymentMethod,
+          }
+        : null,
       lineItems: row.lineItems.map((item) => ({
         orderItemId: item.orderItemId,
         quantity: item.quantity,
@@ -330,6 +392,22 @@ export class ContractWithdrawalsService {
         skuSnapshot: item.skuSnapshot,
       })),
     }
+  }
+
+  private orderInclude() {
+    return {
+      order: {
+        select: {
+          orderNumber: true,
+          totalAmount: true,
+          productsSubtotal: true,
+          deliveryAmount: true,
+          currency: true,
+          paymentMethod: true,
+        },
+      },
+      lineItems: true,
+    } as const
   }
 
   async createPublic(
@@ -606,7 +684,7 @@ export class ContractWithdrawalsService {
   async findAllBackstage(query: ContractWithdrawalQueryDto) {
     const page = query.page && query.page > 0 ? query.page : 1
     const pageSize = Math.min(query.pageSize ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
-    const where = query.status ? { status: query.status } : {}
+    const where = query.status ? { status: query.status as ContractWithdrawalStatus } : {}
 
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.contractWithdrawal.count({ where }),
@@ -615,10 +693,7 @@ export class ContractWithdrawalsService {
         orderBy: { submittedAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: {
-          order: { select: { orderNumber: true } },
-          lineItems: true,
-        },
+        include: this.orderInclude(),
       }),
     ])
 
@@ -634,28 +709,80 @@ export class ContractWithdrawalsService {
   async findOneBackstage(id: string): Promise<ContractWithdrawalListItem> {
     const row = await this.prisma.contractWithdrawal.findUnique({
       where: { id },
-      include: {
-        order: { select: { orderNumber: true } },
-        lineItems: true,
-      },
+      include: this.orderInclude(),
     })
     if (!row) throw new NotFoundException('Žiadosť nebola nájdená.')
     return this.toListItem(row)
   }
 
-  async updateStatusBackstage(
+  /**
+   * Manual ops update only. Never calls Stripe/Mono/bank refund APIs.
+   */
+  async updateBackstage(
     id: string,
-    status: ContractWithdrawalStatus,
+    dto: UpdateContractWithdrawalBackstageDto,
+    actorUserId?: string | null,
   ): Promise<ContractWithdrawalListItem> {
     const existing = await this.prisma.contractWithdrawal.findUnique({ where: { id } })
     if (!existing) throw new NotFoundException('Žiadosť nebola nájdená.')
+
+    const validated = validateManualRefundUpdate(
+      {
+        status: dto.status,
+        confirmRefundCompleted: dto.confirmRefundCompleted,
+        refundAmount: dto.refundAmount,
+        existingRefundAmount:
+          existing.refundAmount != null ? Number(existing.refundAmount) : null,
+        refundCurrency: dto.refundCurrency,
+        existingRefundCurrency: existing.refundCurrency,
+        refundMethod: dto.refundMethod,
+        existingRefundMethod: existing.refundMethod,
+      },
+      { hadReturnReceivedAt: Boolean(existing.returnReceivedAt) },
+    )
+    if (!validated.ok) {
+      throw new BadRequestException(validated.message)
+    }
+
+    const data: Prisma.ContractWithdrawalUpdateInput = {
+      status: dto.status,
+    }
+
+    if (dto.refundRequired !== undefined) data.refundRequired = dto.refundRequired
+    if (dto.refundAmount !== undefined) {
+      data.refundAmount =
+        dto.refundAmount == null ? null : new Prisma.Decimal(dto.refundAmount)
+    }
+    if (dto.refundCurrency !== undefined) {
+      data.refundCurrency = dto.refundCurrency?.trim().toUpperCase() || null
+    }
+    if (dto.refundMethod !== undefined) data.refundMethod = dto.refundMethod
+    if (dto.refundReference !== undefined) {
+      data.refundReference = dto.refundReference?.trim() || null
+    }
+    if (dto.internalNote !== undefined) {
+      data.internalNote = dto.internalNote?.trim() || null
+    }
+
+    if (validated.setReturnReceivedAt) {
+      data.returnReceivedAt = new Date()
+    }
+
+    if (validated.setRefundedAt) {
+      data.refundedAt = existing.refundedAt ?? new Date()
+      data.refundAmount = new Prisma.Decimal(validated.refundAmount!)
+      data.refundCurrency = validated.refundCurrency
+      data.refundMethod = validated.refundMethod
+    }
+
+    if (actorUserId) {
+      data.processedBy = { connect: { id: actorUserId } }
+    }
+
     const updated = await this.prisma.contractWithdrawal.update({
       where: { id },
-      data: { status },
-      include: {
-        order: { select: { orderNumber: true } },
-        lineItems: true,
-      },
+      data,
+      include: this.orderInclude(),
     })
     return this.toListItem(updated)
   }

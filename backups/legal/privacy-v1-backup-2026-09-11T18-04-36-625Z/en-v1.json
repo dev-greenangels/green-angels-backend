@@ -1,0 +1,32 @@
+{
+  "id": "fa65828f-40ca-42b1-a93f-902b821204ee",
+  "locale": "en",
+  "version": 1,
+  "status": "PUBLISHED",
+  "title": "Privacy policy",
+  "intro": "This notice explains how we process personal data under the GDPR and Slovak Act No. 18/2018 Coll.",
+  "content": [
+    {
+      "heading": "1. Orders and account",
+      "body": [
+        "To fulfil an order we process name, e-mail, phone, delivery/billing address and order contents on the basis of contract (Art. 6(1)(b) GDPR) and legal duties such as accounting (Art. 6(1)(c)).",
+        "Account data is processed to run the customer account. You may export or delete the account; legally required order records are retained."
+      ]
+    },
+    {
+      "heading": "2. Recipients, cookies and rights",
+      "body": [
+        "Carriers, payment providers, IT/hosting processors and professional advisers receive only what is needed to deliver the service. We do not sell personal data.",
+        "Necessary cookies keep the cart, session and your cookie choice working. Optional analytics technologies (currently including Vercel Analytics) and marketing/advertising technologies run only with your consent and can be changed on the Cookie policy page.",
+        "We use Google Tag Manager to manage approved measurement and marketing tags. Tag Manager itself is not advertising. Google Analytics 4 and Google Ads are not currently active; if enabled later, they will follow your consent choices.",
+        "Technical data may include device/browser information, page interactions and consent state. We do not send name, email, phone or address through Tag Manager / dataLayer.",
+        "GDPR requests: {supportEmail}. You may complain to the supervisory authority (Slovakia: https://dataprotection.gov.sk/uoou/)."
+      ]
+    }
+  ],
+  "contentHash": "bb1cfeedcfc90e43f34f11616860dea6cf640d13d2b81767dd8de1f271315e08",
+  "publishedAt": "2026-08-21T22:17:47.800Z",
+  "effectiveAt": "2026-08-21T22:17:47.800Z",
+  "createdAt": "2026-08-21T22:17:47.814Z",
+  "updatedAt": "2026-09-03T15:19:31.018Z"
+}

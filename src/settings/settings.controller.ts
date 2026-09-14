@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common'
 import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
+import { MailService } from '../mail/mail.service'
 import type {
   CartCheckoutSettings,
   CatalogPageSettings,
@@ -33,6 +34,7 @@ export class SettingsController {
   constructor(
     private readonly settings: SettingsService,
     private readonly dispatchCalendar: DispatchCalendarService,
+    private readonly mail: MailService,
   ) {}
 
   @Get('public')
@@ -120,6 +122,44 @@ export class SettingsController {
   @Roles(Role.ADMIN, Role.MANAGER)
   updateCartCheckout(@Body() dto: UpdateCartCheckoutSettingsDto) {
     return this.settings.updateCartCheckout(dto as Partial<CartCheckoutSettings>)
+  }
+
+  @Post('cart-checkout/test-new-order-notify')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  async testNewOrderNotify() {
+    const cart = await this.settings.getCartCheckoutSettings()
+    const to = cart.newOrderNotifyEmail.trim()
+    if (!to) {
+      throw new BadRequestException('Спочатку вкажіть email для сповіщень.')
+    }
+    await this.mail.sendNewOrderManagerEmail({
+      to,
+      countrySiteCode: null,
+      isTest: true,
+      order: {
+        orderId: '00000000-0000-0000-0000-000000000000',
+        orderNumber: 'ZY-00000000',
+        createdAt: new Date(),
+        totalAmount: 0,
+        productsSubtotal: 0,
+        deliveryAmount: 0,
+        taxAmount: 0,
+        currency: 'EUR',
+        paymentMethod: 'pay-on-pickup',
+        paymentStatus: null,
+        deliveryMethod: 'pickup',
+        deliveryCountryCode: 'SK',
+        countrySiteCode: null,
+        customerFirstName: 'Test',
+        customerLastName: 'Customer',
+        customerEmail: 'test@example.com',
+        customerPhone: '+421900000000',
+        itemCount: 1,
+        erpSyncStatus: null,
+      },
+    })
+    return { ok: true, to }
   }
 
   @Patch('catalog')

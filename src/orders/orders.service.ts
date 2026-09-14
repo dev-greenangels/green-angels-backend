@@ -15,6 +15,10 @@ import { PricingService } from '../pricing/pricing.service'
 import { convertEurToHuf, resolveCheckoutTax, assertDeliveryCountryAllowed, pickCartCnCode } from '../pricing/tax-regime'
 import { roundMoney } from '../pricing/pricing.helpers'
 import { DispatchCalendarService } from '../settings/dispatch-calendar.service'
+import {
+  getCheckoutPaymentRuleError,
+  isPayOnPickupPaymentMethod,
+} from '../settings/checkout-methods.constants'
 import { SettingsService } from '../settings/settings.service'
 import { PrismaService } from '../prisma/prisma.service'
 import { CommerceService } from '../commerce/commerce.service'
@@ -45,7 +49,13 @@ import { OrderIdempotencyService } from './order-idempotency.service'
 import { OrderPaymentLifecycleService } from './order-payment-lifecycle.service'
 import { StripePaymentProvider } from '../payments/stripe.payment-provider'
 import { MonopayService } from '../monopay/monopay.service'
-import { classifyFlexiError, isFlexiTransportError } from './erp-sync.errors'
+import { classifyFlexiError, erpSyncErrorCodeForKind, isFlexiTransportError } from './erp-sync.errors'
+import { resolveErpSyncStatus } from './erp-sync.constants'
+import {
+  DASHBOARD_CANCELLED_STATUS,
+  DASHBOARD_PAID_PAYMENT_STATUS,
+  shouldReleaseLocalStockOnWebsiteDelete,
+} from './order-dashboard-metrics'
 
 const PREORDER_MAX_QTY = 99
 const DEFAULT_LOCALE = 'uk'
@@ -95,6 +105,8 @@ export type BackstageOrderItem = {
   productSlug: string
   variantLabel: string | null
   sku: string | null
+  ean: string | null
+  imageUrl: string | null
 }
 
 export type BackstageOrderDetail = BackstageOrderListItem & {
@@ -102,14 +114,32 @@ export type BackstageOrderDetail = BackstageOrderListItem & {
   receiverLastName: string
   receiverPatronymic: string | null
   receiverPhone: string
+  receiverCompanyName: string | null
   deliveryMethod: string
   deliveryCity: string | null
   deliveryBranch: string | null
+  deliveryBranchLabel: string | null
   deliveryStreet: string | null
   deliveryHouseNumber: string | null
+  deliveryPostalCode: string | null
+  deliveryCountryCode: string | null
+  countrySiteCode: string | null
+  locale: string | null
   paymentMethod: string
   paymentStatus: string | null
+  paymentProvider: string | null
+  stripePaymentId: string | null
+  monopayInvoiceId: string | null
+  paidAt: string | null
+  paymentExpiresAt: string | null
+  productsSubtotal: number | null
+  deliveryAmount: number | null
+  packagingAmount: number | null
+  taxAmount: number | null
+  codFeeAmount: number | null
+  pointsDiscountAmount: number | null
   comment: string | null
+  preferredShipDate: string | null
   trackingCarrier: string | null
   npDocumentRef: string | null
   trackingSyncedAt: string | null
@@ -640,20 +670,66 @@ export class OrdersService {
     }
   }
 
-  /** Dashboard aggregates without loading order rows. */
-  async findSummary(): Promise<{ totalOrders: number; totalRevenue: number; currency: string }> {
-    const [totalOrders, agg, market] = await Promise.all([
-      this.prisma.order.count(),
-      this.prisma.order.aggregate({ _sum: { totalAmount: true } }),
-      this.settings.getMarketSettings(),
-    ])
+  /** Dashboard aggregates without loading order rows. All-time, deploy currency only. */
+  async findSummary(): Promise<{
+    totalOrders: number
+    activeOrders: number
+    cancelledOrders: number
+    /** @deprecated Prefer ordersValue — was misleading “revenue” including cancelled. */
+    totalRevenue: number
+    ordersValue: number
+    paidRevenue: number
+    averageOrderValue: number
+    currency: string
+  }> {
+    const market = await this.settings.getMarketSettings()
     const currency =
       typeof market?.defaultCurrency === 'string' && market.defaultCurrency.trim()
         ? market.defaultCurrency.trim().toUpperCase()
-        : 'UAH'
+        : 'EUR'
+
+    const currencyWhere = { currency }
+    const activeWhere = {
+      ...currencyWhere,
+      status: { not: DASHBOARD_CANCELLED_STATUS },
+    }
+    const cancelledWhere = {
+      ...currencyWhere,
+      status: DASHBOARD_CANCELLED_STATUS,
+    }
+    const paidWhere = {
+      ...activeWhere,
+      paymentStatus: DASHBOARD_PAID_PAYMENT_STATUS,
+    }
+
+    const [totalOrders, activeOrders, cancelledOrders, ordersAgg, paidAgg] =
+      await Promise.all([
+        this.prisma.order.count({ where: currencyWhere }),
+        this.prisma.order.count({ where: activeWhere }),
+        this.prisma.order.count({ where: cancelledWhere }),
+        this.prisma.order.aggregate({
+          where: activeWhere,
+          _sum: { totalAmount: true },
+        }),
+        this.prisma.order.aggregate({
+          where: paidWhere,
+          _sum: { totalAmount: true },
+        }),
+      ])
+
+    const ordersValue = Number(ordersAgg._sum.totalAmount ?? 0)
+    const paidRevenue = Number(paidAgg._sum.totalAmount ?? 0)
+    const averageOrderValue =
+      activeOrders > 0 ? Math.round((ordersValue / activeOrders) * 100) / 100 : 0
+
     return {
       totalOrders,
-      totalRevenue: Number(agg._sum.totalAmount ?? 0),
+      activeOrders,
+      cancelledOrders,
+      totalRevenue: ordersValue,
+      ordersValue,
+      paidRevenue,
+      averageOrderValue,
       currency,
     }
   }
@@ -664,6 +740,22 @@ export class OrdersService {
       include: {
         items: {
           orderBy: { id: 'asc' },
+          include: {
+            productVariant: {
+              select: {
+                ean: true,
+                product: {
+                  select: {
+                    images: {
+                      orderBy: [{ isMain: 'desc' }, { sortOrder: 'asc' }],
+                      take: 1,
+                      select: { url: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
         cancellationReason: true,
         viesCheck: true,
@@ -682,14 +774,38 @@ export class OrdersService {
       receiverLastName: order.receiverLastName,
       receiverPatronymic: order.receiverPatronymic,
       receiverPhone: order.receiverPhone,
+      receiverCompanyName: order.receiverCompanyName,
       deliveryMethod: order.deliveryMethod,
       deliveryCity: order.deliveryCity,
       deliveryBranch: order.deliveryBranch,
+      deliveryBranchLabel: order.deliveryBranchLabel,
       deliveryStreet: order.deliveryStreet,
       deliveryHouseNumber: order.deliveryHouseNumber,
+      deliveryPostalCode: order.deliveryPostalCode,
+      deliveryCountryCode: order.deliveryCountryCode,
+      countrySiteCode: order.countrySiteCode,
+      locale: order.locale,
       paymentMethod: order.paymentMethod,
       paymentStatus: order.paymentStatus,
+      paymentProvider: order.paymentProvider,
+      stripePaymentId: order.stripePaymentId,
+      monopayInvoiceId: order.monopayInvoiceId,
+      paidAt: order.paidAt?.toISOString() ?? null,
+      paymentExpiresAt: order.paymentExpiresAt?.toISOString() ?? null,
+      productsSubtotal:
+        order.productsSubtotal != null ? Number(order.productsSubtotal) : null,
+      deliveryAmount:
+        order.deliveryAmount != null ? Number(order.deliveryAmount) : null,
+      packagingAmount:
+        order.packagingAmount != null ? Number(order.packagingAmount) : null,
+      taxAmount: order.taxAmount != null ? Number(order.taxAmount) : null,
+      codFeeAmount: order.codFeeAmount != null ? Number(order.codFeeAmount) : null,
+      pointsDiscountAmount:
+        order.pointsDiscountAmount != null
+          ? Number(order.pointsDiscountAmount)
+          : null,
       comment: order.comment,
+      preferredShipDate: order.preferredShipDate?.toISOString() ?? null,
       trackingCarrier: order.trackingCarrier,
       npDocumentRef: order.npDocumentRef,
       trackingSyncedAt: order.trackingSyncedAt?.toISOString() ?? null,
@@ -735,6 +851,8 @@ export class OrdersService {
           productSlug: item.productSlug,
           variantLabel: item.variantLabel,
           sku: item.sku,
+          ean: item.productVariant?.ean ?? null,
+          imageUrl: item.productVariant?.product?.images?.[0]?.url ?? null,
         }
       }),
     }
@@ -884,13 +1002,56 @@ export class OrdersService {
     }
   }
 
-  async remove(id: string): Promise<{ ok: true }> {
-    const existing = await this.prisma.order.findUnique({ where: { id }, select: { id: true } })
+  /**
+   * Website-only hard delete. Never calls Flexi / ABRA / email / refund / NP.
+   * Cascades OrderItem / Vies / OrderPromoCode; clears PromoCodeUsage orphans;
+   * optionally restores local stock reservation.
+   */
+  async remove(
+    id: string,
+    actor?: { userId?: string },
+  ): Promise<{ ok: true }> {
+    const existing = await this.prisma.order.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        orderNumber: true,
+        erpSyncStatus: true,
+        stockReleasedAt: true,
+        paymentStatus: true,
+        stripePaymentId: true,
+        erpNativeKod: true,
+      },
+    })
     if (!existing) {
       throw new NotFoundException('Замовлення не знайдено.')
     }
 
-    await this.prisma.order.delete({ where: { id } })
+    // Drop queued export so a deleted id is never pushed to Flexi later.
+    await this.flexiQueue.removeExportOrderJob(id).catch(() => undefined)
+
+    const isExternal = await this.settings.isExternalInventoryMode()
+    const releaseLocal = shouldReleaseLocalStockOnWebsiteDelete({
+      isExternalInventory: isExternal,
+      erpSyncStatus: existing.erpSyncStatus,
+    })
+    if (releaseLocal && !existing.stockReleasedAt) {
+      await this.releaseLocalStockReservation(id)
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.promoCodeUsage.deleteMany({ where: { orderId: id } })
+      await tx.order.delete({ where: { id } })
+    })
+
+    this.logger.warn(
+      `Website order hard-delete: id=${existing.id} orderNumber=${existing.orderNumber} ` +
+        `erpSyncStatus=${existing.erpSyncStatus ?? 'null'} ` +
+        `paymentStatus=${existing.paymentStatus ?? 'null'} ` +
+        `stripe=${existing.stripePaymentId ? 'yes' : 'no'} ` +
+        `actorUserId=${actor?.userId ?? 'unknown'}`,
+    )
+
     return { ok: true }
   }
 
@@ -1216,6 +1377,110 @@ export class OrdersService {
     return this.findOne(id)
   }
 
+  /**
+   * Manual ABRA re-export for backstage. Reuses FlexiService.exportOrder
+   * (stable ext:GA:{order.id} + GET-before-PUT). Synchronous for manager UX;
+   * transport/auth failures enqueue durable retry without a blind second PUT.
+   */
+  async syncErp(id: string): Promise<BackstageOrderDetail> {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        erpSyncStatus: true,
+        externalErpId: true,
+        erpNativeId: true,
+        erpNativeKod: true,
+      },
+    })
+    if (!order) throw new NotFoundException('Замовлення не знайдено.')
+
+    if (order.status === 'CANCELLED') {
+      throw new BadRequestException(
+        'Скасоване замовлення не можна синхронізувати з ABRA.',
+      )
+    }
+
+    const erpStatus = resolveErpSyncStatus(order.erpSyncStatus)
+    if (erpStatus === 'CANCEL_PENDING_ERP' || erpStatus === 'CANCEL_SYNCED') {
+      throw new BadRequestException(
+        'Скасування ERP у процесі — ручний export недоступний.',
+      )
+    }
+
+    const hasNativeDoc = Boolean(
+      order.erpNativeId?.trim() || order.erpNativeKod?.trim(),
+    )
+    if (erpStatus === 'SYNCED' && (order.externalErpId?.trim() || hasNativeDoc)) {
+      return this.findOne(id)
+    }
+
+    if (!(await this.flexi.isConfigured())) {
+      throw new BadRequestException('ABRA Flexi не налаштовано.')
+    }
+
+    const now = new Date()
+    await this.prisma.order.update({
+      where: { id },
+      data: {
+        erpSyncStatus: 'RETRYING',
+        erpSyncAttempts: { increment: 1 },
+        erpLastSyncAt: now,
+      },
+    })
+
+    let result: { ok: boolean; message: string }
+    try {
+      result = await this.flexi.exportOrder(id)
+    } catch (error) {
+      result = {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      }
+    }
+
+    if (result.ok) {
+      return this.findOne(id)
+    }
+
+    const kind = classifyFlexiError(result.message)
+    const errorCode = erpSyncErrorCodeForKind(kind)
+
+    if (kind === 'transport' || kind === 'auth') {
+      await this.prisma.order.update({
+        where: { id },
+        data: {
+          erpSyncStatus: 'RETRYING',
+          erpLastErrorCode: errorCode,
+          erpLastErrorMessage: result.message,
+          erpLastSyncAt: now,
+        },
+      })
+      void this.flexiQueue.enqueueExportOrder(id).catch((err) => {
+        this.logger.warn(
+          `Flexi export enqueue after manual erp-sync failed for ${id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
+      throw new BadRequestException(
+        `Тимчасова помилка ABRA — повтор поставлено в чергу. ${result.message}`,
+      )
+    }
+
+    await this.prisma.order.update({
+      where: { id },
+      data: {
+        erpSyncStatus: kind === 'business' ? 'ERP_CONFLICT' : 'FAILED',
+        erpLastErrorCode: errorCode,
+        erpLastErrorMessage: result.message,
+        erpLastSyncAt: now,
+      },
+    })
+    throw new BadRequestException(result.message)
+  }
+
   private async fetchNpTracking(
     ttn: string,
   ): Promise<Record<string, unknown> | null> {
@@ -1375,6 +1640,20 @@ export class OrdersService {
       throw new BadRequestException(
         'Обраний спосіб доставки недоступний для ваги цього замовлення.',
       )
+    }
+
+    const paymentRuleError = getCheckoutPaymentRuleError({
+      paymentMethod,
+      deliveryMethod,
+      allowPayOnPickup: settings.allowPayOnPickup,
+    })
+    if (paymentRuleError) {
+      throw new BadRequestException(paymentRuleError)
+    }
+
+    if (isPayOnPickupPaymentMethod(paymentMethod)) {
+      // Special method: gated only by allowPayOnPickup + pickup (already checked).
+      return
     }
 
     if (!settings.enabledPaymentMethods.includes(paymentMethod as never)) {
@@ -2186,6 +2465,28 @@ export class OrdersService {
       }
     }
 
+    void this.sendNewOrderManagerNotificationSafe({
+      orderId: order.id,
+      orderNumber: formattedOrderNumber,
+      createdAt: order.createdAt,
+      totalAmount: Number(order.totalAmount),
+      productsSubtotal,
+      deliveryAmount: checkout.deliveryAmount,
+      taxAmount: checkout.taxAmount,
+      currency: order.currency,
+      paymentMethod,
+      paymentStatus: null,
+      deliveryMethod,
+      deliveryCountryCode: dto.deliveryCountryCode?.trim() || dto.countryCode?.trim() || null,
+      countrySiteCode: dto.countryCode?.trim() || null,
+      customerFirstName: dto.customerFirstName.trim(),
+      customerLastName: dto.customerLastName.trim(),
+      customerEmail: dto.customerEmail?.trim() || null,
+      customerPhone,
+      itemCount: lineItems.length,
+      erpSyncStatus: null,
+    })
+
     return response
   }
 
@@ -2273,6 +2574,51 @@ export class OrdersService {
     await this.sendOrderConfirmationEmailSafe({ to, orderId })
   }
 
+  /**
+   * Manager new-order email — soft-fail; never blocks checkout.
+   * Trigger only from successful executeCreate (Redis idempotency prevents duplicates).
+   */
+  private async sendNewOrderManagerNotificationSafe(input: {
+    orderId: string
+    orderNumber: string
+    createdAt: Date
+    totalAmount: number
+    productsSubtotal: number
+    deliveryAmount: number
+    taxAmount: number
+    currency: string
+    paymentMethod: string
+    paymentStatus: string | null
+    deliveryMethod: string
+    deliveryCountryCode: string | null
+    countrySiteCode: string | null
+    customerFirstName: string
+    customerLastName: string
+    customerEmail: string | null
+    customerPhone: string
+    itemCount: number
+    erpSyncStatus: string | null
+  }): Promise<void> {
+    try {
+      const cart = await this.settings.getCartCheckoutSettings()
+      if (!cart.newOrderNotifyEmailEnabled) return
+      const to = cart.newOrderNotifyEmail.trim()
+      if (!to) return
+
+      await this.mail.sendNewOrderManagerEmail({
+        to,
+        countrySiteCode: input.countrySiteCode as never,
+        order: input,
+      })
+    } catch (err) {
+      this.logger.warn(
+        `Manager new-order email failed for ${input.orderId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
+  }
+
   private async sendOrderConfirmationEmailSafe(input: { to: string; orderId: string }) {
     try {
       const [cart, market] = await Promise.all([
@@ -2293,6 +2639,7 @@ export class OrdersService {
           countrySiteCode: true,
           companyIco: true,
           companyVatId: true,
+          locale: true,
         },
       })
       if (!order) return
@@ -2328,6 +2675,7 @@ export class OrdersService {
         to: input.to,
         orderNumber: formatted,
         pdf,
+        locale: order.locale ?? undefined,
         region: market.region,
         countrySiteCode: siteCode,
       })

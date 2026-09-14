@@ -38,12 +38,71 @@ const ACK_TEMPLATES: Record<AppLocale, WithdrawalAcknowledgementTemplate> = {
 
 týmto potvrdzujeme, že sme dňa {{submittedAt}} prijali a zaznamenali vaše oznámenie o odstúpení od zmluvy (referencia: {{withdrawalReference}}) k objednávke č. {{orderNumber}}.
 
-Rozsah: {{withdrawalScope}}
+Rozsah odstúpenia: {{withdrawalScope}}
 {{partialItems}}
 
-Toto potvrdenie neznamená automatické schválenie odstúpenia, vrátenie platby ani prijatie tovaru. Vašu žiadosť posúdime v súlade so zákonom a budeme vás kontaktovať, ak budeme potrebovať ďalšie informácie.
+Toto potvrdenie potvrdzuje prijatie vášho oznámenia o odstúpení od zmluvy. Neznamená potvrdenie prijatia vráteného tovaru ani vykonanie vrátenia platby.
 
-Adresa na vrátenie tovaru (ak bude relevantné):
+Ďalší postup spracujeme v súlade s platnými právnymi predpismi. Ak budeme potrebovať doplňujúce informácie, budeme vás kontaktovať.
+
+Adresa na vrátenie tovaru:
+{{returnAddress}}
+
+{{sellerName}}
+{{supportEmail}}`,
+  },
+  en: {
+    subject: 'Confirmation of receipt of withdrawal notice — {{withdrawalReference}}',
+    body: `Dear {{customerName}},
+
+We hereby confirm that on {{submittedAt}} we received and recorded your notice of withdrawal from the contract (reference: {{withdrawalReference}}) for order no. {{orderNumber}}.
+
+Scope of withdrawal: {{withdrawalScope}}
+{{partialItems}}
+
+This confirmation acknowledges receipt of your notice of withdrawal from the contract. It does not confirm receipt of returned goods or that a refund has been made.
+
+We will handle the next steps in accordance with applicable law. If we need further information, we will contact you.
+
+Return address for the goods:
+{{returnAddress}}
+
+{{sellerName}}
+{{supportEmail}}`,
+  },
+  hu: {
+    subject: 'Elállási nyilatkozat átvételének visszaigazolása — {{withdrawalReference}}',
+    body: `Tisztelt {{customerName}}!
+
+Ezúton megerősítjük, hogy {{submittedAt}} napján átvettük és rögzítettük a szerződéstől való elállásra vonatkozó nyilatkozatát (hivatkozás: {{withdrawalReference}}) a(z) {{orderNumber}} számú rendeléshez.
+
+Az elállás terjedelme: {{withdrawalScope}}
+{{partialItems}}
+
+Ez a visszaigazolás a szerződéstől való elállásra vonatkozó nyilatkozata átvételét igazolja. Nem jelenti a visszaküldött áru átvételének, sem a fizetés visszatérítésének megerősítését.
+
+A további lépéseket a hatályos jogszabályoknak megfelelően intézzük. Ha kiegészítő információra lesz szükségünk, felvesszük Önnel a kapcsolatot.
+
+Áru visszaküldési címe:
+{{returnAddress}}
+
+{{sellerName}}
+{{supportEmail}}`,
+  },
+  de: {
+    subject: 'Bestätigung des Eingangs der Widerrufsmitteilung — {{withdrawalReference}}',
+    body: `Guten Tag, {{customerName}},
+
+hiermit bestätigen wir, dass wir am {{submittedAt}} Ihre Mitteilung über den Widerruf des Vertrags (Referenz: {{withdrawalReference}}) zur Bestellung Nr. {{orderNumber}} erhalten und erfasst haben.
+
+Umfang des Widerrufs: {{withdrawalScope}}
+{{partialItems}}
+
+Diese Bestätigung bestätigt den Empfang Ihrer Mitteilung über den Widerruf des Vertrags. Sie bedeutet weder die Bestätigung des Empfangs zurückgesandter Ware noch die Durchführung einer Erstattung.
+
+Die weiteren Schritte bearbeiten wir gemäß den geltenden Rechtsvorschriften. Wenn wir ergänzende Informationen benötigen, werden wir Sie kontaktieren.
+
+Rücksendeadresse für die Ware:
 {{returnAddress}}
 
 {{sellerName}}
@@ -55,80 +114,33 @@ Adresa na vrátenie tovaru (ak bude relevantné):
 
 tímto potvrzujeme, že jsme dne {{submittedAt}} přijali a zaznamenali vaše oznámení o odstoupení od smlouvy (reference: {{withdrawalReference}}) k objednávce č. {{orderNumber}}.
 
-Rozsah: {{withdrawalScope}}
+Rozsah odstoupení: {{withdrawalScope}}
 {{partialItems}}
 
-Toto potvrzení neznamená automatické schválení odstoupení, vrácení platby ani přijetí zboží. Vaši žádost posoudíme v souladu se zákonem a budeme vás kontaktovat, pokud budeme potřebovat další informace.
+Toto potvrzení potvrzuje přijetí vašeho oznámení o odstoupení od smlouvy. Neznamená potvrzení přijetí vráceného zboží ani provedení vrácení platby.
 
-Adresa pro vrácení zboží (pokud bude relevantní):
-{{returnAddress}}
+Další postup zpracujeme v souladu s platnými právními předpisy. Pokud budeme potřebovat doplňující informace, budeme vás kontaktovat.
 
-{{sellerName}}
-{{supportEmail}}`,
-  },
-  hu: {
-    subject: 'Elállási nyilatkozat beérkezett — {{withdrawalReference}}',
-    body: `Tisztelt {{customerName}}!
-
-Megerősítjük, hogy {{submittedAt}} időpontban beérkezett és rögzítésre került távollevő szerződésből való elállási nyilatkozata (hivatkozás: {{withdrawalReference}}) a(z) {{orderNumber}} számú rendeléshez.
-
-Terjedelem: {{withdrawalScope}}
-{{partialItems}}
-
-Ez a visszaigazolás nem jelenti az elállás automatikus jóváhagyását, a vételár visszatérítését vagy az áru átvételét. Kérelmét a jogszabályoknak megfelelően bíráljuk el, és szükség esetén felvesszük Önnel a kapcsolatot.
-
-Visszaküldési cím (ha releváns):
-{{returnAddress}}
-
-{{sellerName}}
-{{supportEmail}}`,
-  },
-  de: {
-    subject: 'Widerrufserklärung eingegangen — {{withdrawalReference}}',
-    body: `Guten Tag, {{customerName}},
-
-hiermit bestätigen wir, dass wir am {{submittedAt}} Ihre Widerrufserklärung zum Fernabsatzvertrag (Referenz: {{withdrawalReference}}) für die Bestellung Nr. {{orderNumber}} erhalten und erfasst haben.
-
-Umfang: {{withdrawalScope}}
-{{partialItems}}
-
-Diese Bestätigung bedeutet nicht die automatische Annahme des Widerrufs, die Erstattung der Zahlung oder die Annahme zurückgesandter Waren. Wir prüfen Ihr Anliegen gemäß den gesetzlichen Vorschriften und melden uns bei Bedarf.
-
-Rücksendeadresse (falls zutreffend):
-{{returnAddress}}
-
-{{sellerName}}
-{{supportEmail}}`,
-  },
-  en: {
-    subject: 'Withdrawal notice received — {{withdrawalReference}}',
-    body: `Dear {{customerName}},
-
-We confirm that on {{submittedAt}} we received and recorded your notice of withdrawal from the distance contract (reference: {{withdrawalReference}}) for order no. {{orderNumber}}.
-
-Scope: {{withdrawalScope}}
-{{partialItems}}
-
-This confirmation does not mean automatic approval of withdrawal, refund, or acceptance of returned goods. We will review your request in accordance with applicable law and contact you if we need further information.
-
-Return address (if applicable):
+Adresa pro vrácení zboží:
 {{returnAddress}}
 
 {{sellerName}}
 {{supportEmail}}`,
   },
   uk: {
-    subject: 'Підтвердження отримання заяви про відмову від договору — {{withdrawalReference}}',
+    subject: 'Підтвердження отримання повідомлення про відмову від договору — {{withdrawalReference}}',
     body: `Вітаємо, {{customerName}}!
 
-Підтверджуємо, що {{submittedAt}} ми отримали та зафіксували вашу заяву про відмову від договору, укладеного дистанційно (референція: {{withdrawalReference}}), щодо замовлення № {{orderNumber}}.
+Цим підтверджуємо, що {{submittedAt}} ми отримали та зафіксували ваше повідомлення про відмову від договору (референція: {{withdrawalReference}}) щодо замовлення № {{orderNumber}}.
 
-Обсяг: {{withdrawalScope}}
+Обсяг відмови: {{withdrawalScope}}
 {{partialItems}}
 
-Це підтвердження не означає автоматичного схвалення відмови від договору, повернення коштів чи прийняття товару. Ми розглянемо ваше звернення відповідно до закону та зв’яжемося з вами, якщо знадобляться додаткові відомості.
+Це підтвердження засвідчує отримання вашого повідомлення про відмову від договору. Воно не означає підтвердження отримання повернутого товару чи здійснення повернення платежу.
 
-Адреса для повернення товару (за потреби):
+Подальші кроки ми опрацюємо відповідно до чинного законодавства. Якщо нам знадобляться додаткові відомості, ми з вами зв’яжемося.
+
+Адреса для повернення товару:
 {{returnAddress}}
 
 {{sellerName}}
@@ -141,4 +153,18 @@ export const DEFAULT_WITHDRAWAL_SETTINGS: WithdrawalSettings = {
   customReturnAddress: { ...DEFAULT_WITHDRAWAL_STRUCTURED_ADDRESS },
   acknowledgementTemplates: { ...ACK_TEMPLATES },
   accountWithdrawalWindowDays: 14,
+}
+
+/** Resolve acknowledgement template by withdrawal/order locale; unknown → en. */
+export function resolveWithdrawalAckTemplate(
+  templates: Partial<Record<AppLocale, WithdrawalAcknowledgementTemplate>> | undefined,
+  locale: string | null | undefined,
+): WithdrawalAcknowledgementTemplate {
+  const normalized = (locale ?? '').slice(0, 2).toLowerCase() as AppLocale
+  return (
+    templates?.[normalized] ??
+    ACK_TEMPLATES[normalized] ??
+    templates?.en ??
+    ACK_TEMPLATES.en
+  )
 }

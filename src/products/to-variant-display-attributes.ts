@@ -1,6 +1,6 @@
 import { ColorDisplayMode, VariantAttributeType } from '@prisma/client'
 
-import { pickLocalizedName } from '../i18n/pick-localized-name'
+import { pickLocalizedAttributeName } from '../i18n/pick-localized-attribute-name'
 import type { ProductDisplayCharacteristic } from './dto/product-characteristics.dto'
 
 export type VariantDisplayAttributeLink = {
@@ -81,7 +81,9 @@ export function toVariantDisplayAttributes(
     items.push({
       id: attr.id ?? slug,
       slug,
-      name: pickLocalizedName(attr.translations ?? [], locale, slug),
+      name: pickLocalizedAttributeName(attr.translations ?? [], locale, slug, {
+        valueType: valueType,
+      }),
       icon: attr.icon ?? null,
       unit: attr.unit ?? null,
       valueType,
@@ -108,7 +110,9 @@ export function toVariantDisplayAttributes(
     items.push({
       id: attr.id ?? slug,
       slug,
-      name: pickLocalizedName(attr.translations ?? [], locale, slug),
+      name: pickLocalizedAttributeName(attr.translations ?? [], locale, slug, {
+        valueType: VariantAttributeType.COLOR,
+      }),
       icon: attr.icon ?? null,
       unit: attr.unit ?? null,
       valueType: VariantAttributeType.COLOR,

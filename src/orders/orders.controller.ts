@@ -154,10 +154,20 @@ export class OrdersController {
     return this.orders.syncTracking(id)
   }
 
+  @Post(':id/erp-sync')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  syncErp(@Param('id') id: string) {
+    return this.orders.syncErp(id)
+  }
+
   @Delete(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)
-  remove(@Param('id') id: string) {
-    return this.orders.remove(id)
+  remove(
+    @Param('id') id: string,
+    @Req() req: Request & { user?: SessionJwtPayload },
+  ) {
+    return this.orders.remove(id, { userId: req.user?.userId })
   }
 }

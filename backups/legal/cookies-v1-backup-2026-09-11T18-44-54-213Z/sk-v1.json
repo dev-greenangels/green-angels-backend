@@ -1,0 +1,46 @@
+{
+  "id": "b7d30a4d-e790-442f-8a80-dfc45d38b58a",
+  "locale": "sk",
+  "version": 1,
+  "status": "PUBLISHED",
+  "title": "Politika súborov cookie",
+  "intro": "Cookies sú malé textové súbory. Táto politika vysvetľuje, ktoré kategórie používame a ako spravovať súhlas podľa ePrivacy a zákona o elektronických komunikáciách.",
+  "content": [
+    {
+      "heading": "Kategórie cookies",
+      "body": [
+        "Nevyhnutné cookies: potrebné na základné fungovanie webu (napr. košík, prihlásenie/relácia, jazyk a uloženie vašej voľby súhlasu). Túto kategóriu nie je možné vypnúť v nastaveniach súhlasu.",
+        "Analytické cookies/technológie: voliteľné. Pomáhajú nám pochopiť, ako návštevníci používajú web (momentálne vrátane Vercel Analytics). Spúšťajú sa len po súhlase s kategóriou Analytické. Google Analytics 4 momentálne nie je aktívny.",
+        "Marketingové cookies/technológie: voliteľné. Môžu slúžiť na meranie reklamy, konverzií a súvisiace reklamné funkcie, keď sú zapnuté. Spúšťajú sa len po súhlase s kategóriou Marketingové. Google Ads a Google Ads konverzie momentálne nie sú implementované a aktívne nezbierajú údaje.",
+        "Google Tag Manager používame ako nástroj na správu značiek (tag management). Samotný Tag Manager nie je reklamná služba; umožňuje spúšťať schválené meracie a marketingové značky podľa vášho súhlasu."
+      ]
+    },
+    {
+      "heading": "Správa súhlasu",
+      "body": [
+        "Pred vašou voľbou sú analytické aj marketingové technológie vypnuté; aktívne zostávajú len nevyhnutné cookies.",
+        "Pri prvej návšteve môžete prijať všetko, ponechať len nevyhnutné, alebo samostatne zapnúť/vypnúť Analytické a Marketingové.",
+        "Voľbu môžete kedykoľvek zmeniť na tejto stránke. Uložená voľba súhlasu (súbor ga-cookie-consent) platí približne 180 dní, kým ju nezmeníte. Zmeny súhlasu zaznamenávame na účely súladu a auditu."
+      ]
+    },
+    {
+      "heading": "Práva dotknutej osoby",
+      "body": [
+        "Máte právo na prístup k údajom súvisiacim s cookies, ich opravu, vymazanie a odvolanie súhlasu so spracúvaním analytických alebo marketingových technológií.",
+        "Podrobnosti o spracúvaní osobných údajov sú v [[privacy|Podmienkach ochrany osobných údajov]].",
+        "Sťažnosť môžete podať Úradu na ochranu osobných údajov SR: https://dataprotection.gov.sk/uoou/"
+      ]
+    },
+    {
+      "heading": "Kontakt pre odvolanie súhlasu",
+      "body": [
+        "Súhlas s analytickými alebo marketingovými technológiami môžete kedykoľvek odvolať na tejto stránke alebo e-mailom na {supportEmail}."
+      ]
+    }
+  ],
+  "contentHash": "255afa456ee0d2551b482e7bc457821b9f6068142793375a190389cc5148796f",
+  "publishedAt": "2026-08-21T22:17:47.800Z",
+  "effectiveAt": "2026-08-21T22:17:47.800Z",
+  "createdAt": "2026-08-21T22:17:47.816Z",
+  "updatedAt": "2026-09-03T15:19:31.022Z"
+}
