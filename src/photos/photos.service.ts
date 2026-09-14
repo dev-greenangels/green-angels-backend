@@ -231,6 +231,7 @@ export class PhotosService {
     page?: number
     pageSize?: number
     categorySlug?: string
+    locale?: string
   }) {
     return this.photoIndex.listPublic(params)
   }

@@ -31,6 +31,10 @@ class PublicPhotosQueryDto {
   @IsOptional()
   @IsString()
   category?: string
+
+  @IsOptional()
+  @IsString()
+  locale?: string
 }
 
 /** Публічні ендпоінти для вітрини (без API-ключа). */
@@ -45,6 +49,7 @@ export class CatalogPhotosController {
       page: query.page ? Number(query.page) : 1,
       pageSize: query.pageSize ? Number(query.pageSize) : 24,
       categorySlug: query.category,
+      locale: query.locale,
     })
   }
 

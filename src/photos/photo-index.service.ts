@@ -3,6 +3,7 @@ import { PhotoIdentifierType, Prisma } from '@prisma/client'
 import { createHash } from 'crypto'
 
 import { CategoriesService } from '../categories/categories.service'
+import { pickLocalizedName } from '../i18n/pick-localized-name'
 import { PrismaService } from '../prisma/prisma.service'
 import type { EanCacheItem } from './dto/list-photos-by-barcode-body.dto'
 import {
@@ -369,11 +370,12 @@ export class PhotoIndexService {
         validTo: Date | null
       }>
       attributeValues: Array<{
-        value: { translations: Array<{ label: string }> }
+        value: { translations: Array<{ locale: string; label: string }> }
       }>
     }>,
+    locale: string,
   ) {
-    return this.enrichVariantsByKey(variants, (v) => v.ean)
+    return this.enrichVariantsByKey(variants, (v) => v.ean, locale)
   }
 
   private enrichVariantsBySku(
@@ -400,11 +402,30 @@ export class PhotoIndexService {
         validTo: Date | null
       }>
       attributeValues: Array<{
-        value: { translations: Array<{ label: string }> }
+        value: { translations: Array<{ locale: string; label: string }> }
       }>
     }>,
+    locale: string,
   ) {
-    return this.enrichVariantsByKey(variants, (v) => v.sku ?? null)
+    return this.enrichVariantsByKey(variants, (v) => v.sku ?? null, locale)
+  }
+
+  private pickAttributeLabel(
+    translations: Array<{ locale?: string; label?: string | null }>,
+    locale: string,
+  ): string | null {
+    const requested = translations.find((row) => row.locale === locale)?.label?.trim()
+    if (requested) return requested
+    if (locale === 'uk') {
+      return (
+        translations.find((row) => row.locale === 'uk')?.label?.trim() ||
+        translations.find((row) => row.label?.trim())?.label?.trim() ||
+        null
+      )
+    }
+    const english = translations.find((row) => row.locale === 'en')?.label?.trim()
+    if (english) return english
+    return translations.find((row) => row.label?.trim())?.label?.trim() || null
   }
 
   private enrichVariantsByKey(
@@ -431,10 +452,11 @@ export class PhotoIndexService {
         validTo: Date | null
       }>
       attributeValues: Array<{
-        value: { translations: Array<{ label: string }> }
+        value: { translations: Array<{ locale: string; label: string }> }
       }>
     }>,
     keyOf: (v: { ean: string | null; sku?: string | null }) => string | null,
+    locale: string,
   ) {
     return new Map(
       variants
@@ -445,10 +467,7 @@ export class PhotoIndexService {
             productId: v.product.id,
             productSlug: v.product.slug,
             categorySlug: v.product.category.slug,
-            productName:
-              v.product.translations.find((t) => t.locale === 'uk')?.name ||
-              v.product.translations[0]?.name ||
-              null,
+            productName: pickLocalizedName(v.product.translations, locale, v.product.slug) || null,
             productImageUrl: this.resolveMainImageUrl(v.product.images),
             variantId: v.id,
             price: v.prices[0] ? Number(v.prices[0].value) : null,
@@ -456,7 +475,7 @@ export class PhotoIndexService {
             availableFrom: v.availableFrom?.toISOString() ?? null,
             variantLabel:
               v.attributeValues
-                .map((av) => av.value.translations[0]?.label)
+                .map((av) => this.pickAttributeLabel(av.value.translations, locale))
                 .filter(Boolean)
                 .join(' · ') || null,
             quantityPrices: v.quantityPrices.map((row) => ({
@@ -476,6 +495,7 @@ export class PhotoIndexService {
     page?: number
     pageSize?: number
     categorySlug?: string
+    locale?: string
   }): Promise<PhotoAdminListResult & {
     items: Array<
       PhotoListItem & {
@@ -499,6 +519,7 @@ export class PhotoIndexService {
       }
     >
   }> {
+    const locale = params.locale?.trim() || 'uk'
     const available = await this.getInStockPublishedIdentifiers(params.categorySlug)
     if (available.eans.length === 0 && available.skus.length === 0) {
       return {
@@ -556,7 +577,7 @@ export class PhotoIndexService {
                   slug: true,
                   isPublished: true,
                   category: { select: { slug: true } },
-                  translations: { select: { name: true, locale: true }, take: 5 },
+                  translations: { select: { name: true, locale: true } },
                   images: {
                     select: { url: true, isMain: true, sortOrder: true },
                     orderBy: [{ isMain: 'desc' as const }, { sortOrder: 'asc' as const }],
@@ -578,7 +599,7 @@ export class PhotoIndexService {
                 select: {
                   value: {
                     select: {
-                      translations: { select: { label: true }, take: 1 },
+                      translations: { select: { locale: true, label: true } },
                     },
                   },
                 },
@@ -587,8 +608,8 @@ export class PhotoIndexService {
           })
         : []
 
-    const byEan = this.enrichVariantsByEan(variants)
-    const bySku = this.enrichVariantsBySku(variants)
+    const byEan = this.enrichVariantsByEan(variants, locale)
+    const bySku = this.enrichVariantsBySku(variants, locale)
 
     return {
       ...page,
