@@ -483,6 +483,58 @@ export class PhotoIndexService {
     )
   }
 
+  /**
+   * Resolve in-stock identifiers whose catalog name/latin/slug matches `search`
+   * (any ProductTranslation locale — SK users searching Slovak names).
+   */
+  private async findIdentifiersMatchingCatalogSearch(
+    search: string,
+    available: { eans: string[]; skus: string[] },
+  ): Promise<{ eans: string[]; skus: string[] }> {
+    const term = search.trim()
+    if (!term || (available.eans.length === 0 && available.skus.length === 0)) {
+      return { eans: [], skus: [] }
+    }
+
+    const identifierFilter: Prisma.ProductVariantWhereInput[] = []
+    if (available.eans.length) identifierFilter.push({ ean: { in: available.eans } })
+    if (available.skus.length) identifierFilter.push({ sku: { in: available.skus } })
+
+    const variants = await this.prisma.productVariant.findMany({
+      where: {
+        stock: { gt: 0 },
+        product: {
+          isPublished: true,
+          OR: [
+            { latinName: { contains: term, mode: 'insensitive' } },
+            { slug: { contains: term, mode: 'insensitive' } },
+            {
+              translations: {
+                some: { name: { contains: term, mode: 'insensitive' } },
+              },
+            },
+          ],
+        },
+        OR: identifierFilter,
+      },
+      select: { ean: true, sku: true },
+      take: 500,
+    })
+
+    return {
+      eans: [
+        ...new Set(
+          variants.map((v) => v.ean?.trim()).filter((v): v is string => Boolean(v)),
+        ),
+      ],
+      skus: [
+        ...new Set(
+          variants.map((v) => v.sku?.trim()).filter((v): v is string => Boolean(v)),
+        ),
+      ],
+    }
+  }
+
   async listPublic(params: {
     search?: string
     page?: number
@@ -525,8 +577,15 @@ export class PhotoIndexService {
       }
     }
 
+    const search = params.search?.trim()
+    const catalogMatches = search
+      ? await this.findIdentifiersMatchingCatalogSearch(search, available)
+      : { eans: [], skus: [] }
+
     const page = await this.listAdmin({
       search: params.search,
+      searchMatchEans: catalogMatches.eans,
+      searchMatchSkus: catalogMatches.skus,
       page: params.page,
       pageSize: params.pageSize,
       sortBy: 'photoDate',
@@ -634,33 +693,46 @@ export class PhotoIndexService {
     search?: string,
     eans?: string[],
     skus?: string[],
+    searchMatchEans?: string[],
+    searchMatchSkus?: string[],
   ): Prisma.PhotoIndexWhereInput {
     const clauses: Prisma.PhotoIndexWhereInput[] = []
     const trimmed = search?.trim()
     if (trimmed) {
-      clauses.push({
-        OR: [
-          { ean: { contains: trimmed, mode: 'insensitive' } },
-          {
-            appProperties: {
-              path: ['plantName'],
-              string_contains: trimmed,
-            },
+      const searchOr: Prisma.PhotoIndexWhereInput[] = [
+        { ean: { contains: trimmed, mode: 'insensitive' } },
+        {
+          appProperties: {
+            path: ['plantName'],
+            string_contains: trimmed,
           },
-          {
-            appProperties: {
-              path: ['plantSize'],
-              string_contains: trimmed,
-            },
+        },
+        {
+          appProperties: {
+            path: ['plantSize'],
+            string_contains: trimmed,
           },
-          {
-            appProperties: {
-              path: ['storageName'],
-              string_contains: trimmed,
-            },
+        },
+        {
+          appProperties: {
+            path: ['storageName'],
+            string_contains: trimmed,
           },
-        ],
-      })
+        },
+      ]
+      if (searchMatchEans?.length) {
+        searchOr.push({
+          identifierType: PhotoIdentifierType.EAN,
+          ean: { in: searchMatchEans },
+        })
+      }
+      if (searchMatchSkus?.length) {
+        searchOr.push({
+          identifierType: PhotoIdentifierType.SKU,
+          ean: { in: searchMatchSkus },
+        })
+      }
+      clauses.push({ OR: searchOr })
     }
     const identifierOr: Prisma.PhotoIndexWhereInput[] = []
     if (eans?.length) {
@@ -678,6 +750,8 @@ export class PhotoIndexService {
 
   private async listAdminByPhotoDate(params: {
     search?: string
+    searchMatchEans?: string[]
+    searchMatchSkus?: string[]
     eans?: string[]
     skus?: string[]
     dateFrom?: string
@@ -693,6 +767,8 @@ export class PhotoIndexService {
       params.skus,
       params.dateFrom,
       params.dateTo,
+      params.searchMatchEans,
+      params.searchMatchSkus,
     )
     const rows = await this.prisma.$queryRaw<
       Array<{
@@ -735,6 +811,8 @@ export class PhotoIndexService {
 
   private async listAdminRaw(params: {
     search?: string
+    searchMatchEans?: string[]
+    searchMatchSkus?: string[]
     eans?: string[]
     skus?: string[]
     dateFrom?: string
@@ -750,6 +828,8 @@ export class PhotoIndexService {
       params.skus,
       params.dateFrom,
       params.dateTo,
+      params.searchMatchEans,
+      params.searchMatchSkus,
     )
     const orderColumn =
       params.sortBy === 'photoDate'
@@ -801,6 +881,8 @@ export class PhotoIndexService {
 
   private async countAdminRaw(params: {
     search?: string
+    searchMatchEans?: string[]
+    searchMatchSkus?: string[]
     eans?: string[]
     skus?: string[]
     dateFrom?: string
@@ -812,6 +894,8 @@ export class PhotoIndexService {
       params.skus,
       params.dateFrom,
       params.dateTo,
+      params.searchMatchEans,
+      params.searchMatchSkus,
     )
     const rows = await this.prisma.$queryRaw<Array<{ total: number; total_bytes: number }>>`
       SELECT
@@ -832,20 +916,33 @@ export class PhotoIndexService {
     skus?: string[],
     dateFrom?: string,
     dateTo?: string,
+    searchMatchEans?: string[],
+    searchMatchSkus?: string[],
   ): Prisma.Sql {
     const parts: Prisma.Sql[] = [Prisma.sql`TRUE`]
     const trimmed = search?.trim()
 
     if (trimmed) {
       const term = `%${trimmed}%`
-      parts.push(Prisma.sql`(
-        ean ILIKE ${term}
-        OR app_properties->>'plantName' ILIKE ${term}
-        OR app_properties->>'plantSize' ILIKE ${term}
-        OR app_properties->>'storageName' ILIKE ${term}
-        OR to_char(COALESCE(NULLIF(app_properties->>'date', '')::timestamptz, created_at), 'DD.MM.YYYY') ILIKE ${term}
-        OR to_char(COALESCE(NULLIF(app_properties->>'date', '')::timestamptz, created_at), 'YYYY-MM-DD') ILIKE ${term}
-      )`)
+      const searchParts: Prisma.Sql[] = [
+        Prisma.sql`ean ILIKE ${term}`,
+        Prisma.sql`app_properties->>'plantName' ILIKE ${term}`,
+        Prisma.sql`app_properties->>'plantSize' ILIKE ${term}`,
+        Prisma.sql`app_properties->>'storageName' ILIKE ${term}`,
+        Prisma.sql`to_char(COALESCE(NULLIF(app_properties->>'date', '')::timestamptz, created_at), 'DD.MM.YYYY') ILIKE ${term}`,
+        Prisma.sql`to_char(COALESCE(NULLIF(app_properties->>'date', '')::timestamptz, created_at), 'YYYY-MM-DD') ILIKE ${term}`,
+      ]
+      if (searchMatchEans?.length) {
+        searchParts.push(
+          Prisma.sql`(identifier_type = 'EAN' AND ean IN (${Prisma.join(searchMatchEans)}))`,
+        )
+      }
+      if (searchMatchSkus?.length) {
+        searchParts.push(
+          Prisma.sql`(identifier_type = 'SKU' AND ean IN (${Prisma.join(searchMatchSkus)}))`,
+        )
+      }
+      parts.push(Prisma.sql`(${Prisma.join(searchParts, ' OR ')})`)
     }
 
     const identifierParts: Prisma.Sql[] = []
@@ -883,6 +980,8 @@ export class PhotoIndexService {
 
   async listAdmin(params: {
     search?: string
+    searchMatchEans?: string[]
+    searchMatchSkus?: string[]
     page?: number
     pageSize?: number
     sortBy?: PhotoAdminSortBy
@@ -896,7 +995,13 @@ export class PhotoIndexService {
     const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 24))
     const sortBy = params.sortBy ?? 'createdAt'
     const sortDir = params.sortDir ?? 'desc'
-    const where = this.buildSearchWhere(params.search, params.eans, params.skus)
+    const where = this.buildSearchWhere(
+      params.search,
+      params.eans,
+      params.skus,
+      params.searchMatchEans,
+      params.searchMatchSkus,
+    )
     const useRawQuery =
       sortBy === 'photoDate' || Boolean(params.dateFrom?.trim()) || Boolean(params.dateTo?.trim())
 
@@ -904,6 +1009,8 @@ export class PhotoIndexService {
       const [{ total, totalFileSizeBytes }, rows] = await Promise.all([
         this.countAdminRaw({
           search: params.search,
+          searchMatchEans: params.searchMatchEans,
+          searchMatchSkus: params.searchMatchSkus,
           eans: params.eans,
           skus: params.skus,
           dateFrom: params.dateFrom,
@@ -912,6 +1019,8 @@ export class PhotoIndexService {
         sortBy === 'photoDate'
           ? this.listAdminByPhotoDate({
               search: params.search,
+              searchMatchEans: params.searchMatchEans,
+              searchMatchSkus: params.searchMatchSkus,
               eans: params.eans,
               skus: params.skus,
               dateFrom: params.dateFrom,
@@ -922,6 +1031,8 @@ export class PhotoIndexService {
             })
           : this.listAdminRaw({
               search: params.search,
+              searchMatchEans: params.searchMatchEans,
+              searchMatchSkus: params.searchMatchSkus,
               eans: params.eans,
               skus: params.skus,
               dateFrom: params.dateFrom,
