@@ -1,6 +1,7 @@
 import { ColorDisplayMode, VariantAttributeType } from '@prisma/client'
 
 import { pickLocalizedAttributeName } from '../i18n/pick-localized-attribute-name'
+import { pickLocalizedLabel } from '../i18n/pick-localized-name'
 import type { ProductDisplayCharacteristic } from './dto/product-characteristics.dto'
 
 export type VariantDisplayAttributeLink = {
@@ -22,27 +23,7 @@ export type VariantDisplayAttributeLink = {
   }
 }
 
-function pickDisplayLabel(
-  translations: Array<{ locale?: string; label?: string | null }>,
-  locale: string,
-  slugFallback: string,
-): string {
-  const requested = translations.find((row) => row.locale === locale)?.label?.trim()
-  if (requested) return requested
-  if (locale === 'uk') {
-    return (
-      translations.find((row) => row.locale === 'uk')?.label?.trim() ||
-      translations[0]?.label?.trim() ||
-      slugFallback
-    )
-  }
-  const english = translations.find((row) => row.locale === 'en')?.label?.trim()
-  if (english) return english
-  const any = translations.find((row) => row.label?.trim())?.label?.trim()
-  return any || slugFallback
-}
-
-/** PDP rows for attributes with showOnProductPage. Storefront falls back (locale → en → any). */
+/** PDP rows for attributes with showOnProductPage. Locale → en → non-uk → slug. */
 export function toVariantDisplayAttributes(
   links: VariantDisplayAttributeLink[],
   locale = 'uk',
@@ -61,7 +42,7 @@ export function toVariantDisplayAttributes(
     const attr = link.value.attribute
     if (!attr?.showOnProductPage) continue
     const slug = attr.slug ?? attr.id ?? link.value.slug ?? ''
-    const displayValue = pickDisplayLabel(
+    const displayValue = pickLocalizedLabel(
       link.value.translations,
       locale,
       link.value.slug?.trim() || '',

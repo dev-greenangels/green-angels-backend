@@ -415,6 +415,7 @@ export class StockNotificationsService {
         product: {
           select: {
             slug: true,
+            latinName: true,
             category: { select: { slug: true } },
             translations: { select: { locale: true, name: true } },
           },
@@ -431,6 +432,7 @@ export class StockNotificationsService {
       row.product.translations,
       locale,
       row.product.slug,
+      { latinName: row.product.latinName },
     )
     const productUrl = this.mail.buildLocalizedProductUrl(
       locale,

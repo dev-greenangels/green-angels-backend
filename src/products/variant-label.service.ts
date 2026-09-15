@@ -20,16 +20,18 @@ export class VariantLabelService {
   async buildFromLinks(
     links: VariantAttributeValueLink[],
     separator?: string,
+    locale?: string,
   ): Promise<string | null> {
     const typeOrder = await this.getTypeOrder()
-    return buildVariantLabelFromAttributeLinks(links, { typeOrder, separator })
+    return buildVariantLabelFromAttributeLinks(links, { typeOrder, separator, locale })
   }
 
   buildFromLinksWithOrder(
     links: VariantAttributeValueLink[],
     typeOrder: VariantAttributeType[],
     separator?: string,
+    locale?: string,
   ): string | null {
-    return buildVariantLabelFromAttributeLinks(links, { typeOrder, separator })
+    return buildVariantLabelFromAttributeLinks(links, { typeOrder, separator, locale })
   }
 }

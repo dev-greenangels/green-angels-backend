@@ -3,7 +3,7 @@ import { PhotoIdentifierType, Prisma } from '@prisma/client'
 import { createHash } from 'crypto'
 
 import { CategoriesService } from '../categories/categories.service'
-import { pickLocalizedName } from '../i18n/pick-localized-name'
+import { pickLocalizedLabel, pickLocalizedName } from '../i18n/pick-localized-name'
 import { PrismaService } from '../prisma/prisma.service'
 import type { EanCacheItem } from './dto/list-photos-by-barcode-body.dto'
 import {
@@ -414,18 +414,8 @@ export class PhotoIndexService {
     translations: Array<{ locale?: string; label?: string | null }>,
     locale: string,
   ): string | null {
-    const requested = translations.find((row) => row.locale === locale)?.label?.trim()
-    if (requested) return requested
-    if (locale === 'uk') {
-      return (
-        translations.find((row) => row.locale === 'uk')?.label?.trim() ||
-        translations.find((row) => row.label?.trim())?.label?.trim() ||
-        null
-      )
-    }
-    const english = translations.find((row) => row.locale === 'en')?.label?.trim()
-    if (english) return english
-    return translations.find((row) => row.label?.trim())?.label?.trim() || null
+    const label = pickLocalizedLabel(translations, locale, '')
+    return label || null
   }
 
   private enrichVariantsByKey(
@@ -467,7 +457,10 @@ export class PhotoIndexService {
             productId: v.product.id,
             productSlug: v.product.slug,
             categorySlug: v.product.category.slug,
-            productName: pickLocalizedName(v.product.translations, locale, v.product.slug) || null,
+            productName:
+              pickLocalizedName(v.product.translations, locale, v.product.slug, {
+                latinName: (v.product as { latinName?: string | null }).latinName,
+              }) || null,
             productImageUrl: this.resolveMainImageUrl(v.product.images),
             variantId: v.id,
             price: v.prices[0] ? Number(v.prices[0].value) : null,
@@ -575,6 +568,7 @@ export class PhotoIndexService {
                 select: {
                   id: true,
                   slug: true,
+                  latinName: true,
                   isPublished: true,
                   category: { select: { slug: true } },
                   translations: { select: { name: true, locale: true } },
@@ -621,7 +615,9 @@ export class PhotoIndexService {
           productId: match?.productId ?? item.appProperties.productId ?? null,
           productSlug: match?.productSlug ?? null,
           categorySlug: match?.categorySlug ?? null,
-          productName: match?.productName ?? item.appProperties.plantName ?? null,
+          productName:
+            match?.productName ??
+            (locale === 'uk' ? item.appProperties.plantName ?? null : null),
           productImageUrl: match?.productImageUrl ?? null,
           variantId: match?.variantId ?? null,
           price: match?.price ?? null,

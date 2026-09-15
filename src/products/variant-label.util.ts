@@ -1,5 +1,6 @@
 import { VariantAttributeType } from '@prisma/client'
 
+import { pickLocalizedLabel } from '../i18n/pick-localized-name'
 import { DEFAULT_VARIANT_LABEL_TYPE_ORDER } from '../settings/variant-label.types'
 
 export const VARIANT_LABEL_ATTRIBUTE_SELECT = {
@@ -16,7 +17,7 @@ export type VariantLabelAttributeMeta = {
 
 export type VariantAttributeValueLink = {
   value: {
-    translations: Array<{ label: string }>
+    translations: Array<{ locale?: string; label: string }>
     attribute?: VariantLabelAttributeMeta
   }
 }
@@ -24,6 +25,8 @@ export type VariantAttributeValueLink = {
 export type BuildVariantLabelOptions = {
   separator?: string
   typeOrder?: VariantAttributeType[]
+  /** Storefront / feed locale for label resolution. Defaults to uk. */
+  locale?: string
 }
 
 function resolveTypeOrder(typeOrder?: VariantAttributeType[]): VariantAttributeType[] {
@@ -49,7 +52,7 @@ function compareLinksForLabel(
   return (attrA?.sortOrder ?? 0) - (attrB?.sortOrder ?? 0)
 }
 
-/** Збирає підпис варіанта з привʼязаних значень атрибутів (WRB · H150). */
+/** Builds a variant label from linked attribute values (e.g. C2 · H150). Locale-aware. */
 export function buildVariantLabelFromAttributeLinks(
   links: VariantAttributeValueLink[],
   options: BuildVariantLabelOptions = {},
@@ -58,11 +61,12 @@ export function buildVariantLabelFromAttributeLinks(
 
   const separator = options.separator ?? ' · '
   const typeOrder = resolveTypeOrder(options.typeOrder)
+  const locale = options.locale?.trim() || 'uk'
 
   const labels = [...links]
     .filter((link) => link.value.attribute?.participatesInLabel !== false)
     .sort((a, b) => compareLinksForLabel(a, b, typeOrder))
-    .map((link) => link.value.translations[0]?.label?.trim())
+    .map((link) => pickLocalizedLabel(link.value.translations, locale, ''))
     .filter((label): label is string => Boolean(label))
 
   return labels.length ? labels.join(separator) : null

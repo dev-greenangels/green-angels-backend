@@ -182,13 +182,14 @@ export class ProductsService {
   private readVariantLabel(
     attributeValues: Array<{
       value: {
-        translations: Array<{ label: string }>
+        translations: Array<{ locale?: string; label: string }>
         attribute?: { sortOrder: number; participatesInLabel: boolean; valueType?: VariantAttributeType }
       }
     }>,
     typeOrder: VariantAttributeType[],
+    locale = 'uk',
   ): string | null {
-    return this.variantLabels.buildFromLinksWithOrder(attributeValues, typeOrder)
+    return this.variantLabels.buildFromLinksWithOrder(attributeValues, typeOrder, undefined, locale)
   }
 
   private inferPricingMode(
@@ -360,7 +361,7 @@ export class ProductsService {
       id: variant.id,
       sku: variant.sku ?? null,
       ean: variant.ean ?? null,
-      label: this.readVariantLabel(variant.attributeValues, typeOrder),
+      label: this.readVariantLabel(variant.attributeValues, typeOrder, locale),
       price: priceRow ? Number(priceRow.value) : 0,
       stock: variant.stock,
       availableFrom: this.toIsoDate(variant.availableFrom),
@@ -434,7 +435,7 @@ export class ProductsService {
       stock: variant.stock,
       price: priceRow ? Number(priceRow.value) : 0,
       legacyId: variant.legacyId,
-      label: this.readVariantLabel(variant.attributeValues, typeOrder),
+      label: this.readVariantLabel(variant.attributeValues, typeOrder, locale),
       attributeValueIds: variant.attributeValues.map((row) => row.valueId),
       availableFrom: this.toIsoDate(variant.availableFrom),
       salesUnitId: variant.salesUnitId ?? null,
@@ -534,7 +535,9 @@ export class ProductsService {
       ?.name?.trim()
     const localizedName = merchant
       ? strictName || ''
-      : pickLocalizedName(product.translations, locale, slugFallback || product.slug)
+      : pickLocalizedName(product.translations, locale, slugFallback || product.slug, {
+          latinName: product.latinName,
+        })
     const categoryName = merchant
       ? product.category.translations.find((row) => row.locale === locale)?.name?.trim() ||
         product.category.slug
@@ -559,7 +562,7 @@ export class ProductsService {
       price: priceRow ? Number(priceRow.value) : null,
       stock: product.variants.reduce((sum, variant) => sum + variant.stock, 0),
       variantLabel: firstVariant
-        ? this.readVariantLabel(firstVariant.attributeValues, typeOrder)
+        ? this.readVariantLabel(firstVariant.attributeValues, typeOrder, locale)
         : null,
       imageUrl: this.resolveMainImageUrl(product.images),
       characteristics: this.productCharacteristics.toCharacteristicsDto(product.characteristics),
