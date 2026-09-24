@@ -82,7 +82,14 @@ export type PublicSiteSettings = {
   market: MarketSettings
   wholesale: PublicWholesalePageSettings
   about: AboutPageSettings
-  dispatchCalendar: { enabled: boolean }
+  dispatchCalendar: {
+    enabled: boolean
+    shippingLeadNotice: {
+      enabled: boolean
+      showMode: 'when_calendar_off' | 'always' | 'with_calendar'
+      texts: Record<string, string>
+    }
+  }
   withdrawal: Pick<
     WithdrawalSettings,
     'returnAddressMode' | 'customReturnAddress' | 'accountWithdrawalWindowDays'
@@ -333,7 +340,14 @@ export class SettingsService implements OnModuleInit {
         normalizeWholesalePageSettings(wholesaleRaw, market.region),
       ),
       about: normalizeAboutPageSettings(aboutRaw, market.region),
-      dispatchCalendar: { enabled: dispatch.enabled },
+      dispatchCalendar: {
+        enabled: dispatch.enabled,
+        shippingLeadNotice: {
+          enabled: dispatch.shippingLeadNotice.enabled,
+          showMode: dispatch.shippingLeadNotice.showMode,
+          texts: dispatch.shippingLeadNotice.texts,
+        },
+      },
       withdrawal: {
         returnAddressMode: withdrawal.returnAddressMode,
         customReturnAddress: withdrawal.customReturnAddress,

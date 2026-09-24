@@ -8,7 +8,7 @@ import {
 import { AuthProvider, Prisma, ReviewStatus } from '@prisma/client'
 
 import { isAccountWithdrawalActionVisible } from '../contract-withdrawals/contract-withdrawal-eligibility'
-import { normalizePhoneE164 } from '../auth/auth.utils'
+import { normalizeStoredPhoneE164 } from '../auth/auth.utils'
 import { validatePhoneForPolicy } from '../auth/market-phone.util'
 import { OtpService } from '../auth/otp.service'
 import { PrismaService } from '../prisma/prisma.service'
@@ -338,7 +338,7 @@ export class AccountService {
       throw new BadRequestException('Підтвердження телефону зараз недоступне.')
     }
 
-    const phone = validatePhoneForPolicy(phoneRaw, market.authPhonePolicy)
+    const phone = validatePhoneForPolicy(phoneRaw, market.authPhonePolicy, market.region)
     if (!phone) throw new BadRequestException('Невірний формат телефону.')
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } })
@@ -349,7 +349,14 @@ export class AccountService {
     }
 
     await this.setPendingContact(userId, 'phone', phone)
-    await this.otp.sendPhoneOtp(phone, market.authPhonePolicy, ip, 'profile')
+    await this.otp.sendPhoneOtp(
+      phone,
+      market.authPhonePolicy,
+      ip,
+      'profile',
+      null,
+      market.region,
+    )
     return { ok: true as const, pending: true as const, channel: 'phone' as const }
   }
 
@@ -974,9 +981,9 @@ export class AccountService {
     const orderEmail = order.customerEmail?.trim().toLowerCase() || null
     const userEmail = user.email?.trim().toLowerCase() || null
     const orderPhone =
-      normalizePhoneE164(order.customerPhone) ?? order.customerPhone.trim()
+      normalizeStoredPhoneE164(order.customerPhone) ?? order.customerPhone.trim()
     const userPhone = user.phone
-      ? (normalizePhoneE164(user.phone) ?? user.phone.trim())
+      ? (normalizeStoredPhoneE164(user.phone) ?? user.phone.trim())
       : null
 
     const matchVerifiedEmail =

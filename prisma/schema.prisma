@@ -837,6 +837,12 @@ model Order {
   receiverCompanyName    String?
   /// Human-readable Packeta / branch label (id stored in deliveryBranch)
   deliveryBranchLabel    String?
+  /// Packeta internal serviceKey snapshot at order create (immutable for shipment).
+  packetaServiceKey      String?
+  /// Opaque Packeta external carrier id snapshot (string form of feed numeric id).
+  packetaCarrierId       String?
+  /// Pickup point kind snapshot: branch | box | carrier. Null for courier / non-Packeta.
+  packetaPickupPointKind String?
   paymentMethod          String
   comment                String?              @db.Text
   /// B2B buyer identity (SK IČO / DIČ / IČ DPH or UA ЄДРПОУ)
@@ -846,10 +852,17 @@ model Order {
   companyVatId           String?
   /// ISO VAT country prefix at checkout (SK, HU, AT, …)
   vatCountryCode         String?
-  /// B2B billing address (optional; delivery used as fallback in ERP export)
+  /// B2B company seat address (not B2C billing storage)
   companyStreet          String?
   companyCity            String?
   companyPostalCode      String?
+  /// Immutable billing/invoice address snapshot (SK/EU new orders; null on legacy)
+  billingStreet          String?
+  billingHouseNumber     String?
+  billingCity            String?
+  billingPostalCode      String?
+  /// ISO country code for billing (sk|hu|at|…)
+  billingCountryCode     String?
   /// Customer-selected preferred dispatch / ship date
   preferredShipDate      DateTime?
   monopayInvoiceId       String?              @unique

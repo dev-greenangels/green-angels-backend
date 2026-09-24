@@ -145,6 +145,19 @@ export class StripePaymentProvider implements PaymentProvider {
     const returnUrl = this.buildElementsReturnUrl(input)
     const expiresAt = Math.floor(Date.now() / 1000) + CUSTOMER_PAYMENT_WINDOW_SEC
 
+    const orderNumberLabel = `ZY-${String(input.orderNumber).padStart(8, '0')}`
+    const variableSymbol = String(input.orderNumber)
+    const sessionMetadata: Record<string, string> = {
+      orderId: input.orderId,
+      orderNumber: orderNumberLabel,
+      variableSymbol,
+      ...(input.metadata ?? {}),
+    }
+    // Ensure display forms win if callers passed raw numeric orderNumber.
+    sessionMetadata.orderId = input.orderId
+    sessionMetadata.orderNumber = orderNumberLabel
+    sessionMetadata.variableSymbol = variableSymbol
+
     const session = await stripe.checkout.sessions.create({
       ui_mode: 'elements',
       mode: 'payment',
@@ -163,10 +176,14 @@ export class StripePaymentProvider implements PaymentProvider {
       ],
       customer_email: input.customerEmail?.trim() || undefined,
       return_url: returnUrl,
-      metadata: {
-        orderId: input.orderId,
-        orderNumber: String(input.orderNumber),
-        ...(input.metadata ?? {}),
+      metadata: sessionMetadata,
+      payment_intent_data: {
+        description: input.description,
+        metadata: {
+          orderId: input.orderId,
+          orderNumber: orderNumberLabel,
+          variableSymbol,
+        },
       },
     })
 

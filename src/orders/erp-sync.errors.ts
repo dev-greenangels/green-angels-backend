@@ -20,6 +20,14 @@ export type FlexiErrorKind =
   | 'permanent'
   | 'vat_configuration'
 
+/** True when Flexi error text indicates quantity/stock shortage (not forma úhrady / cenik / VAT). */
+export function isFlexiStockShortageMessage(message: string): boolean {
+  const m = message.toLowerCase()
+  return /недостатньо|insufficient|nedostatek|množství|quantity.*exceed|není dostupn|not enough stock|stock.*unavailable|unavailable.*stock|rezervovat.*nedost|nedostatek zásob/i.test(
+    m,
+  )
+}
+
 /**
  * Checkout offline fallback (EXTERNAL only): true for genuine ERP transport/unavailability.
  * Business rejections from checkStock return ok:false and never throw here.
@@ -57,11 +65,7 @@ export function classifyFlexiError(message: string): FlexiErrorKind {
     return 'auth'
   }
 
-  if (
-    /недостатньо|insufficient|nedostatek|množství|quantity.*exceed|není dostupn|not enough stock/i.test(
-      m,
-    )
-  ) {
+  if (isFlexiStockShortageMessage(message)) {
     return 'business'
   }
 

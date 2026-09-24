@@ -35,6 +35,8 @@ type PdfLabels = {
   recipient: string
   bank: string
   paymentPurpose: string
+  /** Template with `{orderNumber}` for bank-transfer purpose / variable symbol text. */
+  paymentPurposeTemplate: string
   viesValid: string
   viesInvalid: string
   viesUnavailable: string
@@ -128,6 +130,22 @@ const PAYMENT: Record<string, Record<OrderPdfLocale, string>> = {
     de: 'Banküberweisung (Firma)',
     cs: 'Bankovní převod (firma)',
   },
+  dobierka: {
+    uk: 'Післяплата (dobierka)',
+    en: 'Cash on delivery',
+    sk: 'Dobierka',
+    hu: 'Utánvét',
+    de: 'Nachnahme',
+    cs: 'Dobírka',
+  },
+  'pay-on-pickup': {
+    uk: 'Оплата при самовивозі',
+    en: 'Pay on pickup',
+    sk: 'Platba pri odbere',
+    hu: 'Fizetés átvételkor',
+    de: 'Zahlung bei Abholung',
+    cs: 'Platba při vyzvednutí',
+  },
 }
 
 const LABELS: Record<OrderPdfLocale, Omit<PdfLabels, 'deliveryMethods' | 'paymentMethods'>> = {
@@ -164,6 +182,7 @@ const LABELS: Record<OrderPdfLocale, Omit<PdfLabels, 'deliveryMethods' | 'paymen
     recipient: 'Одержувач',
     bank: 'Банк',
     paymentPurpose: 'Призначення платежу',
+    paymentPurposeTemplate: 'Оплата за замовлення {orderNumber}',
     viesValid: 'VIES: дійсний',
     viesInvalid: 'VIES: недійсний',
     viesUnavailable: 'VIES: недоступний',
@@ -203,6 +222,7 @@ const LABELS: Record<OrderPdfLocale, Omit<PdfLabels, 'deliveryMethods' | 'paymen
     recipient: 'Recipient',
     bank: 'Bank',
     paymentPurpose: 'Payment reference',
+    paymentPurposeTemplate: 'Payment for order {orderNumber}',
     viesValid: 'VIES: valid',
     viesInvalid: 'VIES: invalid',
     viesUnavailable: 'VIES: unavailable',
@@ -244,6 +264,7 @@ const LABELS: Record<OrderPdfLocale, Omit<PdfLabels, 'deliveryMethods' | 'paymen
     recipient: 'Príjemca',
     bank: 'Banka',
     paymentPurpose: 'Variabilný symbol / účel',
+    paymentPurposeTemplate: 'Platba za objednávku {orderNumber}',
     viesValid: 'VIES: platné',
     viesInvalid: 'VIES: neplatné',
     viesUnavailable: 'VIES: nedostupné',
@@ -283,6 +304,7 @@ const LABELS: Record<OrderPdfLocale, Omit<PdfLabels, 'deliveryMethods' | 'paymen
     recipient: 'Kedvezményezett',
     bank: 'Bank',
     paymentPurpose: 'Közlemény',
+    paymentPurposeTemplate: 'Fizetés a(z) {orderNumber} rendeléshez',
     viesValid: 'VIES: érvényes',
     viesInvalid: 'VIES: érvénytelen',
     viesUnavailable: 'VIES: nem elérhető',
@@ -322,6 +344,7 @@ const LABELS: Record<OrderPdfLocale, Omit<PdfLabels, 'deliveryMethods' | 'paymen
     recipient: 'Empfänger',
     bank: 'Bank',
     paymentPurpose: 'Verwendungszweck',
+    paymentPurposeTemplate: 'Zahlung für Bestellung {orderNumber}',
     viesValid: 'VIES: gültig',
     viesInvalid: 'VIES: ungültig',
     viesUnavailable: 'VIES: nicht verfügbar',
@@ -361,6 +384,7 @@ const LABELS: Record<OrderPdfLocale, Omit<PdfLabels, 'deliveryMethods' | 'paymen
     recipient: 'Příjemce',
     bank: 'Banka',
     paymentPurpose: 'Variabilní symbol / účel',
+    paymentPurposeTemplate: 'Platba za objednávku {orderNumber}',
     viesValid: 'VIES: platné',
     viesInvalid: 'VIES: neplatné',
     viesUnavailable: 'VIES: nedostupné',

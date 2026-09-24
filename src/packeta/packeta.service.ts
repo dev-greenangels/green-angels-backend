@@ -1,5 +1,11 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 
+import {
+  groupPacketaCarriersByCountry,
+  parsePacketaCarriersFeed,
+  type PacketaCarrier,
+  type PacketaCarriersFeedResult,
+} from './packeta-carriers'
 import { PacketaSettingsService } from './packeta.settings.service'
 import type {
   PacketaCityOption,
@@ -35,22 +41,147 @@ const LEGACY_BRANCH_LIMIT = 30
 const LEGACY_BOX_LIMIT = 30
 const CITY_SEARCH_LIMIT = 50
 
+/** Same TTL as PUDO branch cache — reference data, not per-checkout. */
+const CARRIERS_CACHE_TTL_MS = 6 * 60 * 60 * 1000
+
 /**
  * Packeta (Zásilkovna) — pickup points via v5 branch + Z-BOX + carrier PUDO feeds.
  * Carrier feed is required for HU/AT/DE partner networks (branch/box alone ≈ CZ/SK).
  * Shipment/label remain soft-degrade until credentials + full API wiring.
+ *
+ * `carrier/json` is READ-ONLY reference data for Backstage diagnostics only —
+ * it must never feed checkout totals or createPacket.
  */
 @Injectable()
 export class PacketaService {
   private readonly logger = new Logger(PacketaService.name)
   private branchCache: { fetchedAt: number; points: PacketaPickupPoint[]; apiKey: string } | null =
     null
+  private carriersCache: {
+    fetchedAt: number
+    carriers: PacketaCarrier[]
+    apiKey: string
+  } | null = null
 
   constructor(private readonly settings: PacketaSettingsService) {}
 
   async isConfigured(): Promise<boolean> {
     const settings = await this.settings.getSettings()
     return settings.enabled && Boolean(settings.apiKey && settings.senderLabel)
+  }
+
+  /**
+   * Read-only Packeta carriers feed (carrier/json).
+   * Soft-degrades when unconfigured or upstream fails — never throws secrets.
+   * Does not create shipments.
+   */
+  async listCarriers(options?: { forceRefresh?: boolean }): Promise<PacketaCarriersFeedResult> {
+    const settings = await this.settings.getSettings()
+    const configured = settings.enabled && Boolean(settings.apiKey && settings.senderLabel)
+    if (!configured || !settings.apiKey) {
+      return {
+        configured: false,
+        fetchedAt: null,
+        fromCache: false,
+        carriers: [],
+        byCountry: {},
+        error: 'Packeta не налаштовано (API key / Sender).',
+      }
+    }
+
+    // Never log apiKey — only whether cache hit.
+    const apiKey = settings.apiKey
+    const now = Date.now()
+    if (
+      !options?.forceRefresh &&
+      this.carriersCache &&
+      this.carriersCache.apiKey === apiKey &&
+      now - this.carriersCache.fetchedAt < CARRIERS_CACHE_TTL_MS
+    ) {
+      return this.toCarriersResult({
+        configured: true,
+        fetchedAt: new Date(this.carriersCache.fetchedAt).toISOString(),
+        fromCache: true,
+        carriers: this.carriersCache.carriers,
+        error: null,
+      })
+    }
+
+    try {
+      const carriers = await this.fetchCarriersFeed(apiKey)
+      this.carriersCache = { fetchedAt: now, carriers, apiKey }
+      this.logger.log(
+        `Packeta carriers feed loaded: count=${carriers.length}, countries=${Object.keys(groupPacketaCarriersByCountry(carriers)).join(',')}`,
+      )
+      return this.toCarriersResult({
+        configured: true,
+        fetchedAt: new Date(now).toISOString(),
+        fromCache: false,
+        carriers,
+        error: null,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`Packeta carriers feed failed: ${message}`)
+      // Soft-degrade: return stale cache if present for same key.
+      if (this.carriersCache && this.carriersCache.apiKey === apiKey) {
+        return this.toCarriersResult({
+          configured: true,
+          fetchedAt: new Date(this.carriersCache.fetchedAt).toISOString(),
+          fromCache: true,
+          carriers: this.carriersCache.carriers,
+          error: `Upstream error; showing cached carriers. (${message})`,
+        })
+      }
+      return {
+        configured: true,
+        fetchedAt: null,
+        fromCache: false,
+        carriers: [],
+        byCountry: {},
+        error: `Не вдалося завантажити carriers feed: ${message}`,
+      }
+    }
+  }
+
+  private toCarriersResult(input: {
+    configured: boolean
+    fetchedAt: string | null
+    fromCache: boolean
+    carriers: PacketaCarrier[]
+    error: string | null
+  }): PacketaCarriersFeedResult {
+    return {
+      configured: input.configured,
+      fetchedAt: input.fetchedAt,
+      fromCache: input.fromCache,
+      carriers: input.carriers,
+      byCountry: groupPacketaCarriersByCountry(input.carriers),
+      error: input.error,
+    }
+  }
+
+  /**
+   * GET https://pickup-point.api.packeta.com/v5/{apiKey}/carrier/json
+   * READ-ONLY — never createPacket / createShipment.
+   */
+  private async fetchCarriersFeed(apiKey: string): Promise<PacketaCarrier[]> {
+    const url = `https://pickup-point.api.packeta.com/v5/${encodeURIComponent(apiKey)}/carrier/json?lang=en`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 25_000)
+    try {
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      })
+      if (!res.ok) {
+        throw new Error(`Packeta carrier HTTP ${res.status}`)
+      }
+      const json: unknown = await res.json()
+      return parsePacketaCarriersFeed(json)
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   private async requirePoints(): Promise<{ settings: PacketaSettings; all: PacketaPickupPoint[] }> {
@@ -151,6 +282,23 @@ export class PacketaService {
       .slice(0, LEGACY_BRANCH_LIMIT)
     const boxes = matched.filter((p) => p.kind === 'box').slice(0, LEGACY_BOX_LIMIT)
     return [...branches, ...boxes]
+  }
+
+  /**
+   * Soft lookup for quote identity — never throws; null when unconfigured/missing.
+   */
+  async findPickupPointById(pickupPointId: string): Promise<PacketaPickupPoint | null> {
+    const id = pickupPointId.trim()
+    if (!id) return null
+    try {
+      const configured = await this.isConfigured()
+      if (!configured) return null
+      const settings = await this.settings.getSettings()
+      const all = await this.loadPoints(settings.apiKey)
+      return all.find((p) => p.id === id) ?? null
+    } catch {
+      return null
+    }
   }
 
   private async loadPoints(apiKey: string): Promise<PacketaPickupPoint[]> {
@@ -278,6 +426,11 @@ export class PacketaService {
       const points: PacketaPickupPoint[] = []
       for (const carrier of carriers) {
         const carrierName = String(carrier.name ?? '').trim()
+        const carrierIdRaw = Number(carrier.id)
+        const packetaCarrierId =
+          Number.isFinite(carrierIdRaw) && carrierIdRaw > 0
+            ? Math.floor(carrierIdRaw)
+            : undefined
         for (const row of carrier.points ?? []) {
           const id = String(row.code ?? row.id ?? '').trim()
           if (!id) continue
@@ -296,6 +449,7 @@ export class PacketaService {
             zip: String(row.zip ?? '').trim(),
             country: String(row.country ?? '').trim().toLowerCase(),
             kind: 'carrier',
+            ...(packetaCarrierId != null ? { packetaCarrierId } : {}),
             lat: row.coordinates?.latitude != null ? Number(row.coordinates.latitude) : undefined,
             lng: row.coordinates?.longitude != null ? Number(row.coordinates.longitude) : undefined,
           })

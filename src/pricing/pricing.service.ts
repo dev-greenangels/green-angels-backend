@@ -21,6 +21,7 @@ import { buildCategoryDescendantMap, type CategoryDescendantMap } from './catego
 import { computeCartSizeEnvelope } from './delivery-size.util'
 import {
   computeCartVolumeLiters,
+  computeContainerQtyBySlug,
   computeCartWeightWithMeta,
 } from './delivery-weight.util'
 import {
@@ -505,7 +506,17 @@ export class PricingService {
         },
         prices: { where: { currency, priceType: RETAIL_PRICE_TYPE } },
         quantityPrices: true,
-        attributeValues: { select: { value: { select: { tareWeightKg: true } } } },
+        attributeValues: {
+          select: {
+            value: {
+              select: {
+                tareWeightKg: true,
+                slug: true,
+                attribute: { select: { valueType: true } },
+              },
+            },
+          },
+        },
       },
     })
 
@@ -895,6 +906,7 @@ export class PricingService {
     const cartWeightKg = weightMeta.cartWeightKg
     const cartVolumeL = computeCartVolumeLiters(variants, uniqueItems)
     const cartSizeEnvelope = computeCartSizeEnvelope(variants, uniqueItems)
+    const containerQtyBySlug = computeContainerQtyBySlug(variants, uniqueItems)
 
     return {
       lines,
@@ -904,6 +916,7 @@ export class PricingService {
       cartWeightKg,
       cartVolumeL,
       cartSizeEnvelope,
+      containerQtyBySlug,
       usedFallbackWeight: weightMeta.usedFallbackWeight,
       fallbackWeightItemCount: weightMeta.fallbackWeightItemCount,
       promoCodeId: appliedPromoIdList[0] ?? null,

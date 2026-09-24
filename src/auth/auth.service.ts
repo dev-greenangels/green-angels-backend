@@ -35,7 +35,6 @@ import {
 } from './auth.constants'
 import {
   apiRoleToPrisma,
-  normalizePhoneE164,
   prismaRoleToApi,
   roleFromEmail,
 } from './auth.utils'
@@ -311,7 +310,10 @@ export class AuthService {
 
     const role = roleFromEmail(email)
     const passwordHash = dto.password ? await bcrypt.hash(dto.password, 10) : null
-    const phone = dto.phone ? normalizePhoneE164(dto.phone) : null
+    const market = await this.settings.getMarketSettings()
+    const phone = dto.phone
+      ? validatePhoneForPolicy(dto.phone, market.authPhonePolicy, market.region)
+      : null
 
     if (dto.phone && !phone) {
       throw new BadRequestException('Невірний формат телефону.')
@@ -386,7 +388,7 @@ export class AuthService {
 
   async phoneSession(dto: PhoneSessionDto, res: Response, req: Request) {
     const market = await this.settings.getMarketSettings()
-    const phone = validatePhoneForPolicy(dto.phone, market.authPhonePolicy)
+    const phone = validatePhoneForPolicy(dto.phone, market.authPhonePolicy, market.region)
     if (!phone) {
       throw new BadRequestException('Невірний формат телефону.')
     }
@@ -481,7 +483,14 @@ export class AuthService {
       if (!isOtpChannelEnabled(market, 'sms', purpose)) {
         throw new BadRequestException('SMS OTP вимкнено для цієї поверхні.')
       }
-      await this.otp.sendPhoneOtp(dto.phone, market.authPhonePolicy, ip, purpose, dto.locale)
+      await this.otp.sendPhoneOtp(
+        dto.phone,
+        market.authPhonePolicy,
+        ip,
+        purpose,
+        dto.locale,
+        market.region,
+      )
       return { ok: true }
     }
     if (dto.email?.trim()) {
@@ -498,7 +507,14 @@ export class AuthService {
     const market = await this.settings.getMarketSettings()
     const purpose: OtpPurpose = dto.purpose ?? 'login'
     if (dto.phone?.trim()) {
-      return this.otp.verifyPhoneOtp(dto.phone, dto.code, market.authPhonePolicy, ip, purpose)
+      return this.otp.verifyPhoneOtp(
+        dto.phone,
+        dto.code,
+        market.authPhonePolicy,
+        ip,
+        purpose,
+        market.region,
+      )
     }
     if (dto.email?.trim()) {
       return this.otp.verifyEmailOtp(dto.email, dto.code, ip, purpose)
@@ -529,7 +545,7 @@ export class AuthService {
 
     const emailCandidate = dto.email?.trim().toLowerCase() || null
     const phoneCandidate = dto.phone?.trim()
-      ? validatePhoneForPolicy(dto.phone, market.authPhonePolicy)
+      ? validatePhoneForPolicy(dto.phone, market.authPhonePolicy, market.region)
       : null
 
     const emailLookupReady = Boolean(emailOtpEnabled && emailCandidate)
@@ -589,7 +605,7 @@ export class AuthService {
   async resolveCheckoutIdentity(dto: CheckoutIdentityDto, res: Response, req: Request) {
     const market = await this.settings.getMarketSettings()
     const phoneCandidate = dto.phone?.trim()
-      ? validatePhoneForPolicy(dto.phone, market.authPhonePolicy)
+      ? validatePhoneForPolicy(dto.phone, market.authPhonePolicy, market.region)
       : null
     const emailCandidate = dto.email?.trim().toLowerCase() || null
 

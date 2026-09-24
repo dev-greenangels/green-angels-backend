@@ -6,6 +6,10 @@ type ConfirmationCopy = {
   subject: string
   text: string
   html: string
+  /** Shown only when order.codFeeAmount > 0. Placeholders: {{codFeeLabel}} {{codFeeAmount}} */
+  codFeeText?: string
+  codFeeHtml?: string
+  codFeeLabel: string
 }
 
 const LABELS: Record<OrderConfirmationEmailLocale, ConfirmationCopy> = {
@@ -16,6 +20,9 @@ const LABELS: Record<OrderConfirmationEmailLocale, ConfirmationCopy> = {
       <p>Дякуємо за замовлення <strong>{{orderNumber}}</strong>.</p>
       <p>У вкладенні — PDF-підтвердження замовлення.</p>
     `.trim(),
+    codFeeLabel: 'Комісія за післяплату',
+    codFeeText: 'Комісія за післяплату: {{codFeeAmount}} (включено в загальну суму).',
+    codFeeHtml: '<p>Комісія за післяплату: <strong>{{codFeeAmount}}</strong> (включено в загальну суму).</p>',
   },
   en: {
     subject: 'Order confirmation {{orderNumber}}',
@@ -24,6 +31,9 @@ const LABELS: Record<OrderConfirmationEmailLocale, ConfirmationCopy> = {
       <p>Thank you for order <strong>{{orderNumber}}</strong>.</p>
       <p>Please find the PDF confirmation attached.</p>
     `.trim(),
+    codFeeLabel: 'COD fee',
+    codFeeText: 'COD fee: {{codFeeAmount}} (included in the total).',
+    codFeeHtml: '<p>COD fee: <strong>{{codFeeAmount}}</strong> (included in the total).</p>',
   },
   sk: {
     subject: 'Potvrdenie objednávky {{orderNumber}}',
@@ -32,6 +42,9 @@ const LABELS: Record<OrderConfirmationEmailLocale, ConfirmationCopy> = {
       <p>Ďakujeme za objednávku <strong>{{orderNumber}}</strong>.</p>
       <p>V prílohe nájdete PDF potvrdenie.</p>
     `.trim(),
+    codFeeLabel: 'Poplatok za dobierku',
+    codFeeText: 'Poplatok za dobierku: {{codFeeAmount}} (zahrnutý v celkovej sume).',
+    codFeeHtml: '<p>Poplatok za dobierku: <strong>{{codFeeAmount}}</strong> (zahrnutý v celkovej sume).</p>',
   },
   cs: {
     subject: 'Potvrzení objednávky {{orderNumber}}',
@@ -40,6 +53,9 @@ const LABELS: Record<OrderConfirmationEmailLocale, ConfirmationCopy> = {
       <p>Děkujeme za objednávku <strong>{{orderNumber}}</strong>.</p>
       <p>V příloze najdete PDF potvrzení.</p>
     `.trim(),
+    codFeeLabel: 'Poplatek za dobírku',
+    codFeeText: 'Poplatek za dobírku: {{codFeeAmount}} (zahrnutý v celkové částce).',
+    codFeeHtml: '<p>Poplatek za dobírku: <strong>{{codFeeAmount}}</strong> (zahrnutý v celkové částce).</p>',
   },
   hu: {
     subject: 'Rendelés visszaigazolása {{orderNumber}}',
@@ -48,6 +64,9 @@ const LABELS: Record<OrderConfirmationEmailLocale, ConfirmationCopy> = {
       <p>Köszönjük a <strong>{{orderNumber}}</strong> számú rendelését.</p>
       <p>A PDF visszaigazolás a mellékletben található.</p>
     `.trim(),
+    codFeeLabel: 'Utánvéti díj',
+    codFeeText: 'Utánvéti díj: {{codFeeAmount}} (a végösszegben szerepel).',
+    codFeeHtml: '<p>Utánvéti díj: <strong>{{codFeeAmount}}</strong> (a végösszegben szerepel).</p>',
   },
   de: {
     subject: 'Bestellbestätigung {{orderNumber}}',
@@ -56,6 +75,9 @@ const LABELS: Record<OrderConfirmationEmailLocale, ConfirmationCopy> = {
       <p>Danke für Ihre Bestellung <strong>{{orderNumber}}</strong>.</p>
       <p>Die PDF-Bestätigung finden Sie im Anhang.</p>
     `.trim(),
+    codFeeLabel: 'Nachnahmegebühr',
+    codFeeText: 'Nachnahmegebühr: {{codFeeAmount}} (im Gesamtbetrag enthalten).',
+    codFeeHtml: '<p>Nachnahmegebühr: <strong>{{codFeeAmount}}</strong> (im Gesamtbetrag enthalten).</p>',
   },
 }
 
@@ -80,4 +102,24 @@ export function fillOrderConfirmationEmailTemplate(
   orderNumber: string,
 ): string {
   return template.replaceAll('{{orderNumber}}', orderNumber)
+}
+
+export function appendCodFeeToConfirmationEmail(input: {
+  text: string
+  html: string
+  locale: OrderConfirmationEmailLocale
+  codFeeAmount: number
+  currency: string
+}): { text: string; html: string } {
+  if (!(input.codFeeAmount > 0)) {
+    return { text: input.text, html: input.html }
+  }
+  const copy = getOrderConfirmationEmailCopy(input.locale)
+  const amount = `${input.codFeeAmount.toFixed(2)} ${input.currency}`
+  const feeText = (copy.codFeeText ?? '').replaceAll('{{codFeeAmount}}', amount)
+  const feeHtml = (copy.codFeeHtml ?? '').replaceAll('{{codFeeAmount}}', amount)
+  return {
+    text: feeText ? `${input.text}\n${feeText}` : input.text,
+    html: feeHtml ? `${input.html}\n${feeHtml}` : input.html,
+  }
 }

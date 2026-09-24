@@ -5,6 +5,7 @@ import { CancellationReasonsModule } from '../cancellation-reasons/cancellation-
 import { CommerceModule } from '../commerce/commerce.module'
 import { FlexiModule } from '../flexi/flexi.module'
 import { NovaPoshtaModule } from '../nova-poshta/nova-poshta.module'
+import { PacketaModule } from '../packeta/packeta.module'
 import { PaymentsModule } from '../payments/payments.module'
 import { OrderStatusesModule } from '../order-statuses/order-statuses.module'
 import { PricingModule } from '../pricing/pricing.module'
@@ -39,6 +40,7 @@ import { OrdersService } from './orders.service'
     OrderStatusesModule,
     CancellationReasonsModule,
     NovaPoshtaModule,
+    PacketaModule,
     FlexiModule,
     ReferralsModule,
     MailModule,

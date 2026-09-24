@@ -102,4 +102,25 @@ export class QuotePricingDto {
   @IsOptional()
   @IsBoolean()
   viesValid?: boolean
+
+  /**
+   * packeta-box: selected pickup point id.
+   * Server looks up kind + packetaCarrierId from feed — client hints are not authoritative.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  pickupPointId?: string
+
+  /** Optional client hint; ignored when feed lookup succeeds. */
+  @IsOptional()
+  @IsIn(['branch', 'box', 'carrier'])
+  pickupPointKind?: 'branch' | 'box' | 'carrier'
+
+  /** Optional client hint; ignored when feed lookup succeeds. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  packetaCarrierId?: number
 }

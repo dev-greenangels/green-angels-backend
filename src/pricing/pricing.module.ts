@@ -9,7 +9,13 @@ import { PricingController } from './pricing.controller'
 import { PricingService } from './pricing.service'
 
 @Module({
-  imports: [AuthModule, PrismaModule, SettingsModule, VariantLabelModule, CommerceModule],
+  imports: [
+    AuthModule,
+    PrismaModule,
+    SettingsModule,
+    VariantLabelModule,
+    CommerceModule,
+  ],
   controllers: [PricingController],
   providers: [PricingService],
   exports: [PricingService],

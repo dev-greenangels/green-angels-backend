@@ -17,6 +17,30 @@ export function grossToNet(gross: number, ratePercent: number): number {
   return roundMoney(gross / (1 + ratePercent / 100))
 }
 
+/**
+ * VAT content of a tax-included (gross) commercial line, rounded to cents.
+ * Matches ABRA Flexi per-line extract: round(gross × rate / (100 + rate)).
+ * Use line gross (unit × qty, already money-rounded) — never sum of per-unit VAT.
+ */
+export function vatFromTaxIncludedGross(
+  lineGross: number,
+  ratePercent: number,
+): number {
+  if (!Number.isFinite(lineGross) || lineGross <= 0 || ratePercent <= 0) return 0
+  return roundMoney((lineGross * ratePercent) / (100 + ratePercent))
+}
+
+/** Gross of one ABRA catalog line: cenaMj × mnozMj, money-rounded. */
+export function commercialLineGross(
+  unitGross: number,
+  quantity: number,
+): number {
+  const unit = Number.isFinite(unitGross) ? unitGross : 0
+  const qty = Number.isFinite(quantity) ? quantity : 0
+  if (unit <= 0 || qty <= 0) return 0
+  return roundMoney(unit * qty)
+}
+
 export function toShelfUnitPrice(
   stored: number,
   opts: {

@@ -10,6 +10,7 @@ import {
   resolveOtpEmailLocale,
 } from './otp-email-labels'
 import {
+  appendCodFeeToConfirmationEmail,
   fillOrderConfirmationEmailTemplate,
   getOrderConfirmationEmailCopy,
   resolveOrderConfirmationEmailLocale,
@@ -87,6 +88,8 @@ export class MailService {
     locale?: string
     region?: 'ua' | 'sk'
     countrySiteCode?: CountrySiteCode | null
+    codFeeAmount?: number | null
+    currency?: string | null
   }): Promise<void> {
     if (!this.isConfigured()) {
       this.logger.warn(
@@ -101,20 +104,26 @@ export class MailService {
     })
     if (!identity) return
 
-    const copy = getOrderConfirmationEmailCopy(
-      resolveOrderConfirmationEmailLocale(input.locale),
-    )
+    const emailLocale = resolveOrderConfirmationEmailLocale(input.locale)
+    const copy = getOrderConfirmationEmailCopy(emailLocale)
     const subject = fillOrderConfirmationEmailTemplate(copy.subject, input.orderNumber)
-    const text = fillOrderConfirmationEmailTemplate(copy.text, input.orderNumber)
-    const html = fillOrderConfirmationEmailTemplate(copy.html, input.orderNumber)
+    const baseText = fillOrderConfirmationEmailTemplate(copy.text, input.orderNumber)
+    const baseHtml = fillOrderConfirmationEmailTemplate(copy.html, input.orderNumber)
+    const withFee = appendCodFeeToConfirmationEmail({
+      text: baseText,
+      html: baseHtml,
+      locale: emailLocale,
+      codFeeAmount: input.codFeeAmount ?? 0,
+      currency: (input.currency ?? 'EUR').trim() || 'EUR',
+    })
 
     await this.resend.send({
       from: identity.from,
       to: input.to,
       replyTo: identity.replyTo,
       subject,
-      text,
-      html,
+      text: withFee.text,
+      html: withFee.html,
       attachments: [
         {
           filename: `order-${input.orderNumber}.pdf`,

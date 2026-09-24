@@ -19,8 +19,18 @@ function formatPersonName(first: string, last: string, patronymic?: string | nul
   return [last, first, patronymic?.trim()].filter(Boolean).join(' ')
 }
 
+const BRANCH_PICKUP_METHODS = new Set(['packeta-box', 'nova-poshta-branch'])
+
+/**
+ * Packeta / NP branch labels already embed street + ZIP + city.
+ * Joining city/postal again duplicates those fragments on the PDF.
+ */
 function formatDeliveryAddress(order: OrderWithItems, pickupLabel: string): string {
   if (order.deliveryMethod === 'pickup') return pickupLabel
+  if (BRANCH_PICKUP_METHODS.has(order.deliveryMethod)) {
+    const label = (order.deliveryBranchLabel || order.deliveryBranch || '').trim()
+    return label || '—'
+  }
   const parts = [
     order.deliveryCity,
     order.deliveryBranchLabel || order.deliveryBranch,
@@ -45,6 +55,37 @@ function isBankTransfer(method: string): boolean {
 
 function formatOrderNumberDisplay(orderNumber: number): string {
   return `ZY-${String(orderNumber).padStart(8, '0')}`
+}
+
+const UA_PAYMENT_PURPOSE_DEFAULT = 'Оплата за замовлення {orderNumber}'
+
+function looksUkrainianPaymentPurpose(template: string): boolean {
+  return /[а-яіїєґА-ЯІЇЄҐ]/.test(template) || template.trim() === UA_PAYMENT_PURPOSE_DEFAULT
+}
+
+/**
+ * Prefer CMS template when it matches the PDF locale language.
+ * Never leak the UA cart default into non-uk order PDFs.
+ */
+export function resolvePdfPaymentPurposeTemplate(
+  settingsTemplate: string | undefined,
+  pdfLocale: OrderPdfLocale,
+  localeTemplate: string,
+): string {
+  const fromSettings = (settingsTemplate ?? '').trim()
+  if (pdfLocale === 'uk') {
+    return fromSettings || localeTemplate || UA_PAYMENT_PURPOSE_DEFAULT
+  }
+  if (!fromSettings || looksUkrainianPaymentPurpose(fromSettings)) {
+    return localeTemplate
+  }
+  return fromSettings
+}
+
+export function fillPaymentPurposeTemplate(template: string, orderNumberLabel: string): string {
+  return template
+    .replace(/\{orderNumber\}/g, orderNumberLabel)
+    .replace(/\{orderNumbers\}/g, orderNumberLabel)
 }
 
 export function buildOrderDocumentPdfInput(input: {
@@ -178,6 +219,12 @@ export function buildOrderDocumentPdfInput(input: {
       : null
 
   const title = input.orderPdfTitle?.trim() || labels.title
+  const orderNumberLabel = formatOrderNumberDisplay(order.orderNumber)
+  const purposeTemplate = resolvePdfPaymentPurposeTemplate(
+    input.paymentPurposeTemplate,
+    pdfLocale,
+    labels.paymentPurposeTemplate,
+  )
 
   const bankSection =
     isBankTransfer(order.paymentMethod) && bank.iban
@@ -191,9 +238,7 @@ export function buildOrderDocumentPdfInput(input: {
             bank.bic ? { label: 'BIC / SWIFT', value: bank.bic } : null,
             bank.bankName ? { label: labels.bank, value: bank.bankName } : null,
           ].filter(Boolean) as Array<{ label: string; value: string }>,
-          purpose: (input.paymentPurposeTemplate ?? 'Order {orderNumber}')
-            .replace(/\{orderNumber\}/g, formatOrderNumberDisplay(order.orderNumber))
-            .replace(/\{orderNumbers\}/g, formatOrderNumberDisplay(order.orderNumber)),
+          purpose: fillPaymentPurposeTemplate(purposeTemplate, orderNumberLabel),
         }
       : null
 
@@ -201,7 +246,7 @@ export function buildOrderDocumentPdfInput(input: {
     region,
     locale: pdfLocale,
     title,
-    orderNumber: formatOrderNumberDisplay(order.orderNumber),
+    orderNumber: orderNumberLabel,
     orderDate: localeDate,
     currency: order.currency,
     seller: { name: bank.organizationName || 'Green Angels', lines: sellerLines },

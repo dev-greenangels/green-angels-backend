@@ -20,8 +20,12 @@ import { formatEuVatId } from '../vies/vies.types'
 import { FLEXI_ORDER_CONFLICT_USER_STATUS, FLEXI_ORDER_STORNO_USER_STATUS, FLEXI_CENIK_QUERY_BATCH, FLEXI_STOCK_FILTER_CHUNK, isFlexiMissingRecordError, isImplementedFlexiEvidence, normalizeFlexiEvidence } from './flexi.constants'
 import {
   applyFlexiOrderHeaderMapping,
+  buildFlexiAncillaryExportLines,
+  resolveFlexiAddressCountryCode,
+  resolveFlexiDocumentCountries,
   resolveFlexiDocumentStatCode,
   resolveFlexiLineVatFields,
+  resolveFlexiOrderAddressMapping,
 } from './flexi-order-export-mapping'
 import { parseSizeLabel } from './flexi-size-label'
 import {
@@ -1811,39 +1815,23 @@ export class FlexiService {
     const codFeeAmount = order.codFeeAmount != null ? Number(order.codFeeAmount) : 0
     const boxCount = order.packagingBoxCount ?? 0
 
-    if (deliveryAmount > 0 && settings.shippingCenikKod.trim()) {
+    // Flexi-only: COD surcharge folds into shipping cenaMj. No separate COD cenik line.
+    // Order.codFeeAmount / checkout still keep the fee distinct for the customer.
+    for (const fee of buildFlexiAncillaryExportLines({
+      deliveryAmount,
+      packagingAmount,
+      packagingBoxCount: boxCount,
+      packagingPalletCount: order.packagingPalletCount,
+      codFeeAmount,
+      shippingCenikKod: settings.shippingCenikKod,
+      boxesCenikKod: settings.boxesCenikKod,
+      palletCenikKod: settings.palletCenikKod,
+    })) {
       const line: Record<string, unknown> = {
-        cenik: `code:${settings.shippingCenikKod.trim()}`,
-        mnozMj: 1,
-        cenaMj: deliveryAmount,
-        nazev: 'Doprava / Shipping',
-      }
-      applyLineVat(line)
-      lines.push(line)
-    }
-
-    if (packagingAmount > 0 && settings.boxesCenikKod.trim()) {
-      const line: Record<string, unknown> = {
-        cenik: `code:${settings.boxesCenikKod.trim()}`,
-        mnozMj: boxCount > 0 ? boxCount : 1,
-        cenaMj: boxCount > 0 ? Math.round((packagingAmount / boxCount) * 100) / 100 : packagingAmount,
-        nazev:
-          boxCount > 0
-            ? `Balenie / Boxes (${boxCount}${
-                order.packagingPalletCount ? `, palety ${order.packagingPalletCount}` : ''
-              })`
-            : 'Balenie / Boxes',
-      }
-      applyLineVat(line)
-      lines.push(line)
-    }
-
-    if (codFeeAmount > 0 && settings.codFeeCenikKod.trim()) {
-      const line: Record<string, unknown> = {
-        cenik: `code:${settings.codFeeCenikKod.trim()}`,
-        mnozMj: 1,
-        cenaMj: codFeeAmount,
-        nazev: 'Dobierka / COD fee',
+        cenik: fee.cenik,
+        mnozMj: fee.mnozMj,
+        cenaMj: fee.cenaMj,
+        nazev: fee.nazev,
       }
       applyLineVat(line)
       lines.push(line)
@@ -1862,21 +1850,13 @@ export class FlexiService {
         order.receiverLastName !== order.customerLastName ||
         order.receiverPhone !== order.customerPhone)
 
-    const billingStreet = (order.companyStreet ?? '').trim()
-    const shippingStreet = [order.deliveryStreet, order.deliveryHouseNumber]
-      .filter(Boolean)
-      .join(' ')
-      .trim()
-    const street = (isB2b && billingStreet) || shippingStreet
-    const city = ((isB2b && order.companyCity?.trim()) || order.deliveryCity || '').trim()
+    const addressMapping = resolveFlexiOrderAddressMapping(order)
     const branch = (order.deliveryBranch ?? '').trim()
     const branchLabel = (order.deliveryBranchLabel ?? '').trim()
-    const billingPostal = (order.companyPostalCode ?? '').trim()
-    const shippingPostal = (order.deliveryPostalCode ?? '').trim()
-    const postal = (isB2b && billingPostal) || shippingPostal
-    // VAT country for Flexi `stat` (seller/destination ← taxCountryCode). Ship-to
-    // stays on address / doprava via delivery* fields — do not reuse for `stat`.
-    const documentStatCode = resolveFlexiDocumentStatCode({
+    // Address country → document.stat; VAT legislation → document.statDph.
+    // Ship-to stays on faStat / doprava — never mixed into stat when billing exists.
+    const documentCountries = resolveFlexiDocumentCountries({
+      billingCountryCode: order.billingCountryCode,
       taxRegime: order.taxRegime,
       taxCountryCode: order.taxCountryCode,
       deliveryCountryCode: order.deliveryCountryCode,
@@ -1885,7 +1865,14 @@ export class FlexiService {
 
     let firmaRef: string | null = null
     try {
-      firmaRef = await this.ensureAdresarForOrder(order, isB2b, contactName, street, city, postal)
+      firmaRef = await this.ensureAdresarForOrder(
+        order,
+        isB2b,
+        contactName,
+        addressMapping.adresarStreet,
+        addressMapping.adresarCity,
+        addressMapping.adresarPostal,
+      )
     } catch (error) {
       this.logger.warn(
         `exportOrder(${orderId}): adresar upsert failed: ${
@@ -1974,9 +1961,7 @@ export class FlexiService {
       document.firma = firmaRef
     }
 
-    const nazFirmy = isB2b
-      ? (order.companyLegalName?.trim() || contactName)
-      : contactName
+    const nazFirmy = addressMapping.document.nazFirmy
     document.nazFirmy = nazFirmy
     if (isB2b) {
       if (order.companyIco) document.ic = order.companyIco
@@ -1984,28 +1969,21 @@ export class FlexiService {
       const vatId = fullBuyerVatId ?? order.companyVatId?.trim()
       if (vatId) document.vatId = vatId
     }
-    if (street) document.ulice = street
-    if (city) document.mesto = city
-    if (postal) document.psc = postal
-    if (shippingPostal && shippingPostal !== postal) {
-      notes.push(`PSČ doručenia: ${shippingPostal}`)
-      document.poznam = notes.join('\n')
-    }
+    const addrDoc = addressMapping.document
+    if (addrDoc.ulice) document.ulice = addrDoc.ulice
+    if (addrDoc.mesto) document.mesto = addrDoc.mesto
+    if (addrDoc.psc) document.psc = addrDoc.psc
+    if (addrDoc.postovniShodna != null) document.postovniShodna = addrDoc.postovniShodna
+    if (addrDoc.faNazev) document.faNazev = addrDoc.faNazev
+    if (addrDoc.faUlice) document.faUlice = addrDoc.faUlice
+    if (addrDoc.faMesto) document.faMesto = addrDoc.faMesto
+    if (addrDoc.faPsc) document.faPsc = addrDoc.faPsc
+    if (addrDoc.faStat) document.faStat = addrDoc.faStat
 
-    document.stat = `code:${documentStatCode}`
+    document.stat = `code:${documentCountries.addressCountryCode}`
+    document.statDph = `code:${documentCountries.vatCountryCode}`
 
-    const dopravaParts = [order.deliveryMethod]
-    if (order.deliveryMethod === 'packeta-box' && branch) {
-      dopravaParts.push(`PacketaPoint:${branch}`)
-    } else if (branchLabel || branch) {
-      dopravaParts.push(branchLabel || branch)
-    }
-    if (shippingStreet || order.deliveryCity) {
-      dopravaParts.push(
-        [shippingStreet, order.deliveryCity, shippingPostal].filter(Boolean).join(', '),
-      )
-    }
-    document.doprava = dopravaParts.filter(Boolean).join(' — ')
+    document.doprava = addrDoc.doprava
 
     if (order.preferredShipDate) {
       document.datTermin = order.preferredShipDate.toISOString().slice(0, 10)
@@ -2441,6 +2419,10 @@ export class FlexiService {
       companyDic: string | null
       companyVatId: string | null
       vatCountryCode: string | null
+      billingCountryCode?: string | null
+      taxCountryCode?: string | null
+      taxRegime?: string | null
+      deliveryCountryCode?: string | null
       currency: string
     },
     isB2b: boolean,
@@ -2551,7 +2533,17 @@ export class FlexiService {
     if (street) adresar.ulice = street
     if (city) adresar.mesto = city
     if (postal) adresar.psc = postal
-    adresar.stat = order.currency === 'UAH' ? 'code:UA' : 'code:SK'
+    // Adresar.stat = billing/sídlo country. Tax regime must not drive it.
+    const adresarFromBilling = resolveFlexiAddressCountryCode(order.billingCountryCode)
+    const adresarStat =
+      adresarFromBilling ??
+      resolveFlexiDocumentStatCode({
+        currency: order.currency,
+        taxRegime: order.taxRegime,
+        taxCountryCode: order.taxCountryCode ?? order.vatCountryCode,
+        deliveryCountryCode: order.deliveryCountryCode,
+      })
+    adresar.stat = `code:${adresarStat}`
 
     const write = await this.client.putAdresar(adresar)
     const created = await this.client.findAdresarByExtId(createExt)

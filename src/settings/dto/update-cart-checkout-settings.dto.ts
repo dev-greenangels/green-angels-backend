@@ -124,6 +124,37 @@ export class CartSizeSettingsDto {
   limits?: DeliverySizeLimitDto[]
 }
 
+export class PackagingPalletSettingsDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  unitPrice?: number
+
+  @IsOptional()
+  @IsObject()
+  capacityByContainerSlug?: Record<string, number>
+
+  @IsOptional()
+  @IsBoolean()
+  autoPricingEnabled?: boolean
+}
+
+export class PackagingStrategySettingsDto {
+  @IsOptional()
+  @IsIn(['flat', 'box', 'pallet'])
+  mode?: 'flat' | 'box' | 'pallet'
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PackagingPalletSettingsDto)
+  pallet?: PackagingPalletSettingsDto
+}
+
 export class UpdateCartCheckoutSettingsDto {
   @IsOptional()
   @IsBoolean()
@@ -158,8 +189,8 @@ export class UpdateCartCheckoutSettingsDto {
   packagingAmount?: number
 
   @IsOptional()
-  @IsIn(['flat', 'boxes'])
-  packagingMode?: 'flat' | 'boxes'
+  @IsIn(['flat', 'boxes', 'pallet'])
+  packagingMode?: 'flat' | 'boxes' | 'pallet'
 
   @IsOptional()
   @Type(() => Number)
@@ -276,6 +307,15 @@ export class UpdateCartCheckoutSettingsDto {
       tollPerStartedKgNet?: number
       tollMode?: 'separate' | 'included' | 'none'
       maxParcelWeightKg?: number
+      insurance?: {
+        enabled?: boolean
+        maxDeclaredValue?: number | null
+        tiers?: Array<{ upTo: number; fee: number }>
+      }
+      nonDepot?: {
+        amount?: number
+        automaticCalculation?: false
+      }
     }
   >
 
@@ -295,6 +335,28 @@ export class UpdateCartCheckoutSettingsDto {
   @IsOptional()
   @IsBoolean()
   packagingAmountsAreNet?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  carrierTariffAmountsAreNet?: boolean
+
+  /**
+   * Per-carrier ownership (packeta / gls / novaPoshta):
+   * tariffAmountsAreNet, services, Packeta COD, serviceIdentity.
+   * Shape validated/normalized in cart-checkout.normalize (same pattern as
+   * carrierRateTables — flexible Settings JSON, not a rigid nested DTO tree).
+   */
+  @IsOptional()
+  @IsObject()
+  carrierConfigs?: Record<string, unknown>
+
+  /**
+   * Packaging strategy (BOX vs PALLET). Sent by main Cart Checkout Backoffice save.
+   */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PackagingStrategySettingsDto)
+  packagingStrategy?: PackagingStrategySettingsDto
 
   @IsOptional()
   @IsBoolean()

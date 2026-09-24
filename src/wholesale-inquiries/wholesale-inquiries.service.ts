@@ -185,7 +185,7 @@ export class WholesaleInquiriesService {
     const market = await this.settings.getMarketSettings()
     const region: MarketRegion = market.region === 'sk' ? 'sk' : 'ua'
     const phonePolicy: PhonePolicy = market.authPhonePolicy
-    const phone = validatePhoneForPolicy(dto.phone, phonePolicy)
+    const phone = validatePhoneForPolicy(dto.phone, phonePolicy, region)
     if (!phone) {
       throw new BadRequestException('Вкажіть коректний номер телефону.')
     }

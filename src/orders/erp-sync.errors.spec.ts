@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import {
   classifyFlexiError,
   erpSyncErrorCodeForKind,
+  isFlexiStockShortageMessage,
 } from './erp-sync.errors'
 
 describe('classifyFlexiError', () => {
@@ -33,6 +34,16 @@ describe('classifyFlexiError', () => {
     assert.equal(
       classifyFlexiError('sazbaDphNotFoundDateValueState'),
       'vat_configuration',
+    )
+  })
+
+  it('detects stock shortage messages separately from generic 400', () => {
+    assert.equal(isFlexiStockShortageMessage('not enough stock'), true)
+    assert.equal(
+      isFlexiStockShortageMessage(
+        'Flexi HTTP 400: {"message":"Záznam nebyl v datovém zdroji nalezen"}',
+      ),
+      false,
     )
   })
 })

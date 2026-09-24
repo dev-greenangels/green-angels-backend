@@ -59,6 +59,16 @@ export class DispatchCalendarService {
         patch.externalReservedByDate !== undefined
           ? patch.externalReservedByDate
           : current.externalReservedByDate,
+      shippingLeadNotice: patch.shippingLeadNotice
+        ? {
+            ...current.shippingLeadNotice,
+            ...patch.shippingLeadNotice,
+            texts: {
+              ...current.shippingLeadNotice.texts,
+              ...(patch.shippingLeadNotice.texts ?? {}),
+            },
+          }
+        : current.shippingLeadNotice,
     })
     await this.prisma.settings.upsert({
       where: { key: SETTINGS_KEYS.DISPATCH_CALENDAR },

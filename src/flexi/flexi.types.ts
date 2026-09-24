@@ -83,6 +83,11 @@ export type FlexiSettings = {
   shippingCenikKod: string
   /** Cenik code for packaging fee line (empty = skip) */
   boxesCenikKod: string
+  /**
+   * Cenik code for pallet packaging lines (empty = map pallet financial lines to boxesCenikKod).
+   * Missing kod must not change customer gross or VAT boundaries — only Flexi catalog mapping.
+   */
+  palletCenikKod: string
   /** Cenik code for COD fee line (empty = skip) */
   codFeeCenikKod: string
   /**
@@ -112,6 +117,13 @@ export type FlexiSettings = {
    * Does NOT disable Changes API poll / ERP sync. Default true.
    */
   webhookAccepting: boolean
+  /**
+   * When true, checkout does not reject on Flexi stock shortage (available < qty).
+   * Order is saved against website stock and still exported to Abra; if Abra
+   * rejects, order stays with erpSyncStatus FAILED/ERP_CONFLICT (no compensate delete).
+   * Temporary ops switch while Abra allows negative stock. Default false.
+   */
+  allowCheckoutOnStockShort: boolean
   /** Last known remote Flexi hook id (from GET /hooks), if any */
   webhookRemoteId: string
   webhookLastRegisterAt?: string
@@ -144,6 +156,8 @@ export const DEFAULT_FLEXI_SETTINGS: FlexiSettings = {
   username: '',
   password: '',
   defaultStockCode: '',
+  /** Flexi typ dokladu kod for accepted orders. In ABRA, typ OBP must keep vytvaretKorPol=false
+   * (same as FAKTURA-SITE) so per-line VAT does not spawn korekceRekapitulace. ABRA-only setting. */
   orderDocTypeCode: 'OBP',
   centerCode: 'SITE',
   orderUserStatus: 'stavDoklObch.schvaleno',
@@ -151,6 +165,7 @@ export const DEFAULT_FLEXI_SETTINGS: FlexiSettings = {
   receivedInvoiceDocTypeCode: 'FAKTURA',
   shippingCenikKod: 'SHIPPING',
   boxesCenikKod: 'BOXES',
+  palletCenikKod: '',
   codFeeCenikKod: 'COD',
   deliveryMethodCodes: { ...DEFAULT_FLEXI_DELIVERY_METHOD_CODES },
   defaultCategoryId: '',
@@ -162,6 +177,7 @@ export const DEFAULT_FLEXI_SETTINGS: FlexiSettings = {
   webhookSecKey: '',
   webhookUrl: '',
   webhookAccepting: true,
+  allowCheckoutOnStockShort: false,
   webhookRemoteId: '',
   documentSend: {
     b2b: 'abra',
@@ -189,6 +205,7 @@ export type FlexiPublicSettings = {
   receivedInvoiceDocTypeCode: string
   shippingCenikKod: string
   boxesCenikKod: string
+  palletCenikKod: string
   codFeeCenikKod: string
   deliveryMethodCodes: Record<string, string>
   defaultCategoryId: string
@@ -201,6 +218,8 @@ export type FlexiPublicSettings = {
   hasWebhookSecKey: boolean
   /** Local accept flag only — false does not stop Changes poll / ERP sync. */
   webhookAccepting: boolean
+  /** Soft-allow checkout when Flexi reports insufficient stock (see FlexiSettings). */
+  allowCheckoutOnStockShort: boolean
   webhookRemoteId: string
   webhookRegistrationStatus: FlexiWebhookRegistrationStatus
   webhookLastRegisterAt?: string

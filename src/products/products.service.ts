@@ -211,6 +211,8 @@ export class ProductsService {
     const lengthCm = dto.lengthCm != null && dto.lengthCm > 0 ? dto.lengthCm : null
     const widthCm = dto.widthCm != null && dto.widthCm > 0 ? dto.widthCm : null
     const heightCm = dto.heightCm != null && dto.heightCm > 0 ? dto.heightCm : null
+    // Legacy snapshot at divisor 5000 for catalog display / fallback when LWH missing.
+    // Carrier chargeable weight must use L×W×H + per-service divisor (see carrier-weight-strategy).
     const volumetricWeightKg =
       lengthCm != null && widthCm != null && heightCm != null
         ? (lengthCm * widthCm * heightCm) / 5000

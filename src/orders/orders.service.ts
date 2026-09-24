@@ -7,13 +7,14 @@ import {
 } from '@nestjs/common'
 import { Prisma, VariantQuantityDiscountType } from '@prisma/client'
 
-import { normalizePhoneE164 } from '../auth/auth.utils'
 import { validatePhoneForPolicy } from '../auth/market-phone.util'
 import { computeCheckoutTotals } from '../pricing/checkout-totals'
 import { normalizePromoCodesInput } from '../pricing/pricing.promo'
 import { PricingService } from '../pricing/pricing.service'
 import { convertEurToHuf, resolveCheckoutTax, assertDeliveryCountryAllowed, pickCartCnCode } from '../pricing/tax-regime'
 import { roundMoney } from '../pricing/pricing.helpers'
+import { packetaCheckoutOrderSnapshot } from '../packeta/packeta-fulfilment'
+import { PacketaService } from '../packeta/packeta.service'
 import { DispatchCalendarService } from '../settings/dispatch-calendar.service'
 import {
   getCheckoutPaymentRuleError,
@@ -49,7 +50,13 @@ import { OrderIdempotencyService } from './order-idempotency.service'
 import { OrderPaymentLifecycleService } from './order-payment-lifecycle.service'
 import { StripePaymentProvider } from '../payments/stripe.payment-provider'
 import { MonopayService } from '../monopay/monopay.service'
-import { classifyFlexiError, erpSyncErrorCodeForKind, isFlexiTransportError } from './erp-sync.errors'
+import { customerBadRequest, CustomerErrorCode } from '../common/customer-error'
+import { isConnectedCheckoutStockReject } from './connected-checkout-reject'
+import {
+  classifyFlexiError,
+  erpSyncErrorCodeForKind,
+  isFlexiTransportError,
+} from './erp-sync.errors'
 import { resolveErpSyncStatus } from './erp-sync.constants'
 import {
   DASHBOARD_CANCELLED_STATUS,
@@ -119,10 +126,21 @@ export type BackstageOrderDetail = BackstageOrderListItem & {
   deliveryCity: string | null
   deliveryBranch: string | null
   deliveryBranchLabel: string | null
+  /** Packeta internal serviceKey snapshot (null = legacy / non-Packeta). */
+  packetaServiceKey: string | null
+  /** Opaque Packeta carrier id snapshot. */
+  packetaCarrierId: string | null
+  /** branch | box | carrier — null for courier / non-Packeta. */
+  packetaPickupPointKind: string | null
   deliveryStreet: string | null
   deliveryHouseNumber: string | null
   deliveryPostalCode: string | null
   deliveryCountryCode: string | null
+  billingStreet: string | null
+  billingHouseNumber: string | null
+  billingCity: string | null
+  billingPostalCode: string | null
+  billingCountryCode: string | null
   countrySiteCode: string | null
   locale: string | null
   paymentMethod: string
@@ -247,6 +265,7 @@ export type PublicOrderConfirmation = {
   deliveryMethod: string
   deliveryCity: string | null
   deliveryBranch: string | null
+  deliveryBranchLabel: string | null
   deliveryStreet: string | null
   deliveryHouseNumber: string | null
   paymentMethod: string
@@ -269,6 +288,11 @@ export type PublicOrderConfirmation = {
   companyStreet: string | null
   companyCity: string | null
   companyPostalCode: string | null
+  billingStreet: string | null
+  billingHouseNumber: string | null
+  billingCity: string | null
+  billingPostalCode: string | null
+  billingCountryCode: string | null
   deliveryPostalCode: string | null
   deliveryCountryCode: string | null
   items: PublicOrderConfirmationItem[]
@@ -302,6 +326,7 @@ export class OrdersService {
     private readonly paymentLifecycle: OrderPaymentLifecycleService,
     private readonly stripeProvider: StripePaymentProvider,
     private readonly monopay: MonopayService,
+    private readonly packeta: PacketaService,
   ) {}
 
   private statusLabelCache: Map<string, string> | null = null
@@ -360,6 +385,11 @@ export class OrdersService {
     companyStreet: string | null
     companyCity: string | null
     companyPostalCode: string | null
+    billingStreet: string | null
+    billingHouseNumber: string | null
+    billingCity: string | null
+    billingPostalCode: string | null
+    billingCountryCode: string | null
     deliveryPostalCode: string | null
     deliveryCountryCode: string | null
   }) {
@@ -375,6 +405,11 @@ export class OrdersService {
       companyStreet: order.companyStreet,
       companyCity: order.companyCity,
       companyPostalCode: order.companyPostalCode,
+      billingStreet: order.billingStreet,
+      billingHouseNumber: order.billingHouseNumber,
+      billingCity: order.billingCity,
+      billingPostalCode: order.billingPostalCode,
+      billingCountryCode: order.billingCountryCode,
       deliveryPostalCode: order.deliveryPostalCode,
       deliveryCountryCode: order.deliveryCountryCode,
     }
@@ -779,10 +814,18 @@ export class OrdersService {
       deliveryCity: order.deliveryCity,
       deliveryBranch: order.deliveryBranch,
       deliveryBranchLabel: order.deliveryBranchLabel,
+      packetaServiceKey: order.packetaServiceKey,
+      packetaCarrierId: order.packetaCarrierId,
+      packetaPickupPointKind: order.packetaPickupPointKind,
       deliveryStreet: order.deliveryStreet,
       deliveryHouseNumber: order.deliveryHouseNumber,
       deliveryPostalCode: order.deliveryPostalCode,
       deliveryCountryCode: order.deliveryCountryCode,
+      billingStreet: order.billingStreet,
+      billingHouseNumber: order.billingHouseNumber,
+      billingCity: order.billingCity,
+      billingPostalCode: order.billingPostalCode,
+      billingCountryCode: order.billingCountryCode,
       countrySiteCode: order.countrySiteCode,
       locale: order.locale,
       paymentMethod: order.paymentMethod,
@@ -974,6 +1017,7 @@ export class OrdersService {
       deliveryMethod: order.deliveryMethod,
       deliveryCity: order.deliveryCity,
       deliveryBranch: order.deliveryBranch,
+      deliveryBranchLabel: order.deliveryBranchLabel,
       deliveryStreet: order.deliveryStreet,
       deliveryHouseNumber: order.deliveryHouseNumber,
       paymentMethod: order.paymentMethod,
@@ -1622,6 +1666,39 @@ export class OrdersService {
     }
   }
 
+  /**
+   * SK/EU market-level rule: every new order needs an immutable billing snapshot,
+   * independent of deliveryMethod.
+   */
+  private validateBillingFields(
+    dto: CreateOrderDto,
+    marketRegion: string,
+  ): void {
+    if (marketRegion !== 'sk') return
+
+    if (!dto.billingStreet?.trim()) {
+      throw new BadRequestException('Вкажіть вулицю фактураційної адреси.')
+    }
+    if (!dto.billingCity?.trim()) {
+      throw new BadRequestException('Вкажіть місто фактураційної адреси.')
+    }
+    if (!dto.billingPostalCode?.trim()) {
+      throw new BadRequestException('Вкажіть PSČ фактураційної адреси.')
+    }
+    if (!dto.billingCountryCode?.trim()) {
+      throw new BadRequestException('Вкажіть країну фактураційної адреси.')
+    }
+
+    // B2C: house number required (same completeness as courier address).
+    // B2B: companyStreet is a single line — house number optional.
+    const isCompany =
+      dto.buyerType === 'company' ||
+      Boolean(dto.companyIco?.trim() || dto.companyVatId?.trim())
+    if (!isCompany && !dto.billingHouseNumber?.trim()) {
+      throw new BadRequestException('Вкажіть номер будинку фактураційної адреси.')
+    }
+  }
+
   private async validateCheckoutMethods(
     dto: CreateOrderDto,
     allowedDeliveryMethods?: string[],
@@ -1662,7 +1739,10 @@ export class OrdersService {
   }
 
   private async resolveContractorDiscountPercent(phone: string): Promise<number> {
-    const normalized = normalizePhoneE164(phone)
+    const market = await this.settings.getMarketSettings()
+    const normalized =
+      validatePhoneForPolicy(phone, market.authPhonePolicy, market.region) ??
+      phone.trim()
     if (!normalized) return 0
 
     const user = await this.prisma.user.findUnique({
@@ -1762,8 +1842,11 @@ export class OrdersService {
     }
 
     const customerPhone =
-      validatePhoneForPolicy(dto.customerPhone, marketSettings.authPhonePolicy) ??
-      dto.customerPhone.trim()
+      validatePhoneForPolicy(
+        dto.customerPhone,
+        marketSettings.authPhonePolicy,
+        marketSettings.region,
+      ) ?? dto.customerPhone.trim()
     // Ціни/знижки лише за сесією; телефон — контакт замовлення, не ключ аудиторії.
     const audience = await this.pricing.resolveAudience({
       userId: sessionUserId,
@@ -1862,6 +1945,17 @@ export class OrdersService {
       throw new BadRequestException('Доставка в обрану країну недоступна.')
     }
 
+    const pickupPointId =
+      deliveryMethod === 'packeta-box' ? dto.deliveryBranch?.trim() || null : null
+    const pickupPoint = pickupPointId
+      ? await this.packeta.findPickupPointById(pickupPointId)
+      : null
+    // NEW orders: pickup facts only; courier fulfilment resolved on shipping day.
+    const packetaSnapshot = packetaCheckoutOrderSnapshot({
+      deliveryMethod,
+      pickupPoint,
+    })
+
     let checkout = computeCheckoutTotals({
       productsSubtotal: quote.totalAmount,
       subtotalBeforeDiscount: quote.subtotalBeforeDiscount,
@@ -1877,9 +1971,14 @@ export class OrdersService {
       cartWeightKg: quote.cartWeightKg,
       cartSizeEnvelope: quote.cartSizeEnvelope,
       cartVolumeL: quote.cartVolumeL,
+      containerQtyBySlug: quote.containerQtyBySlug,
       audienceRole: audience.role,
       deliveryCountryCode: dto.deliveryCountryCode,
       hostCountryCode: dto.countryCode,
+      productLines: quote.lines.map((line) => ({
+        unitGross: line.unitPrice,
+        quantity: line.quantity,
+      })),
       taxOverride: tax,
     })
 
@@ -1936,10 +2035,14 @@ export class OrdersService {
     }
 
     const receiverPhone =
-      validatePhoneForPolicy(dto.receiverPhone, marketSettings.deliveryPhonePolicy) ??
-      dto.receiverPhone.trim()
+      validatePhoneForPolicy(
+        dto.receiverPhone,
+        marketSettings.deliveryPhonePolicy,
+        marketSettings.region,
+      ) ??      dto.receiverPhone.trim()
 
     this.validateDeliveryFields(dto)
+    this.validateBillingFields(dto, marketSettings.region)
     await this.validateCheckoutMethods(dto, checkout.allowedDeliveryMethods)
 
     // SEC-007: raw guest PII is never identity proof. Only an authenticated
@@ -1948,6 +2051,11 @@ export class OrdersService {
     const userId: string | null = sessionUserId ?? null
 
     const hasPrivacyConsent = dto.privacyConsent === true
+    if (!hasPrivacyConsent) {
+      throw new BadRequestException(
+        'Потрібно погодитися з політикою конфіденційності та умовами використання.',
+      )
+    }
     // Intent flag only — does not create User or set verification (SEC-007).
     const createAccountRequested = Boolean(dto.createAccount)
 
@@ -1982,15 +2090,23 @@ export class OrdersService {
         try {
           const stockCheck = await this.flexi.checkStock(stockLines)
           if (!stockCheck.ok) {
-            // ERP-CONNECTED-001: refresh local snapshot from Flexi available qty on reject.
-            if (isExternalInventory && stockCheck.unavailable.length > 0) {
-              await this.flexi.applyCheckoutStockHints(stockCheck.unavailable)
+            const flexiCfg = await this.flexiSettings.getSettings()
+            if (flexiCfg.allowCheckoutOnStockShort === true) {
+              this.logger.warn(
+                `Flexi stock short at checkout but allowCheckoutOnStockShort=ON — continuing. ${stockCheck.message}`,
+              )
+            } else {
+              // ERP-CONNECTED-001: refresh local snapshot from Flexi available qty on reject.
+              if (isExternalInventory && stockCheck.unavailable.length > 0) {
+                await this.flexi.applyCheckoutStockHints(stockCheck.unavailable)
+              }
+              throw customerBadRequest(
+                CustomerErrorCode.STOCK_UNAVAILABLE,
+                isExternalInventory
+                  ? 'На жаль, товар уже недоступний у потрібній кількості.'
+                  : stockCheck.message,
+              )
             }
-            throw new BadRequestException(
-              isExternalInventory
-                ? 'На жаль, товар уже недоступний у потрібній кількості.'
-                : stockCheck.message,
-            )
           }
         } catch (error) {
           if (error instanceof BadRequestException) throw error
@@ -2127,10 +2243,12 @@ export class OrdersService {
             deliveryMethod === 'nova-poshta-branch' || deliveryMethod === 'packeta-box'
               ? dto.deliveryBranchLabel?.trim() || null
               : null,
+          ...packetaSnapshot,
           deliveryStreet:
             deliveryMethod === 'nova-poshta-address' ||
             deliveryMethod === 'packeta-courier' ||
-            deliveryMethod === 'gls-courier'
+            deliveryMethod === 'gls-courier' ||
+            deliveryMethod === 'packeta-box'
               ? dto.deliveryStreet?.trim() || null
               : null,
           deliveryHouseNumber:
@@ -2159,6 +2277,11 @@ export class OrdersService {
           companyStreet,
           companyCity,
           companyPostalCode,
+          billingStreet: dto.billingStreet?.trim() || null,
+          billingHouseNumber: dto.billingHouseNumber?.trim() || null,
+          billingCity: dto.billingCity?.trim() || null,
+          billingPostalCode: dto.billingPostalCode?.trim() || null,
+          billingCountryCode: dto.billingCountryCode?.trim()?.toLowerCase() || null,
           preferredShipDate,
           userId,
           viesCheck: viesAudit
@@ -2377,11 +2500,18 @@ export class OrdersService {
               }
             })
             .filter((line) => line.sku)
+          let stockHintUnavailable = false
+          let stockUnavailableRows: Array<{
+            sku: string
+            requested: number
+            available: number
+          }> = []
           try {
             if (stockLines.length > 0) {
               const hint = await this.flexi.checkStock(stockLines)
               if (!hint.ok && hint.unavailable.length > 0) {
-                await this.flexi.applyCheckoutStockHints(hint.unavailable)
+                stockHintUnavailable = true
+                stockUnavailableRows = hint.unavailable
               }
             }
           } catch (hintError) {
@@ -2391,10 +2521,39 @@ export class OrdersService {
               }`,
             )
           }
-          await this.compensateFailedConnectedCheckout(order.id, lineItems)
-          throw new BadRequestException(
-            'На жаль, товар уже недоступний у потрібній кількості.',
+          const asStock = isConnectedCheckoutStockReject({
+            exportMessage: exportResult.message,
+            stockHintUnavailable,
+          })
+          const flexiCfg = await this.flexiSettings.getSettings()
+          // When ops allow short stock: never delete the website order on Abra business reject.
+          const keepOrderDespiteReject = flexiCfg.allowCheckoutOnStockShort === true
+
+          this.logger.warn(
+            `EXTERNAL connected export business reject orderId=${order.id} orderNumber=${formattedOrderNumber} paymentMethod=${paymentMethod} kind=${kind} asStock=${asStock} keepOrderDespiteReject=${keepOrderDespiteReject}: ${exportResult.message}`,
           )
+
+          if (keepOrderDespiteReject) {
+            await this.prisma.order.update({
+              where: { id: order.id },
+              data: { erpSyncStatus: asStock ? 'FAILED' : 'ERP_CONFLICT' },
+            })
+          } else {
+            if (stockUnavailableRows.length > 0) {
+              await this.flexi.applyCheckoutStockHints(stockUnavailableRows)
+            }
+            await this.compensateFailedConnectedCheckout(order.id, lineItems)
+            if (asStock) {
+              throw customerBadRequest(
+                CustomerErrorCode.STOCK_UNAVAILABLE,
+                'На жаль, товар уже недоступний у потрібній кількості.',
+              )
+            }
+            throw customerBadRequest(
+              CustomerErrorCode.ORDER_PROCESSING_FAILED,
+              'Не вдалося оформити замовлення. Спробуйте ще раз або оберіть інший спосіб оплати.',
+            )
+          }
         }
       }
     }
@@ -2640,6 +2799,8 @@ export class OrdersService {
           companyIco: true,
           companyVatId: true,
           locale: true,
+          codFeeAmount: true,
+          currency: true,
         },
       })
       if (!order) return
@@ -2678,6 +2839,8 @@ export class OrdersService {
         locale: order.locale ?? undefined,
         region: market.region,
         countrySiteCode: siteCode,
+        codFeeAmount: order.codFeeAmount != null ? Number(order.codFeeAmount) : null,
+        currency: order.currency,
       })
     } catch (err) {
       this.logger.warn(

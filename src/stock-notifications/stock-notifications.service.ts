@@ -124,11 +124,11 @@ export class StockNotificationsService {
     const email = dto.email?.trim().toLowerCase() || null
     let phone: string | null = null
     if (dto.phone?.trim()) {
-      phone = validatePhoneForPolicy(dto.phone, market.authPhonePolicy)
+    phone = validatePhoneForPolicy(dto.phone, market.authPhonePolicy, market.region)
       if (!phone) {
         throw new BadRequestException(
           market.region === 'sk'
-            ? 'Zadajte platné telefónne číslo (+421).'
+            ? 'Zadajte platné medzinárodné telefónne číslo (napr. +421…).'
             : 'Номер має починатися з +380 (ще 9 цифр) або з 0 (ще 9 цифр, разом 10)',
         )
       }

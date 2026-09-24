@@ -20,8 +20,270 @@ export type OnlineCardProvider = 'monopay' | 'stripe'
  */
 export type OnlineCardErpExportMode = 'immediate' | 'on_paid'
 
-/** flat — фіксована packagingAmount; boxes — за вагою/об’ємом кошика */
-export type PackagingMode = 'flat' | 'boxes'
+/** flat — packagingAmount; boxes — box strategy only; pallet — pallet strategy only (no cardboard). */
+export type PackagingMode = 'flat' | 'boxes' | 'pallet'
+
+export type CarrierWeightStrategyKind = 'ACTUAL_WEIGHT' | 'VOLUMETRIC_OR_ACTUAL'
+
+export type CarrierServicePhysicalLimits = {
+  maxParcelWeightKg?: number
+  maxLongestSideCm?: number
+  maxSideSumCm?: number
+  maxGirthCm?: number
+  maxLengthCm?: number
+  maxWidthCm?: number
+  maxHeightCm?: number
+  supportsBoxes?: boolean
+  supportsPallets?: boolean
+  weightStrategy?: CarrierWeightStrategyKind
+  volumetricDivisor?: number
+}
+
+export type PacketaCodAmountTier = {
+  fromAmount: number
+  toAmount: number | null
+  fee: number
+}
+
+/** @deprecated Alias — prefer PacketaCodAmountTier */
+export type PacketaCodFeeTier = PacketaCodAmountTier
+
+/**
+ * Customer COD tier / max-amount basis.
+ * `cod_collected` is defined as the deterministic pre-COD total
+ * (products + delivery + packaging) — never includes the COD fee itself
+ * (avoids circular tier selection).
+ */
+export type PacketaCustomerCodFeeBase =
+  | 'cod_collected'
+  | 'products_subtotal'
+  | 'grand_total_before_cod'
+
+/** @deprecated Alias — prefer PacketaCustomerCodFeeBase */
+export type PacketaCodFeeBase = PacketaCustomerCodFeeBase
+
+/** A — Packeta contract COD cost. Never customer price / never Order.codFeeAmount. */
+export type PacketaCodCarrierCostSettings = {
+  enabled: boolean
+  /** Locked: tiers keyed on COD cash amount (pre-customer-fee collect estimate). */
+  basis: 'COD_AMOUNT'
+  amountsAreNet: boolean
+  tiers: PacketaCodAmountTier[]
+}
+
+/**
+ * B — Packeta card-on-COD (sender cost).
+ * Never enters checkout grandTotal / Order.codFeeAmount.
+ * Do not show as a customer card surcharge.
+ */
+export type PacketaCardOnCodSettings = {
+  enabled: boolean
+  /** Admin-entered percent (e.g. 1.2). Not invented in defaults. */
+  percent: number
+  basis: 'COD_AMOUNT_INCLUDING_VAT'
+  chargedTo: 'SENDER'
+  affectsCustomerTotal: false
+}
+
+export type PacketaCustomerCodPriceMode = 'none' | 'fixed' | 'tiers'
+
+/**
+ * C — Customer-facing dobierka surcharge → checkout.codFeeAmount / Order.codFeeAmount.
+ * NET/GROSS via feeAmountsAreNet + existing customerFeeSnapshotFromNet.
+ */
+export type PacketaCustomerCodPriceSettings = {
+  mode: PacketaCustomerCodPriceMode
+  maxAmount: number | null
+  feeBase: PacketaCustomerCodFeeBase
+  feeAmountsAreNet: boolean
+  fixedAmount: number
+  tiers: PacketaCodAmountTier[]
+}
+
+export type PacketaCodSettings = {
+  /** A — default / fallback Packeta COD carrier cost (when byService has no entry). */
+  carrierCost: PacketaCodCarrierCostSettings
+  cardOnCod: PacketaCardOnCodSettings
+  customerPrice: PacketaCustomerCodPriceSettings
+  /**
+   * Service-specific COD carrier rules keyed like rates (`packeta-box`, `packeta-courier:SK`).
+   * When present for the selected method/country, overrides top-level carrierCost + supportsCod.
+   */
+  byService?: Record<string, PacketaServiceCodCarrierSettings>
+}
+
+/** Per Packeta service/country: whether COD is allowed and that service's carrier COD cost. */
+export type PacketaServiceCodCarrierSettings = {
+  supportsCod: boolean
+  maxAmount: number | null
+  carrierCost: PacketaCodCarrierCostSettings
+}
+
+export type CarrierConfig = {
+  tariffAmountsAreNet?: boolean
+  /** Physical limits keyed by customer delivery method slug (packeta-box, …). */
+  services?: Partial<Record<string, CarrierServicePhysicalLimits>>
+  cod?: PacketaCodSettings
+  /**
+   * Packeta-only: internal service identity catalog + maps.
+   * Separate from physical `services` and from Packeta numeric carrier IDs.
+   */
+  serviceIdentity?: PacketaServiceIdentitySettings
+}
+
+/**
+ * Internal Packeta contract service slug (Green Angels config).
+ * Never a Packeta numeric carrier ID — those live on packetaCarrierId.
+ */
+export type PacketaServiceKey = string
+
+export type PacketaServiceDefinition = {
+  serviceKey: PacketaServiceKey
+  /** Backstage label only — not used as pricing key. */
+  label: string
+  /** Must match customer-facing delivery method. */
+  customerMethod: 'packeta-box' | 'packeta-courier'
+  /** ISO 2-letter uppercase country this service applies to. */
+  countryCode: string
+  /** Optional Packeta API carrier id for partner networks. */
+  packetaCarrierId?: number
+  enabled: boolean
+}
+
+export type PacketaServiceIdentitySettings = {
+  /** Empty catalog = MODEL C (method:CC only). Do not invent services. */
+  catalog: PacketaServiceDefinition[]
+  /** Courier: destination CC → serviceKey. Missing → legacy country pricing. */
+  courierDefaultServiceByCountry: Record<string, PacketaServiceKey>
+  /**
+   * Native Packeta PUDO defaults by destination country + kind.
+   * Prefer this over global boxKindDefaultServiceKey.
+   */
+  boxDefaultServiceByCountry: Record<
+    string,
+    Partial<Record<'branch' | 'box', PacketaServiceKey>>
+  >
+  /**
+   * COMPATIBILITY: global kind → serviceKey (all countries).
+   * Used only when boxDefaultServiceByCountry has no entry for CC+kind.
+   */
+  boxKindDefaultServiceKey: Partial<Record<'branch' | 'box', PacketaServiceKey>>
+}
+
+export const DEFAULT_PACKETA_SERVICE_IDENTITY: PacketaServiceIdentitySettings = {
+  catalog: [],
+  courierDefaultServiceByCountry: {},
+  boxDefaultServiceByCountry: {},
+  boxKindDefaultServiceKey: {},
+}
+
+export type CarrierConfigs = {
+  packeta?: CarrierConfig
+  gls?: CarrierConfig
+  novaPoshta?: CarrierConfig
+}
+
+export type PackagingPalletSettings = {
+  enabled: boolean
+  unitPrice: number
+  /** VariantAttributeValue.slug on CONTAINER attr — never translated labels. */
+  capacityByContainerSlug: Record<string, number>
+  autoPricingEnabled: boolean
+}
+
+export type PackagingStrategySettings = {
+  /** Mirrors packagingMode: flat | box(←boxes) | pallet */
+  mode: 'flat' | 'box' | 'pallet'
+  pallet: PackagingPalletSettings
+}
+
+export const DEFAULT_PACKETA_COD: PacketaCodSettings = {
+  carrierCost: {
+    enabled: false,
+    basis: 'COD_AMOUNT',
+    amountsAreNet: true,
+    tiers: [],
+  },
+  cardOnCod: {
+    enabled: false,
+    percent: 0,
+    basis: 'COD_AMOUNT_INCLUDING_VAT',
+    chargedTo: 'SENDER',
+    affectsCustomerTotal: false,
+  },
+  customerPrice: {
+    mode: 'none',
+    maxAmount: null,
+    feeBase: 'products_subtotal',
+    feeAmountsAreNet: true,
+    fixedAmount: 0,
+    tiers: [],
+  },
+}
+
+export const DEFAULT_PACKAGING_STRATEGY: PackagingStrategySettings = {
+  mode: 'flat',
+  pallet: {
+    enabled: false,
+    unitPrice: 0,
+    capacityByContainerSlug: {},
+    autoPricingEnabled: false,
+  },
+}
+
+export const DEFAULT_CARRIER_CONFIGS: CarrierConfigs = {
+  packeta: {
+    tariffAmountsAreNet: true,
+    services: {
+      'packeta-box': {
+        maxLongestSideCm: 120,
+        maxSideSumCm: 150,
+        maxGirthCm: 0,
+        supportsBoxes: true,
+        supportsPallets: false,
+        weightStrategy: 'ACTUAL_WEIGHT',
+      },
+      'packeta-courier': {
+        maxLongestSideCm: 120,
+        maxSideSumCm: 150,
+        maxGirthCm: 0,
+        supportsBoxes: true,
+        supportsPallets: false,
+        weightStrategy: 'ACTUAL_WEIGHT',
+      },
+    },
+    serviceIdentity: {
+      catalog: [],
+      courierDefaultServiceByCountry: {},
+      boxDefaultServiceByCountry: {},
+      boxKindDefaultServiceKey: {},
+    },
+    cod: {
+      ...DEFAULT_PACKETA_COD,
+      carrierCost: { ...DEFAULT_PACKETA_COD.carrierCost, tiers: [] },
+      cardOnCod: { ...DEFAULT_PACKETA_COD.cardOnCod },
+      customerPrice: { ...DEFAULT_PACKETA_COD.customerPrice, tiers: [] },
+    },
+  },
+  gls: {
+    tariffAmountsAreNet: true,
+    services: {
+      'gls-courier': {
+        maxLongestSideCm: 200,
+        maxSideSumCm: 0,
+        maxGirthCm: 300,
+        supportsBoxes: true,
+        supportsPallets: false,
+        weightStrategy: 'ACTUAL_WEIGHT',
+      },
+    },
+  },
+  novaPoshta: {
+    tariffAmountsAreNet: true,
+    services: {},
+  },
+}
+
 
 export type CheckoutBankDetails = {
   organizationName: string
@@ -89,24 +351,60 @@ export type CodFeeMode = 'fixed' | 'percent'
 /** Packeta fuel/toll: separate = add NET; included = already in base; none = do not apply. */
 export type CarrierSurchargeMode = 'separate' | 'included' | 'none'
 
+/** Insurance fee tier on declared goods value (not order.totalAmount). */
+export type CarrierInsuranceTier = {
+  /** Inclusive upper bound of declared goods value for this tier. */
+  upTo: number
+  fee: number
+}
+
+export type CarrierInsuranceSettings = {
+  enabled: boolean
+  /** When declared goods value exceeds this → service unavailable (do not price highest tier). */
+  maxDeclaredValue: number | null
+  tiers: CarrierInsuranceTier[]
+}
+
+/**
+ * Contractual non-depot surcharge reference.
+ * automaticCalculation is always false until a deterministic Packeta condition exists.
+ */
+export type CarrierNonDepotSettings = {
+  amount: number
+  automaticCalculation: false
+}
+
 export type CarrierSurchargeConfig = {
-  /** NET % of base transportation (editable; Packeta changes monthly). */
+  /** % of base transportation (not itself NET/GROSS). Resulting € follows tariff basis. */
   fuelPercent: number
   fuelMode: CarrierSurchargeMode
-  /** NET EUR per commenced kg (Packeta SK: 0.04). */
+  /** Monetary toll per commenced kg; price basis follows carrierTariffAmountsAreNet. */
   tollPerStartedKgNet: number
   tollMode: CarrierSurchargeMode
-  /** 0 = do not split (single parcel of cart weight). Packeta standard = 15. */
+  /**
+   * Max kg per carrier parcel for tariff split.
+   * Explicit `0` = do not split (single parcel). Default Packeta = 15.
+   * Independent of packaging `boxMaxWeightKg`.
+   */
   maxParcelWeightKg: number
+  /**
+   * Optional insurance. Default/missing = disabled (no sudden charge after deploy).
+   * Fee is NET and follows carrier tariff NET/GROSS conversion.
+   */
+  insurance?: CarrierInsuranceSettings
+  /**
+   * Optional non-depot reference. Never auto-added while automaticCalculation is false.
+   */
+  nonDepot?: CarrierNonDepotSettings
 }
 
 /**
  * Weight tiers for carrier_rates.
- * `amount` is always the contractual transportation price NET (without VAT, fuel, or toll).
+ * `amount` uses the same price basis as `carrierTariffAmountsAreNet` (default NET).
  */
 export type CarrierRateTier = {
   maxWeightKg: number
-  /** NET transportation price in deploy currency (EUR on SK). Never VAT-inclusive. */
+  /** Transportation price in deploy currency; basis = carrierTariffAmountsAreNet. */
   amount: number
 }
 
@@ -135,8 +433,9 @@ export type CartCheckoutSettings = {
   /** Якщо true — ПДВ уже в цінах товарів, рядок податку лише інформативний */
   taxIncluded: boolean
   /**
-   * Якщо true — DPH/VAT нараховується також на доставку та пакування
-   * (типово для SK/EU). UA за замовчуванням false.
+   * @deprecated Prefer fee VAT from NET/GROSS + order tax regime.
+   * SK quote/order paths force true. UA may still use for legacy fee participation.
+   * Does not rewrite historical Order snapshots.
    */
   taxAppliesToFees: boolean
   /** Безкоштовна доставка при самовивозі */
@@ -163,7 +462,12 @@ export type CartCheckoutSettings = {
    * Packeta/GLS surcharge policy, keyed like rate tables (`packeta-box`, `packeta-courier:SK`).
    */
   carrierSurcharges: Record<string, CarrierSurchargeConfig>
-  /** Default max kg per standard parcel when surcharge config omits maxParcelWeightKg. */
+  /**
+   * @deprecated Prefer per-service `carrierSurcharges[method].maxParcelWeightKg`.
+   * Kept as normalization fallback when a service has no surcharge config.
+   * Hidden from normal Backoffice UI. Explicit 0 here still falls back to 15 kg
+   * when no service surcharge exists (legacy Packeta behaviour).
+   */
   standardParcelMaxWeightKg: number
   /**
    * Shipping-calculation-only fallback when a variant has no factual/tare weight.
@@ -176,15 +480,34 @@ export type CartCheckoutSettings = {
    */
   packagingAmountsAreNet: boolean
   /**
-   * When true, codFeeAmount is NET and follows the same VAT path as delivery/packaging.
-   * Missing on legacy JSON → false (COD stays outside VAT extract — historical).
+   * When true, EU carrier tariff tiers + monetary surcharges (toll €/kg etc.) are NET.
+   * @deprecated Prefer carrierConfigs.packeta|gls|novaPoshta.tariffAmountsAreNet.
+   * Missing → true. Used only as fallback when carrier-specific value absent.
+   */
+  carrierTariffAmountsAreNet: boolean
+  /** Per-carrier ownership: limits, tariff NET, Packeta COD / card-on-COD notice. */
+  carrierConfigs: CarrierConfigs
+  /**
+   * Packaging strategy (BOX vs PALLET are alternatives).
+   * pallet no longer derives from boxCount.
+   */
+  packagingStrategy: PackagingStrategySettings
+  /**
+   * When true, COD fee follows VAT path.
+   * Missing on legacy JSON → false.
    */
   codFeeAmountsAreNet: boolean
   /** Керування розрахунком ваги кошика */
   cartWeight: CartWeightSettings
-  /** Макс. довжина / сума сторін / girth по способу доставки */
+  /**
+   * Size filter input. Prefer editing via carrierConfigs.*.services;
+   * normalize projects carrier limits into cartSize.limits.
+   */
   cartSize: CartSizeSettings
-  /** Комісія за післяплату (dobierka / COD) */
+  /**
+   * Legacy global COD — compatibility fallback when Packeta tiers empty/disabled.
+   * Prefer carrierConfigs.packeta.cod in Backoffice.
+   */
   codFeeAmount: number
   codFeeMode: CodFeeMode
   /** Провайдер, що обробляє `card-online` (сервер вирішує, checkout не показує вибір) */
@@ -314,6 +637,8 @@ export const DEFAULT_CART_CHECKOUT_SETTINGS: CartCheckoutSettings = {
       tollPerStartedKgNet: 0.04,
       tollMode: 'separate',
       maxParcelWeightKg: 15,
+      insurance: { enabled: false, maxDeclaredValue: null, tiers: [] },
+      nonDepot: { amount: 0, automaticCalculation: false },
     },
     'packeta-courier:SK': {
       fuelPercent: 18.5,
@@ -321,6 +646,8 @@ export const DEFAULT_CART_CHECKOUT_SETTINGS: CartCheckoutSettings = {
       tollPerStartedKgNet: 0.04,
       tollMode: 'separate',
       maxParcelWeightKg: 15,
+      insurance: { enabled: false, maxDeclaredValue: null, tiers: [] },
+      nonDepot: { amount: 0, automaticCalculation: false },
     },
     'packeta-courier': {
       fuelPercent: 18.5,
@@ -328,6 +655,8 @@ export const DEFAULT_CART_CHECKOUT_SETTINGS: CartCheckoutSettings = {
       tollPerStartedKgNet: 0.04,
       tollMode: 'included',
       maxParcelWeightKg: 15,
+      insurance: { enabled: false, maxDeclaredValue: null, tiers: [] },
+      nonDepot: { amount: 0, automaticCalculation: false },
     },
     'gls-courier': {
       fuelPercent: 0,
@@ -335,11 +664,16 @@ export const DEFAULT_CART_CHECKOUT_SETTINGS: CartCheckoutSettings = {
       tollPerStartedKgNet: 0,
       tollMode: 'none',
       maxParcelWeightKg: 0,
+      insurance: { enabled: false, maxDeclaredValue: null, tiers: [] },
+      nonDepot: { amount: 0, automaticCalculation: false },
     },
   },
   standardParcelMaxWeightKg: 15,
   defaultMissingWeightKg: 1,
   packagingAmountsAreNet: true,
+  carrierTariffAmountsAreNet: true,
+  carrierConfigs: structuredClone(DEFAULT_CARRIER_CONFIGS),
+  packagingStrategy: structuredClone(DEFAULT_PACKAGING_STRATEGY),
   codFeeAmountsAreNet: true,
   cartWeight: { ...DEFAULT_CART_WEIGHT_SETTINGS },
   cartSize: {

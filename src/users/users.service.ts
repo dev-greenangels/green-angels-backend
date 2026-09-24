@@ -10,8 +10,10 @@ import {
 import { AuthProvider, Prisma, Role } from '@prisma/client'
 import * as bcrypt from 'bcrypt'
 
-import { normalizePhoneE164 } from '../auth/auth.utils'
+import { normalizeStoredPhoneE164 } from '../auth/auth.utils'
+import { validatePhoneForPolicy } from '../auth/market-phone.util'
 import { LegalService } from '../legal/legal.service'
+import { SettingsService } from '../settings/settings.service'
 import { CreateStaffDto } from './dto/create-staff.dto'
 import { UpdateUserDto } from './dto/update-user.dto'
 import { UpdateUserGroupsDto } from './dto/update-user-groups.dto'
@@ -99,7 +101,19 @@ export class UsersService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => LegalService))
     private readonly legal: LegalService,
+    private readonly settings: SettingsService,
   ) {}
+
+  private async normalizePhoneForMarket(raw: string): Promise<string | null> {
+    const trimmed = raw.trim()
+    if (!trimmed) return null
+    // Already E.164 from OTP/checkout — never rewrite +421 into +380.
+    if (trimmed.startsWith('+')) {
+      return normalizeStoredPhoneE164(trimmed)
+    }
+    const market = await this.settings.getMarketSettings()
+    return validatePhoneForPolicy(trimmed, market.authPhonePolicy, market.region)
+  }
 
   private formatOrderNumber(orderNumber: number): string {
     return `ZY-${String(orderNumber).padStart(8, '0')}`
@@ -291,13 +305,14 @@ export class UsersService {
       }
     }
 
+    let normalizedPhone: string | null = null
     if (dto.phone !== undefined && dto.phone !== null) {
-      const normalized = normalizePhoneE164(dto.phone)
-      if (!normalized) {
+      normalizedPhone = await this.normalizePhoneForMarket(dto.phone)
+      if (!normalizedPhone) {
         throw new BadRequestException('Невірний формат телефону.')
       }
       const phoneTaken = await this.prisma.user.findFirst({
-        where: { phone: normalized, NOT: { id } },
+        where: { phone: normalizedPhone, NOT: { id } },
       })
       if (phoneTaken) {
         throw new ConflictException('Користувач з таким телефоном вже існує.')
@@ -316,7 +331,7 @@ export class UsersService {
       data.emailVerified = true
     }
     if (dto.phone !== undefined) {
-      data.phone = dto.phone ? normalizePhoneE164(dto.phone) : null
+      data.phone = dto.phone ? normalizedPhone : null
       if (dto.phone) data.phoneVerified = true
     }
     if (dto.role !== undefined) data.role = dto.role
@@ -326,24 +341,21 @@ export class UsersService {
 
     await this.prisma.user.update({ where: { id }, data })
 
-    if (dto.phone !== undefined && dto.phone) {
-      const phone = normalizePhoneE164(dto.phone)
-      if (phone) {
-        await this.prisma.account.upsert({
-          where: {
-            provider_providerId: {
-              provider: AuthProvider.PHONE,
-              providerId: phone,
-            },
-          },
-          create: {
+    if (dto.phone !== undefined && dto.phone && normalizedPhone) {
+      await this.prisma.account.upsert({
+        where: {
+          provider_providerId: {
             provider: AuthProvider.PHONE,
-            providerId: phone,
-            userId: id,
+            providerId: normalizedPhone,
           },
-          update: { userId: id },
-        })
-      }
+        },
+        create: {
+          provider: AuthProvider.PHONE,
+          providerId: normalizedPhone,
+          userId: id,
+        },
+        update: { userId: id },
+      })
     }
 
     return this.findOne(id)
@@ -498,7 +510,7 @@ export class UsersService {
     params: LinkOrphanOrdersParams,
   ): Promise<number> {
     const phone = params.phone
-      ? normalizePhoneE164(params.phone) ?? params.phone.trim()
+      ? (await this.normalizePhoneForMarket(params.phone)) ?? params.phone.trim()
       : null
     const email = params.email?.trim().toLowerCase() || null
     const matchFilters = this.buildOrderMatchFilters(phone, email)
@@ -535,7 +547,7 @@ export class UsersService {
   }): Promise<boolean> {
     const email = order.customerEmail?.trim().toLowerCase() || null
     const rawPhone = order.customerPhone.trim()
-    const phone = normalizePhoneE164(rawPhone) ?? (rawPhone || null)
+    const phone = (await this.normalizePhoneForMarket(rawPhone)) ?? (rawPhone || null)
     if (!email || !phone) return false
 
     const [emailOwner, phoneOwner] = await Promise.all([
@@ -551,7 +563,7 @@ export class UsersService {
    * Callers must already have set User.phone + phoneVerified=true.
    */
   async ensureVerifiedPhoneAccount(userId: string, phone: string): Promise<void> {
-    const normalized = normalizePhoneE164(phone) ?? phone.trim()
+    const normalized = (await this.normalizePhoneForMarket(phone)) ?? phone.trim()
     if (!normalized) {
       throw new BadRequestException('Невірний формат телефону.')
     }
@@ -624,7 +636,7 @@ export class UsersService {
 
   async findOrCreateCustomer(params: FindOrCreateCustomerParams): Promise<string> {
     const phone = params.phone
-      ? normalizePhoneE164(params.phone) ?? params.phone.trim()
+      ? (await this.normalizePhoneForMarket(params.phone)) ?? params.phone.trim()
       : null
     const email = params.email?.trim().toLowerCase() || null
     const firstName = params.firstName?.trim() || null

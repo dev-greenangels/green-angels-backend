@@ -65,6 +65,7 @@ export class PricingController {
       fallbackTaxIncluded: cartSettings.taxIncluded,
     })
 
+    // Customer deliveryAmount uses method:CC → method only (no Packeta fulfilment identity).
     let checkout = computeCheckoutTotals({
       productsSubtotal: quote.totalAmount,
       subtotalBeforeDiscount: quote.subtotalBeforeDiscount,
@@ -80,9 +81,14 @@ export class PricingController {
       cartWeightKg: quote.cartWeightKg,
       cartSizeEnvelope: quote.cartSizeEnvelope,
       cartVolumeL: quote.cartVolumeL,
+      containerQtyBySlug: quote.containerQtyBySlug,
       audienceRole: audience.role,
       deliveryCountryCode: dto.deliveryCountryCode,
       hostCountryCode: dto.countryCode,
+      productLines: quote.lines.map((line) => ({
+        unitGross: line.unitPrice,
+        quantity: line.quantity,
+      })),
       taxOverride: tax,
     })
 

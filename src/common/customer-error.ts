@@ -14,6 +14,10 @@ export const CustomerErrorCode = {
   CART_ITEMS_UNAVAILABLE: 'CART_ITEMS_UNAVAILABLE',
   ORDER_NOT_FOUND: 'ORDER_NOT_FOUND',
   ONLINE_CARD_UNAVAILABLE: 'ONLINE_CARD_UNAVAILABLE',
+  /** Genuine Flexi/local stock shortage at checkout. */
+  STOCK_UNAVAILABLE: 'STOCK_UNAVAILABLE',
+  /** Connected ERP business reject that is not a confirmed stock shortage. */
+  ORDER_PROCESSING_FAILED: 'ORDER_PROCESSING_FAILED',
 } as const
 
 export type CustomerErrorCodeValue = (typeof CustomerErrorCode)[keyof typeof CustomerErrorCode]

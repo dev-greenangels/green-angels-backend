@@ -62,6 +62,11 @@ export class OrderIdempotencyService {
       dto.customerPhone.trim(),
       dto.paymentMethod,
       dto.deliveryMethod,
+      (dto.billingStreet ?? '').trim().toLowerCase(),
+      (dto.billingHouseNumber ?? '').trim().toLowerCase(),
+      (dto.billingPostalCode ?? '').trim(),
+      (dto.billingCity ?? '').trim().toLowerCase(),
+      (dto.billingCountryCode ?? '').trim().toLowerCase(),
     ].join('|')
     return createHash('sha256').update(payload).digest('hex')
   }

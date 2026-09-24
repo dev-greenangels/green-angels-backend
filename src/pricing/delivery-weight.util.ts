@@ -11,7 +11,11 @@ export type WeighableVariant = {
   heightCm?: number | null
   volumetricWeightKg?: number | null
   attributeValues?: Array<{
-    value: { tareWeightKg: Prisma.Decimal | number | null }
+    value: {
+      tareWeightKg: Prisma.Decimal | number | null
+      slug?: string | null
+      attribute?: { valueType?: string | null } | null
+    }
   }>
 }
 
@@ -42,7 +46,9 @@ export function resolveVariantWeightKg(variant: WeighableVariant): number {
   return tare != null ? Number(tare) : 0
 }
 
-/** Об'ємна вага (кг): L×W×H / divisor, або збережене volumetricWeightKg. */
+/** Об'ємна вага (кг): L×W×H / divisor; fallback на збережене volumetricWeightKg (legacy /5000 snapshot).
+ * ProductVariant.volumetricWeightKg is NOT a carrier-independent chargeable weight.
+ */
 export function resolveVariantVolumetricKg(
   variant: WeighableVariant,
   divisor: number,
@@ -175,6 +181,28 @@ export function computeCartVolumeLiters(
     if (quantity <= 0) return sum
     return sum + resolveVariantVolumeLiters(variant) * quantity
   }, 0)
+}
+
+/**
+ * Aggregates cart quantities by CONTAINER VariantAttributeValue.slug (c2, c5, …).
+ * Stable key for pallet capacity rules — never translated labels.
+ */
+export function computeContainerQtyBySlug(
+  variants: WeighableVariant[],
+  quantityByVariantId: Map<string, number>,
+): Record<string, number> {
+  const result: Record<string, number> = {}
+  for (const variant of variants) {
+    const quantity = quantityByVariantId.get(variant.id) ?? 0
+    if (quantity <= 0) continue
+    const container = variant.attributeValues?.find(
+      (link) => link.value.attribute?.valueType === 'CONTAINER' && link.value.slug,
+    )
+    const slug = container?.value.slug?.trim().toLowerCase()
+    if (!slug) continue
+    result[slug] = (result[slug] ?? 0) + quantity
+  }
+  return result
 }
 
 /**

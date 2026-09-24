@@ -134,8 +134,12 @@ export class OtpService {
     return `${channel}:${purpose}:${id}`
   }
 
-  private requirePhone(phone: string, policy: PhonePolicy): string {
-    const normalized = validatePhoneForPolicy(phone, policy)
+  private requirePhone(
+    phone: string,
+    policy: PhonePolicy,
+    regionFallback?: 'ua' | 'sk',
+  ): string {
+    const normalized = validatePhoneForPolicy(phone, policy, regionFallback)
     if (!normalized) {
       throw new BadRequestException('Невірний формат телефону.')
     }
@@ -229,9 +233,10 @@ export class OtpService {
     ip?: string,
     purpose: OtpPurpose = 'login',
     locale?: string | null,
+    regionFallback?: 'ua' | 'sk',
   ): Promise<void> {
     const normalizedPurpose = this.normalizePurpose(purpose)
-    const normalized = this.requirePhone(phone, phonePolicy)
+    const normalized = this.requirePhone(phone, phonePolicy, regionFallback)
     await this.assertNotInCooldown('phone', normalizedPurpose, normalized)
     await this.consumeIpLimit('send', ip)
 
@@ -327,9 +332,10 @@ export class OtpService {
     phonePolicy: PhonePolicy,
     ip?: string,
     purpose: OtpPurpose = 'login',
+    regionFallback?: 'ua' | 'sk',
   ): Promise<{ verificationToken: string }> {
     const normalizedPurpose = this.normalizePurpose(purpose)
-    const normalized = this.requirePhone(phone, phonePolicy)
+    const normalized = this.requirePhone(phone, phonePolicy, regionFallback)
     return this.verifyChannelOtp('phone', normalizedPurpose, normalized, code, ip)
   }
 

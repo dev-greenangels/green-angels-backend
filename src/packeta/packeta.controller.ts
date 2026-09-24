@@ -33,7 +33,10 @@ export class PacketaController {
 @UseGuards(BackstageJwtAuthGuard, RolesGuard)
 @Roles(Role.ADMIN, Role.MANAGER)
 export class PacketaAdminController {
-  constructor(private readonly settings: PacketaSettingsService) {}
+  constructor(
+    private readonly settings: PacketaSettingsService,
+    private readonly packeta: PacketaService,
+  ) {}
 
   @Get('settings')
   getSettings() {
@@ -43,5 +46,16 @@ export class PacketaAdminController {
   @Patch('settings')
   updateSettings(@Body() dto: Partial<PacketaSettings>) {
     return this.settings.updateSettings(dto)
+  }
+
+  /**
+   * READ-ONLY Packeta carriers feed (carrier/json) for Backstage diagnostics.
+   * Never returns apiKey / apiPassword. Does not create shipments.
+   * Query `refresh=1` bypasses in-memory cache.
+   */
+  @Get('carriers')
+  listCarriers(@Query('refresh') refresh?: string) {
+    const forceRefresh = refresh === '1' || refresh === 'true'
+    return this.packeta.listCarriers({ forceRefresh })
   }
 }

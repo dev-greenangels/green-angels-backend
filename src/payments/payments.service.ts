@@ -134,22 +134,27 @@ export class PaymentsService {
     const confirmationQuery = confirmationToken
       ? `&confirmation=${encodeURIComponent(confirmationToken)}`
       : ''
-    const metadata: Record<string, string> = {}
-    if (order.buyerType) metadata.buyerType = order.buyerType
-    if (order.companyVatId) metadata.companyVatId = order.companyVatId
+    const variableSymbol = String(order.orderNumber)
+    const stripeMeta: Record<string, string> = {
+      orderId: order.id,
+      orderNumber,
+      variableSymbol,
+    }
+    if (order.buyerType) stripeMeta.buyerType = order.buyerType
+    if (order.companyVatId) stripeMeta.companyVatId = order.companyVatId
 
     const input: CreatePaymentInput = {
       orderId: order.id,
       orderNumber: order.orderNumber,
       amount: Number(order.totalAmount),
       currency: order.currency,
-      description: `Замовлення ${orderNumber}`,
+      description: `Green Angels order ${orderNumber}`,
       customerEmail: order.customerEmail,
       successUrl: `${shopUrl}/checkout/success?order=${encodeURIComponent(orderNumber)}${confirmationQuery}`,
       failUrl: `${shopUrl}/checkout/success?order=${encodeURIComponent(orderNumber)}${confirmationQuery}&payment=cancelled`,
       returnUrl: `${shopUrl}/checkout?stripe_return=1&order=${encodeURIComponent(orderNumber)}${confirmationQuery}`,
       confirmationToken: confirmationToken || undefined,
-      metadata: Object.keys(metadata).length ? metadata : undefined,
+      metadata: stripeMeta,
     }
 
     const result = await provider.createPayment(input)

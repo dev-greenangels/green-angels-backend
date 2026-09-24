@@ -244,6 +244,32 @@ export class CreateOrderDto {
   @MaxLength(32)
   companyPostalCode?: string
 
+  /** SK/EU billing/invoice address snapshot (required for new SK orders) */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  billingStreet?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  billingHouseNumber?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  billingCity?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  billingPostalCode?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(8)
+  billingCountryCode?: string
+
   /** Preferred dispatch date YYYY-MM-DD */
   @IsOptional()
   @IsString()

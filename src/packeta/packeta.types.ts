@@ -76,6 +76,11 @@ export type PacketaPickupPoint = {
   zip: string
   country: string
   kind: PacketaPickupPointKind
+  /**
+   * Packeta partner-network carrier id from carrier_point feed group.
+   * Present for kind=carrier; absent for native branch/box feeds.
+   */
+  packetaCarrierId?: number
   /** From feed `maxWeight` (kg), when present. */
   maxWeightKg?: number
   lat?: number
@@ -126,3 +131,11 @@ export type PacketaLabelResult = {
   labelPdfBase64?: string
   message: string
 }
+
+// Re-export carriers feed types (read-only reference data — not used in checkout).
+export type {
+  PacketaBdsStatus,
+  PacketaCarrier,
+  PacketaCarriersFeedResult,
+} from './packeta-carriers'
+

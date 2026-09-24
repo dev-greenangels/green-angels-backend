@@ -19,7 +19,8 @@ export class GlsAdminController {
   }
 
   @Patch('settings')
-  updateSettings(@Body() dto: Partial<GlsSettings>) {
-    return this.settings.updateSettings(dto)
+  async updateSettings(@Body() dto: Partial<GlsSettings>) {
+    await this.settings.updateSettings(dto)
+    return this.settings.getPublicSettings()
   }
 }

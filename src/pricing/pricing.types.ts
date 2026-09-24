@@ -112,6 +112,8 @@ export type PricingQuoteResult = {
   }
   /** Об’єм кошика (л) для packagingMode=boxes */
   cartVolumeL?: number
+  /** CONTAINER VariantAttributeValue.slug → qty (pallet occupancy) */
+  containerQtyBySlug?: Record<string, number>
   /**
    * @deprecated Missing product weight now uses defaultMissingWeightKg; kept optional for older clients.
    */

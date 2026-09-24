@@ -9,7 +9,14 @@ const NEW_PHONE = '+421900000001'
 const ADMIN_PHONE = '+380000000000'
 
 function createUsersService(prisma: unknown) {
-  return new UsersService(prisma as never)
+  const settings = {
+    getMarketSettings: async () => ({
+      region: 'sk' as const,
+      authPhonePolicy: 'intl' as const,
+      deliveryPhonePolicy: 'intl' as const,
+    }),
+  }
+  return new UsersService(prisma as never, {} as never, settings as never)
 }
 
 describe('findOrCreateCustomer — proven contact identity', () => {
