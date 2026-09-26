@@ -2,11 +2,13 @@ import { InjectQueue } from '@nestjs/bullmq'
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { Queue } from 'bullmq'
 
+import { CHECKOUT_DRAFT_PII_CLEANUP_EVERY_MS } from '../carts/cart-pii-retention'
 import {
   APP_JOB_NAMES,
   APP_QUEUE,
   EXPIRE_UNPAID_CARD_ORDERS_EVERY_MS,
   EXPIRE_UNPAID_CARD_ORDERS_JOB_ID,
+  SANITIZE_CHECKOUT_DRAFT_PII_JOB_ID,
   type AppJobPayload,
   type OrderEmailJobType,
 } from './queue.constants'
@@ -19,6 +21,7 @@ export class QueueService implements OnModuleInit {
 
   async onModuleInit() {
     await this.registerExpireUnpaidRepeatable()
+    await this.registerSanitizeCheckoutDraftPiiRepeatable()
   }
 
   private async registerExpireUnpaidRepeatable() {
@@ -49,6 +52,40 @@ export class QueueService implements OnModuleInit {
     } catch (error) {
       this.logger.warn(
         `expire-unpaid repeatable register: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+  }
+
+  private async registerSanitizeCheckoutDraftPiiRepeatable() {
+    try {
+      const existing = await this.queue.getRepeatableJobs()
+      for (const job of existing) {
+        if (
+          job.id === SANITIZE_CHECKOUT_DRAFT_PII_JOB_ID ||
+          job.name === APP_JOB_NAMES.SANITIZE_CHECKOUT_DRAFT_PII
+        ) {
+          await this.queue.removeRepeatableByKey(job.key)
+        }
+      }
+
+      await this.queue.add(
+        APP_JOB_NAMES.SANITIZE_CHECKOUT_DRAFT_PII,
+        { type: 'sanitize-checkout-draft-pii' },
+        {
+          jobId: SANITIZE_CHECKOUT_DRAFT_PII_JOB_ID,
+          repeat: { every: CHECKOUT_DRAFT_PII_CLEANUP_EVERY_MS },
+          removeOnComplete: 20,
+          removeOnFail: 50,
+        },
+      )
+      this.logger.log(
+        `Scheduled ${APP_JOB_NAMES.SANITIZE_CHECKOUT_DRAFT_PII} every ${CHECKOUT_DRAFT_PII_CLEANUP_EVERY_MS / 1000}s`,
+      )
+    } catch (error) {
+      this.logger.warn(
+        `sanitize-checkout-draft-pii repeatable register: ${
           error instanceof Error ? error.message : String(error)
         }`,
       )

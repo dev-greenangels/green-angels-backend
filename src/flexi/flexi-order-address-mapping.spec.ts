@@ -59,6 +59,47 @@ describe('resolveFlexiOrderAddressMapping', () => {
     assert.equal(m.adresarCity, 'Nitra')
   })
 
+  it('B2C nazFirmy uses billing person when set (not orderer)', () => {
+    const m = resolveFlexiOrderAddressMapping({
+      customerFirstName: 'Jan',
+      customerLastName: 'Novak',
+      billingFirstName: 'Maria',
+      billingLastName: 'Novakova',
+      receiverFirstName: 'Peter',
+      receiverLastName: 'Novak',
+      deliveryMethod: 'packeta-courier',
+      billingStreet: 'Hlavná',
+      billingHouseNumber: '1',
+      billingCity: 'Bratislava',
+      billingPostalCode: '811 01',
+      billingCountryCode: 'sk',
+      deliveryStreet: 'Hlavná',
+      deliveryHouseNumber: '1',
+      deliveryCity: 'Bratislava',
+      deliveryPostalCode: '811 01',
+      deliveryCountryCode: 'sk',
+    })
+    assert.equal(m.document.nazFirmy, 'Maria Novakova')
+  })
+
+  it('B2C nazFirmy falls back to customer when billing names null', () => {
+    const m = resolveFlexiOrderAddressMapping({
+      ...base,
+      deliveryMethod: 'packeta-courier',
+      billingStreet: 'Hlavná',
+      billingHouseNumber: '1',
+      billingCity: 'Bratislava',
+      billingPostalCode: '811 01',
+      billingCountryCode: 'sk',
+      deliveryStreet: 'Hlavná',
+      deliveryHouseNumber: '1',
+      deliveryCity: 'Bratislava',
+      deliveryPostalCode: '811 01',
+      deliveryCountryCode: 'sk',
+    })
+    assert.equal(m.document.nazFirmy, 'Dušan Štofík')
+  })
+
   it('Packeta Z-BOX + separate billing — point never in Adresar sídlo', () => {
     const m = resolveFlexiOrderAddressMapping({
       ...base,

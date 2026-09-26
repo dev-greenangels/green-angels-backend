@@ -67,6 +67,8 @@ export class OrderIdempotencyService {
       (dto.billingPostalCode ?? '').trim(),
       (dto.billingCity ?? '').trim().toLowerCase(),
       (dto.billingCountryCode ?? '').trim().toLowerCase(),
+      (dto.billingFirstName ?? '').trim().toLowerCase(),
+      (dto.billingLastName ?? '').trim().toLowerCase(),
     ].join('|')
     return createHash('sha256').update(payload).digest('hex')
   }

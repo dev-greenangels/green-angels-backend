@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq'
 import { Module, forwardRef } from '@nestjs/common'
 
+import { CartsModule } from '../carts/carts.module'
 import { MailModule } from '../mail/mail.module'
 import { OrdersModule } from '../orders/orders.module'
 import { PrismaModule } from '../prisma/prisma.module'
@@ -17,6 +18,7 @@ import { QueueService } from './queue.service'
     }),
     PrismaModule,
     MailModule,
+    CartsModule,
     forwardRef(() => OrdersModule),
     forwardRef(() => StockNotificationsModule),
   ],

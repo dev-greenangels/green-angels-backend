@@ -76,6 +76,8 @@ export type FlexiOrderAddressSource = {
   deliveryMethod: string
   customerFirstName: string
   customerLastName: string
+  billingFirstName?: string | null
+  billingLastName?: string | null
   receiverFirstName: string
   receiverLastName: string
   receiverCompanyName?: string | null
@@ -161,6 +163,9 @@ export function resolveFlexiOrderAddressMapping(
 ): FlexiOrderAddressMapping {
   const isB2b = Boolean(order.companyIco?.trim() || order.companyVatId?.trim())
   const contactName = `${order.customerFirstName} ${order.customerLastName}`.trim()
+  const billingPersonName = `${
+    order.billingFirstName?.trim() || order.customerFirstName
+  } ${order.billingLastName?.trim() || order.customerLastName}`.trim()
   const receiverName = `${order.receiverFirstName} ${order.receiverLastName}`.trim()
   const hasDifferentReceiver =
     Boolean(receiverName) &&
@@ -168,7 +173,7 @@ export function resolveFlexiOrderAddressMapping(
       order.receiverLastName !== order.customerLastName)
   const nazFirmy = isB2b
     ? (order.companyLegalName?.trim() || contactName)
-    : contactName
+    : billingPersonName
 
   const billingStreetJoined = joinStreet(order.billingStreet, order.billingHouseNumber)
   const hasBillingSnapshot = Boolean(

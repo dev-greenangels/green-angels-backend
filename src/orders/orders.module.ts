@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common'
 
+import { CartsModule } from '../carts/carts.module'
 import { AuthModule } from '../auth/auth.module'
 import { CancellationReasonsModule } from '../cancellation-reasons/cancellation-reasons.module'
 import { CommerceModule } from '../commerce/commerce.module'
@@ -46,6 +47,7 @@ import { OrdersService } from './orders.service'
     MailModule,
     ViesModule,
     LegalModule,
+    CartsModule,
   ],
   controllers: [OrdersController],
   providers: [

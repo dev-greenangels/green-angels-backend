@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -11,6 +12,8 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import { Role } from '@prisma/client'
+import { Type } from 'class-transformer'
+import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator'
 import type { Request, Response } from 'express'
 
 import type { SessionJwtPayload } from '../auth/auth.constants'
@@ -20,8 +23,56 @@ import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard'
 import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { GUEST_CART_COOKIE_NAME } from './cart.constants'
-import { CartsService } from './carts.service'
+import { CartsService, type BackstageCartStateFilter } from './carts.service'
 import { MergeCartDto, SyncCartDto } from './dto/sync-cart.dto'
+import { UpdateCheckoutDraftDto } from './dto/update-checkout-draft.dto'
+
+class BackstageCartsQueryDto {
+  @IsOptional()
+  @IsString()
+  search?: string
+
+  @IsOptional()
+  @IsIn(['guest', 'user', 'all'])
+  kind?: 'guest' | 'user' | 'all'
+
+  @IsOptional()
+  @IsIn([
+    'all',
+    'active',
+    'abandoned',
+    'cart_only',
+    'checkout_started',
+    'cart_abandoned',
+    'checkout_abandoned',
+  ])
+  state?: BackstageCartStateFilter
+
+  @IsOptional()
+  @IsString()
+  locale?: string
+
+  @IsOptional()
+  @IsString()
+  updatedFrom?: string
+
+  @IsOptional()
+  @IsString()
+  updatedTo?: string
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  pageSize?: number
+}
 
 @Controller('carts')
 export class CartsController {
@@ -50,6 +101,37 @@ export class CartsController {
     return this.carts.syncCart(owner, dto, locale)
   }
 
+  @Get('me/checkout-draft')
+  @UseGuards(OptionalJwtAuthGuard)
+  getCheckoutDraft(
+    @Req() req: Request & { user?: SessionJwtPayload },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const owner = this.carts.resolveOwner(req, res)
+    return this.carts.getCheckoutDraft(owner)
+  }
+
+  @Patch('me/checkout-draft')
+  @UseGuards(OptionalJwtAuthGuard)
+  patchCheckoutDraft(
+    @Body() dto: UpdateCheckoutDraftDto,
+    @Req() req: Request & { user?: SessionJwtPayload },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const owner = this.carts.resolveOwner(req, res)
+    return this.carts.upsertCheckoutDraft(owner, dto)
+  }
+
+  @Post('me/checkout-start')
+  @UseGuards(OptionalJwtAuthGuard)
+  startCheckout(
+    @Req() req: Request & { user?: SessionJwtPayload },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const owner = this.carts.resolveOwner(req, res)
+    return this.carts.startCheckout(owner)
+  }
+
   @Get('merge-preview')
   @UseGuards(JwtAuthGuard)
   mergePreview(
@@ -75,11 +157,17 @@ export class CartsController {
   @Get()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)
-  listBackstage(
-    @Query('search') search?: string,
-    @Query('kind') kind?: 'guest' | 'user' | 'all',
-  ) {
-    return this.carts.listBackstage({ search, kind })
+  listBackstage(@Query() query: BackstageCartsQueryDto) {
+    return this.carts.listBackstage({
+      search: query.search,
+      kind: query.kind,
+      state: query.state,
+      locale: query.locale,
+      updatedFrom: query.updatedFrom,
+      updatedTo: query.updatedTo,
+      page: query.page,
+      pageSize: query.pageSize,
+    })
   }
 
   @Get(':id')

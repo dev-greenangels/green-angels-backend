@@ -726,13 +726,17 @@ model PromoCodeUsage {
 // ==========================================
 
 model Cart {
-  id             String     @id @default(uuid())
-  userId         String?    @unique
-  user           User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  guestSessionId String?    @unique
-  items          CartItem[]
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id                String     @id @default(uuid())
+  userId            String?    @unique
+  user              User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  guestSessionId    String?    @unique
+  /// Best-effort checkout form recovery / Backoffice PII — never order authority.
+  checkoutDraft     Json?
+  /// Set once when checkout is first entered; not reset on later edits.
+  checkoutStartedAt DateTime?
+  items             CartItem[]
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
   @@index([updatedAt])
 }
@@ -863,6 +867,9 @@ model Order {
   billingPostalCode      String?
   /// ISO country code for billing (sk|hu|at|…)
   billingCountryCode     String?
+  /// B2C invoice person (independent of customer*). Null on legacy → fall back to customer*.
+  billingFirstName       String?
+  billingLastName        String?
   /// Customer-selected preferred dispatch / ship date
   preferredShipDate      DateTime?
   monopayInvoiceId       String?              @unique

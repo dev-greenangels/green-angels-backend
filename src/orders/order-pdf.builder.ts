@@ -5,6 +5,10 @@ import type { MarketSettings } from '../settings/market.types'
 import { formatEuVatId } from '../vies/vies.types'
 import type { OrderDocumentPdfInput } from '../mail/order-document-pdf'
 import {
+  effectiveBillingFirstName,
+  effectiveBillingLastName,
+} from './order-billing-identity'
+import {
   getOrderPdfLabels,
   resolveOrderPdfLocale,
   type OrderPdfLocale,
@@ -56,11 +60,17 @@ function formatDeliveryAddress(order: OrderWithItems, pickupLabel: string): stri
 }
 
 function formatBillingAddress(order: OrderWithItems): string[] {
-  const lines = [
-    order.companyStreet,
-    [order.companyPostalCode, order.companyCity].filter(Boolean).join(' '),
+  if (order.buyerType === 'company') {
+    return [
+      order.companyStreet,
+      [order.companyPostalCode, order.companyCity].filter(Boolean).join(' '),
+    ].filter(Boolean) as string[]
+  }
+  return [
+    [order.billingStreet, order.billingHouseNumber].filter(Boolean).join(' '),
+    [order.billingPostalCode, order.billingCity].filter(Boolean).join(' '),
+    order.billingCountryCode?.trim().toUpperCase() || '',
   ].filter(Boolean) as string[]
-  return lines
 }
 
 function isBankTransfer(method: string): boolean {
@@ -140,10 +150,13 @@ export function buildOrderDocumentPdfInput(input: {
   const buyerName = isCompany
     ? order.companyLegalName?.trim() ||
       formatPersonName(order.customerFirstName, order.customerLastName, order.customerPatronymic)
-    : formatPersonName(order.customerFirstName, order.customerLastName, order.customerPatronymic)
+    : formatPersonName(
+        effectiveBillingFirstName(order),
+        effectiveBillingLastName(order),
+      )
 
   const buyerLines = [
-    ...(isCompany ? formatBillingAddress(order) : []),
+    ...formatBillingAddress(order),
     order.customerEmail ?? '',
     order.customerPhone,
     ...(isCompany

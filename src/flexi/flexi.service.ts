@@ -1845,6 +1845,9 @@ export class FlexiService {
 
     const isB2b = Boolean(order.companyIco?.trim() || order.companyVatId?.trim())
     const contactName = `${order.customerFirstName} ${order.customerLastName}`.trim()
+    const billingPersonName = `${
+      order.billingFirstName?.trim() || order.customerFirstName
+    } ${order.billingLastName?.trim() || order.customerLastName}`.trim()
     const receiverName = `${order.receiverFirstName} ${order.receiverLastName}`.trim()
     const hasDifferentReceiver =
       receiverName &&
@@ -1870,7 +1873,7 @@ export class FlexiService {
       firmaRef = await this.ensureAdresarForOrder(
         order,
         isB2b,
-        contactName,
+        isB2b ? contactName : billingPersonName,
         addressMapping.adresarStreet,
         addressMapping.adresarCity,
         addressMapping.adresarPostal,

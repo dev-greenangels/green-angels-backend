@@ -25,10 +25,7 @@ import {
   resolveStockNotificationLocale,
   type StockNotificationLocale,
 } from './stock-notification-locale'
-
-const CYRILLIC_NAME_REGEX = /^[А-Яа-яІіЇїЄєҐґ'ʼ]{2,}$/
-const LATIN_NAME_REGEX =
-  /^[A-Za-zÀ-ÖØ-öø-ÿĀ-žĄąĆćČčĎďĐđĘęĚěĹĺĽľŁłŃńŇňŐőŘřŚśŠšŤťŮůŰűŹźŻżŽž'ʼ\- ]{2,}$/
+import { isPersonNameUsableForMarket } from '../orders/market-person-name-policy'
 
 const DEFAULT_PAGE_SIZE = 20
 const SEND_BATCH = 40
@@ -70,18 +67,11 @@ export class StockNotificationsService {
   ) {}
 
   private assertValidName(name: string, region: 'ua' | 'sk') {
-    const trimmed = name.trim()
-    if (region === 'sk') {
-      if (!LATIN_NAME_REGEX.test(trimmed) || !/[A-Za-zÀ-ÖØ-öø-ÿĀ-ž]/.test(trimmed)) {
-        throw new BadRequestException(
-          'Meno musí obsahovať iba písmená (minimálne 2 znaky).',
-        )
-      }
-      return
-    }
-    if (!CYRILLIC_NAME_REGEX.test(trimmed)) {
+    if (!isPersonNameUsableForMarket(name, region)) {
       throw new BadRequestException(
-        'Імʼя має містити лише літери (мінімум 2 символи).',
+        region === 'sk'
+          ? 'Meno musí obsahovať iba písmená (minimálne 2 znaky).'
+          : 'Імʼя має містити лише літери (мінімум 2 символи).',
       )
     }
   }

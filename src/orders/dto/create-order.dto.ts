@@ -270,6 +270,17 @@ export class CreateOrderDto {
   @MaxLength(8)
   billingCountryCode?: string
 
+  /** SK B2C invoice person (independent of customer*). Not used for B2B company. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  billingFirstName?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  billingLastName?: string
+
   /** Preferred dispatch date YYYY-MM-DD */
   @IsOptional()
   @IsString()

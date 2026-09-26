@@ -3,6 +3,7 @@ import { Inject, Logger, forwardRef } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Job } from 'bullmq'
 
+import { CartPiiRetentionService } from '../carts/cart-pii-retention.service'
 import { MailService } from '../mail/mail.service'
 import { resolveShopPublicOrigin } from '../mail/country-hosts'
 import { OrderConfirmationTokenService } from '../orders/order-confirmation-token.service'
@@ -27,6 +28,7 @@ export class QueueProcessor extends WorkerHost {
     private readonly mail: MailService,
     private readonly config: ConfigService,
     private readonly confirmationTokens: OrderConfirmationTokenService,
+    private readonly cartPiiRetention: CartPiiRetentionService,
     @Inject(forwardRef(() => OrderPaymentLifecycleService))
     private readonly paymentLifecycle: OrderPaymentLifecycleService,
     @Inject(forwardRef(() => OrdersService))
@@ -51,6 +53,17 @@ export class QueueProcessor extends WorkerHost {
       const result = await this.paymentLifecycle.expireUnpaidCardOrders()
       this.logger.log(
         `expire-unpaid-card-orders: examined=${result.examined} cancelled=${result.cancelled}`,
+      )
+      return result
+    }
+
+    if (
+      job.name === APP_JOB_NAMES.SANITIZE_CHECKOUT_DRAFT_PII ||
+      job.data.type === 'sanitize-checkout-draft-pii'
+    ) {
+      const result = await this.cartPiiRetention.sanitizeExpiredCheckoutDrafts()
+      this.logger.log(
+        `sanitize-checkout-draft-pii: examined=${result.examined} sanitized=${result.sanitized}`,
       )
       return result
     }

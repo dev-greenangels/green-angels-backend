@@ -28,6 +28,7 @@ import { ProductsService } from '../products/products.service'
 import { VARIANT_LABEL_ATTRIBUTE_SELECT } from '../products/variant-label.util'
 import { ViesService } from '../vies/vies.service'
 import { CreateOrderDto } from './dto/create-order.dto'
+import { isPersonNameUsableForMarket } from './market-person-name-policy'
 import { PatchOrderDto } from './dto/patch-order.dto'
 import { type OrderStatus } from './order-status.constants'
 import { ONLINE_CARD_PAYMENT_METHOD } from '../payments/payments.constants'
@@ -50,6 +51,7 @@ import { OrderIdempotencyService } from './order-idempotency.service'
 import { OrderPaymentLifecycleService } from './order-payment-lifecycle.service'
 import { StripePaymentProvider } from '../payments/stripe.payment-provider'
 import { MonopayService } from '../monopay/monopay.service'
+import { CartsService, type CartOwner } from '../carts/carts.service'
 import { customerBadRequest, CustomerErrorCode } from '../common/customer-error'
 import { isConnectedCheckoutStockReject } from './connected-checkout-reject'
 import {
@@ -142,6 +144,8 @@ export type BackstageOrderDetail = BackstageOrderListItem & {
   billingCity: string | null
   billingPostalCode: string | null
   billingCountryCode: string | null
+  billingFirstName: string | null
+  billingLastName: string | null
   countrySiteCode: string | null
   locale: string | null
   paymentMethod: string
@@ -296,6 +300,8 @@ export type PublicOrderConfirmation = {
   billingCity: string | null
   billingPostalCode: string | null
   billingCountryCode: string | null
+  billingFirstName: string | null
+  billingLastName: string | null
   deliveryPostalCode: string | null
   deliveryCountryCode: string | null
   items: PublicOrderConfirmationItem[]
@@ -330,6 +336,7 @@ export class OrdersService {
     private readonly stripeProvider: StripePaymentProvider,
     private readonly monopay: MonopayService,
     private readonly packeta: PacketaService,
+    private readonly carts: CartsService,
   ) {}
 
   private statusLabelCache: Map<string, string> | null = null
@@ -393,6 +400,8 @@ export class OrdersService {
     billingCity: string | null
     billingPostalCode: string | null
     billingCountryCode: string | null
+    billingFirstName: string | null
+    billingLastName: string | null
     deliveryPostalCode: string | null
     deliveryCountryCode: string | null
   }) {
@@ -413,6 +422,8 @@ export class OrdersService {
       billingCity: order.billingCity,
       billingPostalCode: order.billingPostalCode,
       billingCountryCode: order.billingCountryCode,
+      billingFirstName: order.billingFirstName,
+      billingLastName: order.billingLastName,
       deliveryPostalCode: order.deliveryPostalCode,
       deliveryCountryCode: order.deliveryCountryCode,
     }
@@ -839,6 +850,8 @@ export class OrdersService {
       billingCity: order.billingCity,
       billingPostalCode: order.billingPostalCode,
       billingCountryCode: order.billingCountryCode,
+      billingFirstName: order.billingFirstName,
+      billingLastName: order.billingLastName,
       countrySiteCode: order.countrySiteCode,
       locale: order.locale,
       paymentMethod: order.paymentMethod,
@@ -1712,6 +1725,14 @@ export class OrdersService {
     if (!isCompany && !dto.billingHouseNumber?.trim()) {
       throw new BadRequestException('Вкажіть номер будинку фактураційної адреси.')
     }
+    if (!isCompany) {
+      if (!dto.billingFirstName?.trim() || dto.billingFirstName.trim().length < 2) {
+        throw new BadRequestException('Вкажіть імʼя для фактураційних даних.')
+      }
+      if (!dto.billingLastName?.trim() || dto.billingLastName.trim().length < 2) {
+        throw new BadRequestException('Вкажіть прізвище для фактураційних даних.')
+      }
+    }
   }
 
   private async validateCheckoutMethods(
@@ -1776,21 +1797,39 @@ export class OrdersService {
     dto: CreateOrderDto,
     sessionUserId?: string,
     idempotencyKey?: string,
+    cartOwner?: CartOwner | null,
   ): Promise<CreatedOrderResponse> {
     const key = this.orderIdempotency.normalizeKey(idempotencyKey)
     if (!key) {
-      return this.executeCreate(dto, sessionUserId)
+      return this.executeCreate(dto, sessionUserId, cartOwner)
     }
 
     const fingerprint = this.orderIdempotency.buildFingerprint(dto, sessionUserId)
 
     const cached = await this.orderIdempotency.getMatchingResult(key, fingerprint)
-    if (cached) return cached
+    if (cached) {
+      // Replay: only clear if cart still matches this order's items (no newer lines).
+      await this.clearOriginatingCartAfterSuccessfulOrder(cartOwner, dto, 'idempotent_replay')
+      await this.maybeFillUserProfileNamesFromOrder({
+        userId: sessionUserId ?? null,
+        customerFirstName: dto.customerFirstName,
+        customerLastName: dto.customerLastName,
+      })
+      return cached
+    }
 
     let acquired = await this.orderIdempotency.tryAcquireLock(key)
     if (!acquired) {
       const waited = await this.orderIdempotency.waitForMatchingResult(key, fingerprint)
-      if (waited) return waited
+      if (waited) {
+        await this.clearOriginatingCartAfterSuccessfulOrder(cartOwner, dto, 'idempotent_replay')
+        await this.maybeFillUserProfileNamesFromOrder({
+          userId: sessionUserId ?? null,
+          customerFirstName: dto.customerFirstName,
+          customerLastName: dto.customerLastName,
+        })
+        return waited
+      }
 
       // First request failed before caching a result (lock released, no record).
       // Same key + same fingerprint may safely retry create.
@@ -1808,9 +1847,17 @@ export class OrdersService {
         key,
         fingerprint,
       )
-      if (cachedAfterLock) return cachedAfterLock
+      if (cachedAfterLock) {
+        await this.clearOriginatingCartAfterSuccessfulOrder(cartOwner, dto, 'idempotent_replay')
+        await this.maybeFillUserProfileNamesFromOrder({
+          userId: sessionUserId ?? null,
+          customerFirstName: dto.customerFirstName,
+          customerLastName: dto.customerLastName,
+        })
+        return cachedAfterLock
+      }
 
-      const response = await this.executeCreate(dto, sessionUserId)
+      const response = await this.executeCreate(dto, sessionUserId, cartOwner)
       try {
         await this.orderIdempotency.storeResult(key, fingerprint, response)
       } catch (err) {
@@ -1827,9 +1874,101 @@ export class OrdersService {
     }
   }
 
+  /**
+   * Best-effort cart empty after Order is durable. Never rolls back the Order.
+   * Fresh create: clear owned cart unconditionally.
+   * Idempotent replay: clear only when cart lines are covered by this DTO's items
+   * (avoids wiping items the customer added after the original purchase).
+   */
+  private async clearOriginatingCartAfterSuccessfulOrder(
+    cartOwner: CartOwner | null | undefined,
+    dto: CreateOrderDto,
+    mode: 'create' | 'idempotent_replay',
+  ): Promise<void> {
+    if (!cartOwner) return
+    try {
+      if (mode === 'create') {
+        await this.carts.clearCartContentsForOwner(cartOwner)
+        return
+      }
+      const result = await this.carts.clearCartContentsForOwnerIfCoveredByOrderItems(
+        cartOwner,
+        dto.items,
+      )
+      if (!result.cleared && result.skippedReason === 'cart_has_newer_items') {
+        this.logger.log(
+          `Skipped post-order cart clear on idempotent replay (${cartOwner.kind}): cart has newer items.`,
+        )
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Post-order cart clear failed (${mode}, ${cartOwner.kind}): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
+  }
+
+  /**
+   * After durable Order: fill User.firstName/lastName from ORDERER only when
+   * missing or unusable for the deploy market. Never billing/receiver/phone.
+   * Best-effort — must not fail the order. Idempotent via conditional update.
+   */
+  private async maybeFillUserProfileNamesFromOrder(order: {
+    userId: string | null
+    customerFirstName: string
+    customerLastName: string
+  }): Promise<void> {
+    if (!order.userId) return
+    try {
+      const market = await this.settings.getMarketSettings()
+      const region = market.region === 'sk' ? 'sk' : 'ua'
+
+      const orderFirst = order.customerFirstName.trim()
+      const orderLast = order.customerLastName.trim()
+      if (
+        !isPersonNameUsableForMarket(orderFirst, region) ||
+        !isPersonNameUsableForMarket(orderLast, region)
+      ) {
+        return
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: order.userId },
+        select: { id: true, firstName: true, lastName: true },
+      })
+      if (!user) return
+
+      const firstUsable = isPersonNameUsableForMarket(user.firstName, region)
+      const lastUsable = isPersonNameUsableForMarket(user.lastName, region)
+      if (firstUsable && lastUsable) return
+
+      const data: { firstName?: string; lastName?: string } = {}
+      if (!firstUsable) data.firstName = orderFirst
+      if (!lastUsable) data.lastName = orderLast
+
+      // Concurrency: only update while names still match the unusable snapshot we read.
+      await this.prisma.user.updateMany({
+        where: {
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+        },
+        data,
+      })
+    } catch (err) {
+      this.logger.warn(
+        `Post-order profile name fill failed for user ${order.userId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
+  }
+
   private async executeCreate(
     dto: CreateOrderDto,
     sessionUserId?: string,
+    cartOwner?: CartOwner | null,
   ): Promise<CreatedOrderResponse> {
     const marketSettings = await this.settings.getMarketSettings()
 
@@ -2297,6 +2436,8 @@ export class OrdersService {
           billingCity: dto.billingCity?.trim() || null,
           billingPostalCode: dto.billingPostalCode?.trim() || null,
           billingCountryCode: dto.billingCountryCode?.trim()?.toLowerCase() || null,
+          billingFirstName: dto.billingFirstName?.trim() || null,
+          billingLastName: dto.billingLastName?.trim() || null,
           preferredShipDate,
           userId,
           viesCheck: viesAudit
@@ -2573,6 +2714,16 @@ export class OrdersService {
         }
       }
     }
+
+    // Order is durable for the customer from here (ERP reject paths above either
+    // keep the order or delete+throw). Clear cart outside the order transaction;
+    // failure must not roll back the Order. Stripe/emails still use Order only.
+    await this.clearOriginatingCartAfterSuccessfulOrder(cartOwner, dto, 'create')
+    await this.maybeFillUserProfileNamesFromOrder({
+      userId,
+      customerFirstName: dto.customerFirstName,
+      customerLastName: dto.customerLastName,
+    })
 
     const response: CreatedOrderResponse = {
       id: order.id,

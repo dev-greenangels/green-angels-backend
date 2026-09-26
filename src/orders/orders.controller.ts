@@ -20,6 +20,7 @@ import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard'
+import { CartsService } from '../carts/carts.service'
 import { CreateOrderDto } from './dto/create-order.dto'
 import { PatchOrderDto } from './dto/patch-order.dto'
 import { ORDER_IDEMPOTENCY_KEY_HEADER } from './order-idempotency.constants'
@@ -29,7 +30,10 @@ import { OrdersService } from './orders.service'
 
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly carts: CartsService,
+  ) {}
 
   @Get()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
@@ -129,7 +133,9 @@ export class OrdersController {
     @Req() req: Request & { user?: SessionJwtPayload },
     @Headers(ORDER_IDEMPOTENCY_KEY_HEADER) idempotencyKey?: string,
   ) {
-    return this.orders.create(dto, req.user?.userId, idempotencyKey)
+    // Secure cart ownership only — never mint a guest cookie here.
+    const cartOwner = this.carts.resolveExistingOwner(req)
+    return this.orders.create(dto, req.user?.userId, idempotencyKey, cartOwner)
   }
 
   @Patch(':id/status')
