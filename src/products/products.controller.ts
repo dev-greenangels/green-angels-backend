@@ -96,6 +96,13 @@ export class ProductsController {
     return this.products.getAvailableNameLetters(locale)
   }
 
+  @Get('inventory-retail-value')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getInventoryRetailValue() {
+    return this.products.getInventoryRetailValue()
+  }
+
   @Get('check-slug')
   checkSlug(@Query('slug') slug?: string, @Query('excludeId') excludeId?: string) {
     return this.products.isSlugAvailable(slug ?? '', excludeId)

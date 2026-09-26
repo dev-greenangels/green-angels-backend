@@ -21,6 +21,7 @@ import { FLEXI_ORDER_CONFLICT_USER_STATUS, FLEXI_ORDER_STORNO_USER_STATUS, FLEXI
 import {
   applyFlexiOrderHeaderMapping,
   buildFlexiAncillaryExportLines,
+  buildFlexiCatalogProductLine,
   resolveFlexiAddressCountryCode,
   resolveFlexiDocumentCountries,
   resolveFlexiDocumentStatCode,
@@ -1796,10 +1797,11 @@ export class FlexiService {
       .filter((item) => item.sku?.trim())
       .map((item) => {
         const line: Record<string, unknown> = {
-          cenik: `code:${item.sku!.trim()}`,
-          mnozMj: item.quantity,
-          cenaMj: Number(item.priceAtPurchase),
-          nazev: item.productName,
+          ...buildFlexiCatalogProductLine({
+            sku: item.sku!,
+            quantity: item.quantity,
+            priceAtPurchase: Number(item.priceAtPurchase),
+          }),
           rezervovat: reserveLines,
           rezervovatMj: reserveLines ? item.quantity : 0,
         }

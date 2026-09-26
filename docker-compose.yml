@@ -54,7 +54,8 @@ services:
       WATCHPACK_POLLING: 'false'
       UPLOAD_ROOT: /data/uploads
       # Local/dev only. Production compose has no uploads volume (R2).
-      # 1 = skip npm install + prisma generate in entrypoint (set by VS Code quick task)
+      # 1 = skip npm install only. Entrypoint still runs migrate deploy,
+      # prisma generate when schema≠client, and an initial nest build gate.
       DEV_QUICK_START: ${DEV_QUICK_START:-0}
     env_file:
       - .env

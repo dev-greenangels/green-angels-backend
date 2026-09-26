@@ -1061,6 +1061,8 @@ model OrderItem {
   stockDecremented Int             @default(0)
   priceAtPurchase  Decimal         @db.Decimal(10, 2)
   productName      String
+  /// Immutable botanical Latin snapshot from Product.latinName at order create (null on legacy rows).
+  latinName        String?
   productSlug      String
   variantLabel     String?
   sku              String?

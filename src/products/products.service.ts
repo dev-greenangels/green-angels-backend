@@ -22,7 +22,9 @@ import { CategoriesService } from '../categories/categories.service'
 import { normalizeCatalogNameLetter, sortCatalogNameLetters } from '../catalog/locale-alphabet'
 import { normalizeSearchQuery } from '../search/normalize-search-query'
 import { ProductSearchService } from '../search/product-search.service'
+import { SettingsService } from '../settings/settings.service'
 import { normalizeSearchSynonymsInput } from './search-synonyms'
+import { computeInventoryRetailValue } from './inventory-retail-value'
 import { PatchTranslationsDto } from '../characteristics/dto/patch-translations.dto'
 import { SUPPORTED_LOCALES } from '../settings/localization.types'
 import { CreateProductDto } from './dto/create-product.dto'
@@ -154,12 +156,56 @@ export class ProductsService {
     private readonly categories: CategoriesService,
     private readonly variantLabels: VariantLabelService,
     private readonly commerce: CommerceService,
+    private readonly settings: SettingsService,
     @Inject(forwardRef(() => StockNotificationsService))
     private readonly stockNotifications: StockNotificationsService,
   ) {}
 
   private retailPriceFilter(currency: string) {
     return { priceType: RETAIL_PRICE_TYPE, currency }
+  }
+
+  /**
+   * Dashboard: current sellable inventory × retail selling price (NET + GROSS).
+   * Stock SoT = ProductVariant.stock (already net of order decrements).
+   * Published products only — same as storefront sellability.
+   */
+  async getInventoryRetailValue() {
+    const [market, cart] = await Promise.all([
+      this.settings.getMarketSettings(),
+      this.settings.getCartCheckoutSettings(),
+    ])
+    const currency =
+      typeof market.defaultCurrency === 'string' && market.defaultCurrency.trim()
+        ? market.defaultCurrency.trim().toUpperCase()
+        : 'EUR'
+
+    const variants = await this.prisma.productVariant.findMany({
+      where: {
+        stock: { gt: 0 },
+        product: { isPublished: true },
+      },
+      select: {
+        stock: true,
+        prices: {
+          where: this.retailPriceFilter(currency),
+          select: { value: true },
+          take: 1,
+        },
+        product: { select: { cnCode: true } },
+      },
+    })
+
+    return computeInventoryRetailValue({
+      market,
+      currency,
+      fallbackCartTaxRatePercent: cart.taxRatePercent,
+      rows: variants.map((row) => ({
+        stock: row.stock,
+        unitPrice: row.prices[0] != null ? Number(row.prices[0].value) : Number.NaN,
+        cnCode: row.product.cnCode,
+      })),
+    })
   }
 
   private defaultLocale(locale?: string) {

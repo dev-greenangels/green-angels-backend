@@ -6,6 +6,7 @@ import type { Order, OrderItem } from '@prisma/client'
 import {
   buildOrderDocumentPdfInput,
   fillPaymentPurposeTemplate,
+  formatOrderItemPdfDescription,
   resolvePdfPaymentPurposeTemplate,
 } from './order-pdf.builder'
 import { getOrderPdfLabels, type OrderPdfLocale } from './order-pdf-labels'
@@ -75,10 +76,12 @@ function baseOrder(overrides: Partial<Order> = {}): Order & { items: OrderItem[]
         quantity: 1,
         priceAtPurchase: 4.95 as never,
         productName: 'Plant',
+        latinName: null,
         productSlug: 'plant',
         variantLabel: null,
         sku: 'SKU1',
         ean: null,
+        stockDecremented: 1,
       } as OrderItem,
     ],
   } as Order & { items: OrderItem[] }
@@ -198,6 +201,30 @@ describe('resolvePdfPaymentPurposeTemplate', () => {
     assert.equal(
       resolvePdfPaymentPurposeTemplate(custom, 'sk', getOrderPdfLabels('sk').paymentPurposeTemplate),
       custom,
+    )
+  })
+})
+
+describe('formatOrderItemPdfDescription', () => {
+  it('stacks localized name, Latin, and variant when present', () => {
+    assert.equal(
+      formatOrderItemPdfDescription({
+        productName: "Tuja západná 'Smaragd'",
+        latinName: "Thuja occidentalis 'Smaragd'",
+        variantLabel: 'C5 / H80–100',
+      }),
+      "Tuja západná 'Smaragd'\nThuja occidentalis 'Smaragd'\nC5 / H80–100",
+    )
+  })
+
+  it('omits blank Latin / variant lines', () => {
+    assert.equal(
+      formatOrderItemPdfDescription({
+        productName: 'Plant',
+        latinName: null,
+        variantLabel: '  ',
+      }),
+      'Plant',
     )
   })
 })

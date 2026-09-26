@@ -70,6 +70,7 @@ export type AccountOrderDetailItem = {
   priceAtPurchase: number
   lineTotal: number
   productName: string
+  latinName: string | null
   productSlug: string
   variantLabel: string | null
   sku: string | null
@@ -645,6 +646,7 @@ export class AccountService {
         priceAtPurchase: Number(item.priceAtPurchase),
         lineTotal,
         productName: item.productName,
+        latinName: item.latinName ?? null,
         productSlug: item.productSlug,
         variantLabel: item.variantLabel,
         sku: item.sku,

@@ -19,6 +19,20 @@ function formatPersonName(first: string, last: string, patronymic?: string | nul
   return [last, first, patronymic?.trim()].filter(Boolean).join(' ')
 }
 
+/** Compact PDF description: localized name, optional Latin, optional variant — one cell. */
+export function formatOrderItemPdfDescription(item: {
+  productName: string
+  latinName?: string | null
+  variantLabel?: string | null
+}): string {
+  const parts = [item.productName]
+  const latin = item.latinName?.trim()
+  if (latin) parts.push(latin)
+  const variant = item.variantLabel?.trim()
+  if (variant) parts.push(variant)
+  return parts.join('\n')
+}
+
 const BRANCH_PICKUP_METHODS = new Set(['packeta-box', 'nova-poshta-branch'])
 
 /**
@@ -163,11 +177,8 @@ export function buildOrderDocumentPdfInput(input: {
   const docLines = order.items.map((item) => {
     const unitPrice = Number(item.priceAtPurchase)
     const lineTotal = Math.round(unitPrice * item.quantity * 100) / 100
-    const description = item.variantLabel
-      ? `${item.productName} (${item.variantLabel})`
-      : item.productName
     return {
-      description,
+      description: formatOrderItemPdfDescription(item),
       quantity: item.quantity,
       unitPrice,
       vatPercent: lineVat,

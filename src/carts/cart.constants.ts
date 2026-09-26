@@ -10,6 +10,8 @@ export type CartLineView = CartLineDto & {
   productId: string
   productSlug: string
   productName: string
+  /** Current Product.latinName for display (shopping state, not a historical snapshot). */
+  latinName: string | null
   variantLabel: string | null
 }
 

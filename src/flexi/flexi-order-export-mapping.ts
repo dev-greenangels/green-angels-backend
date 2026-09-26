@@ -457,6 +457,24 @@ export type FlexiAncillaryExportLine = {
 }
 
 /**
+ * Catalog product line for objednávka-přijatá.
+ * References Ceník by SKU code only — do NOT send `nazev`.
+ * ABRA fills the line name from the Ceník item (Latin botanical name is SoT in ABRA).
+ * Variant identity is the SKU/Ceník kod itself (each size has its own kod).
+ */
+export function buildFlexiCatalogProductLine(item: {
+  sku: string
+  quantity: number
+  priceAtPurchase: number
+}): { cenik: string; mnozMj: number; cenaMj: number } {
+  return {
+    cenik: `code:${item.sku.trim()}`,
+    mnozMj: item.quantity,
+    cenaMj: item.priceAtPurchase,
+  }
+}
+
+/**
  * Builds Flexi ancillary fee lines (shipping ± COD, packaging).
  * Does not emit a separate COD cenik line — COD is merged into shipping when > 0.
  *

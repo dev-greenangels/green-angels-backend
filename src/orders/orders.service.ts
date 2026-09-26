@@ -109,6 +109,7 @@ export type BackstageOrderItem = {
   lineTotal: number
   productVariantId: string
   productName: string
+  latinName: string | null
   productSlug: string
   variantLabel: string | null
   sku: string | null
@@ -225,6 +226,7 @@ export type CreatedOrderResponse = {
   /** Line items for payment summary UI (products only). */
   items?: Array<{
     productName: string
+    latinName: string | null
     variantLabel: string | null
     quantity: number
     lineTotal: number
@@ -237,6 +239,7 @@ export type PublicOrderConfirmationItem = {
   priceAtPurchase: number
   lineTotal: number
   productName: string
+  latinName: string | null
   productSlug: string
   variantLabel: string | null
 }
@@ -490,6 +493,7 @@ export class OrdersService {
     const uniqueIds = [...new Set(variantIds)]
     if (!uniqueIds.length) return new Map<string, {
       productName: string
+      latinName: string | null
       productSlug: string
       variantLabel: string | null
       sku: string | null
@@ -514,9 +518,12 @@ export class OrdersService {
           },
         },
         product: {
-          include: {
+          select: {
+            slug: true,
+            latinName: true,
             translations: {
               where: { locale: { in: snapshotLocale === DEFAULT_LOCALE ? [DEFAULT_LOCALE] : [snapshotLocale, DEFAULT_LOCALE] } },
+              select: { locale: true, name: true },
             },
           },
         },
@@ -527,6 +534,7 @@ export class OrdersService {
 
     const map = new Map<string, {
       productName: string
+      latinName: string | null
       productSlug: string
       variantLabel: string | null
       sku: string | null
@@ -554,6 +562,7 @@ export class OrdersService {
 
       map.set(variant.id, {
         productName: localizedProductName,
+        latinName: variant.product.latinName?.trim() || null,
         productSlug: variant.product.slug,
         variantLabel: this.variantLabels.buildFromLinksWithOrder(variant.attributeValues, typeOrder),
         sku: variant.sku,
@@ -633,6 +642,8 @@ export class OrdersService {
   async findAll(query: {
     search?: string
     status?: string
+    /** When true, exclude CANCELLED from results (dashboard recent / operational lists). */
+    excludeCancelled?: boolean
     page?: number
     pageSize?: number
   }): Promise<BackstageOrdersPageResult> {
@@ -640,6 +651,8 @@ export class OrdersService {
     const status = query.status?.trim().toUpperCase()
     if (status && status !== 'ALL') {
       where.status = status
+    } else if (query.excludeCancelled) {
+      where.status = { not: DASHBOARD_CANCELLED_STATUS }
     }
 
     const search = query.search?.trim()
@@ -891,6 +904,7 @@ export class OrdersService {
           lineTotal: Math.round(price * item.quantity * 100) / 100,
           productVariantId: item.productVariantId ?? '',
           productName: item.productName,
+          latinName: item.latinName ?? null,
           productSlug: item.productSlug,
           variantLabel: item.variantLabel,
           sku: item.sku,
@@ -1039,6 +1053,7 @@ export class OrdersService {
           priceAtPurchase: Number(item.priceAtPurchase),
           lineTotal,
           productName: localized?.productName ?? item.productName,
+          latinName: item.latinName ?? null,
           productSlug: item.productSlug,
           variantLabel: localized?.variantLabel ?? item.variantLabel,
         }
@@ -2325,6 +2340,7 @@ export class OrdersService {
                 stockDecremented: item.stockToDecrement,
                 priceAtPurchase: item.priceAtPurchase,
                 productName: snapshot.productName,
+                latinName: snapshot.latinName,
                 productSlug: snapshot.productSlug,
                 variantLabel: snapshot.variantLabel,
                 sku: snapshot.sku,
@@ -2570,6 +2586,7 @@ export class OrdersService {
         const snapshot = snapshotByVariantId.get(item.productVariantId)!
         return {
           productName: snapshot.productName,
+          latinName: snapshot.latinName,
           variantLabel: snapshot.variantLabel,
           quantity: item.quantity,
           lineTotal: Math.round(item.priceAtPurchase * item.quantity * 100) / 100,

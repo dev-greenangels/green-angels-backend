@@ -6,6 +6,7 @@ import { CharacteristicsModule } from '../characteristics/characteristics.module
 import { CommerceModule } from '../commerce/commerce.module'
 import { PrismaModule } from '../prisma/prisma.module'
 import { SearchModule } from '../search/search.module'
+import { SettingsModule } from '../settings/settings.module'
 import { StockNotificationsModule } from '../stock-notifications/stock-notifications.module'
 import { VariantAttributesModule } from '../variant-attributes/variant-attributes.module'
 import { VariantLabelModule } from './variant-label.module'
@@ -24,6 +25,7 @@ import { ProductsService } from './products.service'
     VariantAttributesModule,
     VariantLabelModule,
     CommerceModule,
+    SettingsModule,
     forwardRef(() => StockNotificationsModule),
   ],
   controllers: [ProductsController, CatalogFiltersController],

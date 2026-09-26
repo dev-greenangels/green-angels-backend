@@ -145,6 +145,7 @@ export class CartsService {
       productId: product.id,
       productSlug: product.slug,
       productName: product.translations[0]?.name ?? product.slug,
+      latinName: product.latinName?.trim() || null,
       variantLabel: this.variantLabels.buildFromLinksWithOrder(
         row.productVariant.attributeValues,
         typeOrder,

@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
 import {
   DEFAULT_FLEXI_DELIVERY_METHOD_CODES,
   applyFlexiOrderHeaderMapping,
   buildFlexiAncillaryExportLines,
+  buildFlexiCatalogProductLine,
   flexiIsoDate,
   mapPaymentMethodToFlexiCode,
   normalizeDeliveryMethodCodes,
@@ -389,5 +393,34 @@ describe('Flexi shipping + COD fee merge (export only)', () => {
 
   it('card-online payment mapping unchanged', () => {
     assert.equal(mapPaymentMethodToFlexiCode('card-online'), 'KARTA')
+  })
+})
+
+describe('buildFlexiCatalogProductLine', () => {
+  it('references Ceník by SKU and omits nazev so ABRA owns the Latin line name', () => {
+    const line = buildFlexiCatalogProductLine({
+      sku: 'SMARAGD-C5',
+      quantity: 2,
+      priceAtPurchase: 14.35,
+    })
+    assert.deepEqual(line, {
+      cenik: 'code:SMARAGD-C5',
+      mnozMj: 2,
+      cenaMj: 14.35,
+    })
+    assert.equal('nazev' in line, false)
+  })
+
+  /**
+   * Manual integration smoke (not CI — needs Flexi + DB):
+   * 1) Ensure API Prisma Client matches schema (entrypoint ensure_prisma_client).
+   * 2) Create card-online order for a product with Product.latinName set.
+   * 3) Assert create response + OrderItem.latinName == Product.latinName.
+   * 4) Export to Flexi; confirm outbound catalog line has cenik/mnozMj/cenaMj and no nazev.
+   * 5) GET polozka: nazev should equal Ceník.nazev (often includes size suffix, e.g. "… - C2"),
+   *    not OrderItem.productName (localized) and not necessarily bare OrderItem.latinName.
+   */
+  it('documents Flexi omit-nazev manual smoke expectations', () => {
+    assert.equal('nazev' in buildFlexiCatalogProductLine({ sku: 'X', quantity: 1, priceAtPurchase: 1 }), false)
   })
 })

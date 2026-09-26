@@ -37,12 +37,14 @@ export class OrdersController {
   findAll(
     @Query('search') search?: string,
     @Query('status') status?: string,
+    @Query('excludeCancelled') excludeCancelled?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
     return this.orders.findAll({
       search,
       status,
+      excludeCancelled: excludeCancelled === '1' || excludeCancelled === 'true',
       page: page != null && page !== '' ? Number(page) : undefined,
       pageSize: pageSize != null && pageSize !== '' ? Number(pageSize) : undefined,
     })
