@@ -1,9 +1,11 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common'
 import { Prisma, VariantQuantityDiscountType } from '@prisma/client'
 
@@ -38,8 +40,8 @@ import { CancellationReasonsService } from '../cancellation-reasons/cancellation
 import { ReferralsService } from '../referrals/referrals.service'
 import { NovaPoshtaSettingsService } from '../nova-poshta/nova-poshta.settings.service'
 import { normalizeNpListData } from '../nova-poshta/nova-poshta.client'
-import { MailService } from '../mail/mail.service'
 import { buildOrderDocumentPdf } from '../mail/order-document-pdf'
+import { QueueService } from '../queue/queue.service'
 import { buildOrderDocumentPdfInput } from './order-pdf.builder'
 import type { ViesValidationResult } from '../vies/vies.types'
 import { FlexiQueueService } from '../flexi/flexi.queue.service'
@@ -209,6 +211,24 @@ export type BackstageOrderDetail = BackstageOrderListItem & {
     source: string
   } | null
   items: BackstageOrderItem[]
+  /** Backstage: confirmation PDF archived in private storage (no R2 key exposed). */
+  confirmationPdfPresent: boolean
+  communications: Array<{
+    id: string
+    orderId: string | null
+    orderNumber: string | null
+    audience: string
+    type: string
+    source: string
+    status: string
+    toEmail: string | null
+    subjectSnapshot: string | null
+    hasAttachment: boolean
+    errorMessage: string | null
+    providerMessageId: string | null
+    sentAt: string | null
+    createdAt: string
+  }>
 }
 
 export type CreatedOrderResponse = {
@@ -324,7 +344,6 @@ export class OrdersService {
     private readonly cancellationReasons: CancellationReasonsService,
     private readonly npSettings: NovaPoshtaSettingsService,
     private readonly referrals: ReferralsService,
-    private readonly mail: MailService,
     private readonly flexi: FlexiService,
     private readonly flexiSettings: FlexiSettingsService,
     private readonly flexiQueue: FlexiQueueService,
@@ -337,6 +356,8 @@ export class OrdersService {
     private readonly monopay: MonopayService,
     private readonly packeta: PacketaService,
     private readonly carts: CartsService,
+    @Inject(forwardRef(() => QueueService))
+    private readonly queue: QueueService,
   ) {}
 
   private statusLabelCache: Map<string, string> | null = null
@@ -489,7 +510,8 @@ export class OrdersService {
     return buildOrderDocumentPdf(input)
   }
 
-  private async buildOrderPdfById(orderId: string): Promise<Buffer> {
+  /** Used by OrderDocumentService to archive confirmation PDFs. */
+  async buildOrderPdfById(orderId: string): Promise<Buffer> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       select: { orderNumber: true },
@@ -825,7 +847,35 @@ export class OrdersService {
       throw new NotFoundException('Замовлення не знайдено.')
     }
 
-    const base = await this.toListItem(order)
+    const [base, confirmationPdf, communicationRows] = await Promise.all([
+      this.toListItem(order),
+      this.prisma.orderDocument.findUnique({
+        where: {
+          orderId_kind: { orderId: id, kind: 'CONFIRMATION_PDF' },
+        },
+        select: { id: true },
+      }),
+      this.prisma.communication.findMany({
+        where: { orderId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: {
+          id: true,
+          orderId: true,
+          audience: true,
+          type: true,
+          source: true,
+          status: true,
+          toEmail: true,
+          subjectSnapshot: true,
+          orderDocumentId: true,
+          errorMessage: true,
+          providerMessageId: true,
+          sentAt: true,
+          createdAt: true,
+        },
+      }),
+    ])
 
     return {
       ...base,
@@ -925,6 +975,26 @@ export class OrdersService {
           imageUrl: item.productVariant?.product?.images?.[0]?.url ?? null,
         }
       }),
+      confirmationPdfPresent: Boolean(confirmationPdf),
+      communications: communicationRows.map((row) => ({
+        id: row.id,
+        orderId: row.orderId,
+        orderNumber: base.orderNumber,
+        audience: row.audience,
+        type: row.type,
+        source: row.source,
+        status: row.status,
+        toEmail: row.toEmail,
+        subjectSnapshot: row.subjectSnapshot,
+        hasAttachment: Boolean(row.orderDocumentId),
+        errorMessage:
+          row.status === 'FAILED' || row.status === 'SKIPPED'
+            ? row.errorMessage
+            : null,
+        providerMessageId: row.providerMessageId,
+        sentAt: row.sentAt?.toISOString() ?? null,
+        createdAt: row.createdAt.toISOString(),
+      })),
     }
   }
 
@@ -2774,45 +2844,32 @@ export class OrdersService {
     const customerEmail = dto.customerEmail?.trim()
     if (customerEmail) {
       if (paymentMethod === ONLINE_CARD_PAYMENT_METHOD) {
-        // Card: awaiting-payment email (no PDF). PDF only after applyPaymentSuccess.
+        // Card: awaiting-payment email only. Confirmation PDF + manager after applyPaymentSuccess.
         void this.paymentLifecycle.scheduleCardPaymentLifecycleEmails(order.id)
       } else {
-        let sendSitePdf = true
-        if (flexiConfigured) {
-          const flexiCfg = await this.flexiSettings.getSettings()
-          const mode = this.flexi.resolveDocumentSendMode(isB2b, flexiCfg.documentSend)
-          sendSitePdf = this.flexi.shouldSendSiteDocument(mode)
-        }
-        if (sendSitePdf) {
-          void this.sendOrderConfirmationEmailSafe({
-            to: customerEmail,
-            orderId: order.id,
+        // Non-card: async PDF once + customer confirmation + manager notify (same PDF).
+        void this.queue
+          .enqueueOrderEmail({ orderId: order.id, type: 'order_confirmation_pdf' })
+          .catch((err) => {
+            this.logger.warn(
+              `Order confirmation/manager enqueue failed for ${order.id}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            )
           })
-        }
       }
+    } else if (paymentMethod !== ONLINE_CARD_PAYMENT_METHOD) {
+      // No customer email — still notify manager with PDF when configured.
+      void this.queue
+        .enqueueOrderEmail({ orderId: order.id, type: 'order_confirmation_pdf' })
+        .catch((err) => {
+          this.logger.warn(
+            `Manager-ready enqueue failed for ${order.id}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          )
+        })
     }
-
-    void this.sendNewOrderManagerNotificationSafe({
-      orderId: order.id,
-      orderNumber: formattedOrderNumber,
-      createdAt: order.createdAt,
-      totalAmount: Number(order.totalAmount),
-      productsSubtotal,
-      deliveryAmount: checkout.deliveryAmount,
-      taxAmount: checkout.taxAmount,
-      currency: order.currency,
-      paymentMethod,
-      paymentStatus: null,
-      deliveryMethod,
-      deliveryCountryCode: dto.deliveryCountryCode?.trim() || dto.countryCode?.trim() || null,
-      countrySiteCode: dto.countryCode?.trim() || null,
-      customerFirstName: dto.customerFirstName.trim(),
-      customerLastName: dto.customerLastName.trim(),
-      customerEmail: dto.customerEmail?.trim() || null,
-      customerPhone,
-      itemCount: lineItems.length,
-      erpSyncStatus: null,
-    })
 
     return response
   }
@@ -2888,134 +2945,5 @@ export class OrdersService {
     auth?: { userId?: string; confirmationToken?: string },
   ): Promise<Buffer> {
     return this.buildOrderPdfByOrderNumber(orderNumber, auth)
-  }
-
-  /** Used by APP_QUEUE after card payment success (and non-card create path). */
-  async sendOrderConfirmationEmailById(orderId: string): Promise<void> {
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      select: { customerEmail: true },
-    })
-    const to = order?.customerEmail?.trim()
-    if (!to) return
-    await this.sendOrderConfirmationEmailSafe({ to, orderId })
-  }
-
-  /**
-   * Manager new-order email — soft-fail; never blocks checkout.
-   * Trigger only from successful executeCreate (Redis idempotency prevents duplicates).
-   */
-  private async sendNewOrderManagerNotificationSafe(input: {
-    orderId: string
-    orderNumber: string
-    createdAt: Date
-    totalAmount: number
-    productsSubtotal: number
-    deliveryAmount: number
-    taxAmount: number
-    currency: string
-    paymentMethod: string
-    paymentStatus: string | null
-    deliveryMethod: string
-    deliveryCountryCode: string | null
-    countrySiteCode: string | null
-    customerFirstName: string
-    customerLastName: string
-    customerEmail: string | null
-    customerPhone: string
-    itemCount: number
-    erpSyncStatus: string | null
-  }): Promise<void> {
-    try {
-      const cart = await this.settings.getCartCheckoutSettings()
-      if (!cart.newOrderNotifyEmailEnabled) return
-      const to = cart.newOrderNotifyEmail.trim()
-      if (!to) return
-
-      await this.mail.sendNewOrderManagerEmail({
-        to,
-        countrySiteCode: input.countrySiteCode as never,
-        order: input,
-      })
-    } catch (err) {
-      this.logger.warn(
-        `Manager new-order email failed for ${input.orderId}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      )
-    }
-  }
-
-  private async sendOrderConfirmationEmailSafe(input: { to: string; orderId: string }) {
-    try {
-      const [cart, market] = await Promise.all([
-        this.settings.getCartCheckoutSettings(),
-        this.settings.getMarketSettings(),
-      ])
-      if (cart.orderPdfEmailEnabled === false) {
-        return
-      }
-
-      const order = await this.prisma.order.findUnique({
-        where: { id: input.orderId },
-        select: {
-          orderNumber: true,
-          paymentMethod: true,
-          paymentStatus: true,
-          status: true,
-          countrySiteCode: true,
-          companyIco: true,
-          companyVatId: true,
-          locale: true,
-          codFeeAmount: true,
-          currency: true,
-        },
-      })
-      if (!order) return
-
-      // Card-online: never send PDF while unpaid (awaiting email covers create).
-      if (
-        order.paymentMethod === ONLINE_CARD_PAYMENT_METHOD &&
-        order.paymentStatus !== 'success'
-      ) {
-        return
-      }
-
-      // Same B2B gate as create(): skip site PDF email when Flexi documentSend says ERP-only.
-      // Download path (buildConfirmationPdf) is intentionally not gated here.
-      if (await this.flexi.isConfigured()) {
-        const flexiCfg = await this.flexiSettings.getSettings()
-        const isB2b = Boolean(order.companyIco?.trim() || order.companyVatId?.trim())
-        const mode = this.flexi.resolveDocumentSendMode(isB2b, flexiCfg.documentSend)
-        if (!this.flexi.shouldSendSiteDocument(mode)) {
-          return
-        }
-      }
-
-      const formatted = this.formatOrderNumber(order.orderNumber)
-      const pdf = await this.buildOrderPdfById(input.orderId)
-      const siteCode =
-        order.countrySiteCode === 'sk' ||
-        order.countrySiteCode === 'hu' ||
-        order.countrySiteCode === 'at'
-          ? order.countrySiteCode
-          : null
-      await this.mail.sendOrderConfirmationEmail({
-        to: input.to,
-        orderNumber: formatted,
-        pdf,
-        locale: order.locale ?? undefined,
-        region: market.region,
-        countrySiteCode: siteCode,
-        codFeeAmount: order.codFeeAmount != null ? Number(order.codFeeAmount) : null,
-        currency: order.currency,
-      })
-    } catch (err) {
-      this.logger.warn(
-        `Не вдалося надіслати підтвердження для ${input.orderId}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      )
-    }
   }
 }

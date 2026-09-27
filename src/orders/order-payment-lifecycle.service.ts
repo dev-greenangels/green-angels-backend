@@ -225,6 +225,16 @@ export class OrderPaymentLifecycleService {
         }`,
       )
     })
+
+    void this.queue
+      .enqueueOrderEmail({ orderId, type: 'manager_late_pay_refund' })
+      .catch((err) => {
+        this.logger.warn(
+          `Manager late-pay refund enqueue failed for ${orderId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
   }
 
   /**
@@ -359,6 +369,16 @@ export class OrderPaymentLifecycleService {
       .catch((err) => {
         this.logger.warn(
           `Cancelled unpaid email enqueue failed for ${orderId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
+
+    void this.queue
+      .enqueueOrderEmail({ orderId: order.id, type: 'manager_cancelled_unpaid' })
+      .catch((err) => {
+        this.logger.warn(
+          `Manager cancelled-unpaid enqueue failed for ${orderId}: ${
             err instanceof Error ? err.message : String(err)
           }`,
         )

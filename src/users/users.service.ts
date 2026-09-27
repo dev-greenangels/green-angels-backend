@@ -7,7 +7,7 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common'
-import { AuthProvider, Prisma, Role } from '@prisma/client'
+import { AuthProvider, CommunicationStatus, Prisma, Role } from '@prisma/client'
 import * as bcrypt from 'bcrypt'
 
 import { normalizeStoredPhoneE164 } from '../auth/auth.utils'
@@ -94,6 +94,8 @@ const CUSTOMER_ROLES: Role[] = [Role.USER, Role.WHOLESALER, Role.GUEST]
 const EDITABLE_CUSTOMER_ROLES: Role[] = [Role.USER, Role.WHOLESALER]
 const STAFF_ROLES: Role[] = [Role.ADMIN, Role.MANAGER]
 const DEFAULT_LOCALE = 'uk'
+/** Cap Backoffice user communication history (matches OrderCommunicationService). */
+const USER_COMM_PAGE_SIZE_MAX = 50
 
 @Injectable()
 export class UsersService {
@@ -464,6 +466,108 @@ export class UsersService {
           }
         }),
       })),
+    }
+  }
+
+  /**
+   * Order-related Communication history for a user (paginated).
+   * Kept here (not via OrdersModule) to avoid Users↔Orders↔Auth circular DI.
+   */
+  async listCommunications(
+    userId: string,
+    opts?: { page?: number; pageSize?: number },
+  ): Promise<{
+    items: Array<{
+      id: string
+      orderId: string | null
+      orderNumber: string | null
+      audience: string
+      type: string
+      source: string
+      status: string
+      toEmail: string | null
+      subjectSnapshot: string | null
+      hasAttachment: boolean
+      errorMessage: string | null
+      providerMessageId: string | null
+      sentAt: string | null
+      createdAt: string
+    }>
+    total: number
+    page: number
+    pageSize: number
+    totalPages: number
+  }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    })
+    if (!user) {
+      throw new NotFoundException('Користувача не знайдено.')
+    }
+
+    const page = Math.max(1, opts?.page ?? 1)
+    const pageSize = Math.min(
+      USER_COMM_PAGE_SIZE_MAX,
+      Math.max(1, opts?.pageSize ?? 20),
+    )
+    const where: Prisma.CommunicationWhereInput = {
+      OR: [{ userId }, { order: { userId } }],
+    }
+    const [total, rows] = await Promise.all([
+      this.prisma.communication.count({ where }),
+      this.prisma.communication.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          orderId: true,
+          audience: true,
+          type: true,
+          source: true,
+          status: true,
+          toEmail: true,
+          subjectSnapshot: true,
+          orderDocumentId: true,
+          errorMessage: true,
+          providerMessageId: true,
+          sentAt: true,
+          createdAt: true,
+          order: { select: { orderNumber: true } },
+        },
+      }),
+    ])
+
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        orderId: row.orderId,
+        orderNumber:
+          row.order?.orderNumber != null
+            ? this.formatOrderNumber(row.order.orderNumber)
+            : null,
+        audience: row.audience,
+        type: row.type,
+        source: row.source,
+        status: row.status,
+        toEmail: row.toEmail,
+        subjectSnapshot: row.subjectSnapshot,
+        hasAttachment: Boolean(row.orderDocumentId),
+        errorMessage:
+          row.status === CommunicationStatus.FAILED ||
+          row.status === CommunicationStatus.SKIPPED
+            ? row.errorMessage
+            : null,
+        providerMessageId: row.providerMessageId,
+        sentAt: row.sentAt?.toISOString() ?? null,
+        createdAt: row.createdAt.toISOString(),
+      })),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
     }
   }
 

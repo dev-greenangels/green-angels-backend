@@ -13,6 +13,8 @@ import { UsersService } from './users.service'
     SettingsModule,
     forwardRef(() => AuthModule),
     forwardRef(() => LegalModule),
+    // Do NOT import OrdersModule here — it creates
+    // UsersModule → OrdersModule → AuthModule → UsersModule and breaks DI.
   ],
   controllers: [UsersController],
   providers: [UsersService],

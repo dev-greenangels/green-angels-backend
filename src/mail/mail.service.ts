@@ -90,20 +90,7 @@ export class MailService {
     countrySiteCode?: CountrySiteCode | null
     codFeeAmount?: number | null
     currency?: string | null
-  }): Promise<void> {
-    if (!this.isConfigured()) {
-      this.logger.warn(
-        `Resend не налаштовано — підтвердження замовлення ${input.orderNumber} не надіслано`,
-      )
-      return
-    }
-
-    const identity = await this.identity.resolve({
-      kind: 'order',
-      countrySiteCode: input.countrySiteCode,
-    })
-    if (!identity) return
-
+  }): Promise<{ id: string | null; subject: string; text: string }> {
     const emailLocale = resolveOrderConfirmationEmailLocale(input.locale)
     const copy = getOrderConfirmationEmailCopy(emailLocale)
     const subject = fillOrderConfirmationEmailTemplate(copy.subject, input.orderNumber)
@@ -117,7 +104,20 @@ export class MailService {
       currency: (input.currency ?? 'EUR').trim() || 'EUR',
     })
 
-    await this.resend.send({
+    if (!this.isConfigured()) {
+      this.logger.warn(
+        `Resend не налаштовано — підтвердження замовлення ${input.orderNumber} не надіслано`,
+      )
+      return { id: null, subject, text: withFee.text }
+    }
+
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) return { id: null, subject, text: withFee.text }
+
+    const result = await this.resend.send({
       from: identity.from,
       to: input.to,
       replyTo: identity.replyTo,
@@ -132,6 +132,7 @@ export class MailService {
         },
       ],
     })
+    return { id: result.id, subject, text: withFee.text }
   }
 
   async sendAwaitingPaymentEmail(input: {
@@ -140,27 +141,27 @@ export class MailService {
     resumeUrl: string
     locale?: string | null
     countrySiteCode?: CountrySiteCode | null
-  }): Promise<void> {
-    if (!this.isConfigured()) {
-      this.logger.warn(
-        `Resend не налаштовано — лист очікування оплати ${input.orderNumber} не надіслано`,
-      )
-      return
-    }
-
-    const identity = await this.identity.resolve({
-      kind: 'order',
-      countrySiteCode: input.countrySiteCode,
-    })
-    if (!identity) return
-
+  }): Promise<{ id: string | null; subject: string; text: string }> {
     const copy = getLifecycleEmailLabels(resolveLifecycleEmailLocale(input.locale)).awaitingPayment
     const vars = { orderNumber: input.orderNumber, resumeUrl: input.resumeUrl }
     const subject = fillLifecycleEmailTemplate(copy.subject, vars)
     const text = fillLifecycleEmailTemplate(copy.text, vars)
     const html = fillLifecycleEmailTemplate(copy.html, vars)
 
-    await this.resend.send({
+    if (!this.isConfigured()) {
+      this.logger.warn(
+        `Resend не налаштовано — лист очікування оплати ${input.orderNumber} не надіслано`,
+      )
+      return { id: null, subject, text }
+    }
+
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) return { id: null, subject, text }
+
+    const result = await this.resend.send({
       from: identity.from,
       to: input.to,
       replyTo: identity.replyTo,
@@ -168,6 +169,7 @@ export class MailService {
       text,
       html,
     })
+    return { id: result.id, subject, text }
   }
 
   async sendPaymentReminderEmail(input: {
@@ -176,27 +178,27 @@ export class MailService {
     resumeUrl: string
     locale?: string | null
     countrySiteCode?: CountrySiteCode | null
-  }): Promise<void> {
-    if (!this.isConfigured()) {
-      this.logger.warn(
-        `Resend не налаштовано — нагадування про оплату ${input.orderNumber} не надіслано`,
-      )
-      return
-    }
-
-    const identity = await this.identity.resolve({
-      kind: 'order',
-      countrySiteCode: input.countrySiteCode,
-    })
-    if (!identity) return
-
+  }): Promise<{ id: string | null; subject: string; text: string }> {
     const copy = getLifecycleEmailLabels(resolveLifecycleEmailLocale(input.locale)).paymentReminder
     const vars = { orderNumber: input.orderNumber, resumeUrl: input.resumeUrl }
     const subject = fillLifecycleEmailTemplate(copy.subject, vars)
     const text = fillLifecycleEmailTemplate(copy.text, vars)
     const html = fillLifecycleEmailTemplate(copy.html, vars)
 
-    await this.resend.send({
+    if (!this.isConfigured()) {
+      this.logger.warn(
+        `Resend не налаштовано — нагадування про оплату ${input.orderNumber} не надіслано`,
+      )
+      return { id: null, subject, text }
+    }
+
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) return { id: null, subject, text }
+
+    const result = await this.resend.send({
       from: identity.from,
       to: input.to,
       replyTo: identity.replyTo,
@@ -204,6 +206,7 @@ export class MailService {
       text,
       html,
     })
+    return { id: result.id, subject, text }
   }
 
   async sendCancelledUnpaidEmail(input: {
@@ -212,20 +215,7 @@ export class MailService {
     shopUrl?: string
     locale?: string | null
     countrySiteCode?: CountrySiteCode | null
-  }): Promise<void> {
-    if (!this.isConfigured()) {
-      this.logger.warn(
-        `Resend не налаштовано — лист про скасування ${input.orderNumber} не надіслано`,
-      )
-      return
-    }
-
-    const identity = await this.identity.resolve({
-      kind: 'order',
-      countrySiteCode: input.countrySiteCode,
-    })
-    if (!identity) return
-
+  }): Promise<{ id: string | null; subject: string; text: string }> {
     const shopUrl = (
       input.shopUrl ?? this.getShopPublicUrl(input.countrySiteCode)
     ).replace(/\/$/, '')
@@ -235,7 +225,20 @@ export class MailService {
     const text = fillLifecycleEmailTemplate(copy.text, vars)
     const html = fillLifecycleEmailTemplate(copy.html, vars)
 
-    await this.resend.send({
+    if (!this.isConfigured()) {
+      this.logger.warn(
+        `Resend не налаштовано — лист про скасування ${input.orderNumber} не надіслано`,
+      )
+      return { id: null, subject, text }
+    }
+
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) return { id: null, subject, text }
+
+    const result = await this.resend.send({
       from: identity.from,
       to: input.to,
       replyTo: identity.replyTo,
@@ -243,6 +246,7 @@ export class MailService {
       text,
       html,
     })
+    return { id: result.id, subject, text }
   }
 
   async sendLatePayRefundEmail(input: {
@@ -251,20 +255,7 @@ export class MailService {
     shopUrl?: string
     locale?: string | null
     countrySiteCode?: CountrySiteCode | null
-  }): Promise<void> {
-    if (!this.isConfigured()) {
-      this.logger.warn(
-        `Resend не налаштовано — лист про повернення ${input.orderNumber} не надіслано`,
-      )
-      return
-    }
-
-    const identity = await this.identity.resolve({
-      kind: 'order',
-      countrySiteCode: input.countrySiteCode,
-    })
-    if (!identity) return
-
+  }): Promise<{ id: string | null; subject: string; text: string }> {
     const shopUrl = (
       input.shopUrl ?? this.getShopPublicUrl(input.countrySiteCode)
     ).replace(/\/$/, '')
@@ -274,7 +265,20 @@ export class MailService {
     const text = fillLifecycleEmailTemplate(copy.text, vars)
     const html = fillLifecycleEmailTemplate(copy.html, vars)
 
-    await this.resend.send({
+    if (!this.isConfigured()) {
+      this.logger.warn(
+        `Resend не налаштовано — лист про повернення ${input.orderNumber} не надіслано`,
+      )
+      return { id: null, subject, text }
+    }
+
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) return { id: null, subject, text }
+
+    const result = await this.resend.send({
       from: identity.from,
       to: input.to,
       replyTo: identity.replyTo,
@@ -282,6 +286,58 @@ export class MailService {
       text,
       html,
     })
+    return { id: result.id, subject, text }
+  }
+
+  async sendManualCustomerEmail(input: {
+    to: string
+    subject: string
+    body: string
+    countrySiteCode?: CountrySiteCode | null
+    pdf?: Buffer | null
+    pdfFilename?: string | null
+  }): Promise<{ id: string | null; subject: string; text: string }> {
+    const subject = input.subject.trim()
+    const text = input.body.trim()
+    if (!subject || !text) {
+      throw new Error('Тема та текст листа обовʼязкові.')
+    }
+
+    if (!this.isConfigured()) {
+      this.logger.warn('Resend не налаштовано — ручний лист клієнту не надіслано')
+      throw new Error('Resend не налаштовано')
+    }
+
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) {
+      throw new Error('Не вдалося визначити from/reply-to для листа')
+    }
+
+    const html = `<div style="font-family:system-ui,sans-serif;font-size:14px;line-height:1.5;white-space:pre-wrap">${escapeHtml(text)}</div>`
+    const pdf = input.pdf
+    const result = await this.resend.send({
+      from: identity.from,
+      to: input.to,
+      replyTo: identity.replyTo,
+      subject,
+      text,
+      html,
+      ...(pdf
+        ? {
+            attachments: [
+              {
+                filename: input.pdfFilename?.trim() || 'order-confirmation.pdf',
+                content: pdf,
+                contentType: 'application/pdf',
+              },
+            ],
+          }
+        : {}),
+    })
+    return { id: result.id, subject, text }
   }
 
   async sendWholesaleInquiryEmail(input: {
@@ -424,6 +480,8 @@ export class MailService {
     to: string
     countrySiteCode?: CountrySiteCode | null
     isTest?: boolean
+    pdf?: Buffer | null
+    pdfFilename?: string | null
     order: {
       orderId: string
       orderNumber: string
@@ -443,12 +501,13 @@ export class MailService {
       customerEmail: string | null
       customerPhone: string
       itemCount: number
+      itemSummary?: string[]
       erpSyncStatus: string | null
     }
-  }): Promise<void> {
+  }): Promise<{ id: string | null; subject: string; text: string }> {
     if (!this.isConfigured()) {
       this.logger.warn('Resend не налаштовано — сповіщення менеджеру про замовлення не надіслано')
-      return
+      return { id: null, subject: '', text: '' }
     }
 
     const siteCode =
@@ -458,7 +517,7 @@ export class MailService {
       kind: 'order',
       countrySiteCode: siteCode,
     })
-    if (!identity) return
+    if (!identity) return { id: null, subject: '', text: '' }
 
     const origin = this.getShopPublicUrl(siteCode)
     const backstageUrl = `${origin}/backstage/orders/${input.order.orderId}`
@@ -466,8 +525,14 @@ export class MailService {
       `${n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${input.order.currency}`
     const customerName =
       `${input.order.customerFirstName} ${input.order.customerLastName}`.trim()
+    const paymentStatusLabel = formatManagerPaymentStatus(input.order.paymentStatus)
     const subjectPrefix = input.isTest ? '[TEST] ' : ''
-    const subject = `${subjectPrefix}Нове замовлення #${input.order.orderNumber} — ${money(input.order.totalAmount)}`
+    const subject = `${subjectPrefix}Нове замовлення #${input.order.orderNumber} — ${paymentStatusLabel} — ${money(input.order.totalAmount)}`
+
+    const itemLines =
+      input.order.itemSummary?.length
+        ? input.order.itemSummary
+        : [`Товари: ${input.order.itemCount} позиції`]
 
     const lines = [
       input.isTest ? 'Це тестове сповіщення з Backstage settings.' : 'Нове замовлення на сайті',
@@ -485,10 +550,10 @@ export class MailService {
       input.order.customerPhone,
       '',
       `Оплата: ${input.order.paymentMethod}`,
-      `Статус оплати: ${input.order.paymentStatus ?? 'unpaid'}`,
+      `Статус оплати: ${paymentStatusLabel}`,
       `Доставка: ${input.order.deliveryMethod}`,
       '',
-      `Товари: ${input.order.itemCount} позиції`,
+      ...itemLines,
       `Сума товарів: ${money(input.order.productsSubtotal)}`,
       `Доставка: ${money(input.order.deliveryAmount)}`,
       `VAT: ${money(input.order.taxAmount)}`,
@@ -514,9 +579,9 @@ export class MailService {
         ${input.order.customerEmail ? `${escapeHtml(input.order.customerEmail)}<br/>` : ''}
         ${escapeHtml(input.order.customerPhone)}</p>
         <p><strong>Оплата:</strong> ${escapeHtml(input.order.paymentMethod)}<br/>
-        <strong>Статус оплати:</strong> ${escapeHtml(input.order.paymentStatus ?? 'unpaid')}<br/>
+        <strong>Статус оплати:</strong> ${escapeHtml(paymentStatusLabel)}<br/>
         <strong>Доставка:</strong> ${escapeHtml(input.order.deliveryMethod)}</p>
-        <p>Товари: ${input.order.itemCount}<br/>
+        <p>${itemLines.map((l) => escapeHtml(l)).join('<br/>')}<br/>
         Сума товарів: ${escapeHtml(money(input.order.productsSubtotal))}<br/>
         Доставка: ${escapeHtml(money(input.order.deliveryAmount))}<br/>
         VAT: ${escapeHtml(money(input.order.taxAmount))}<br/>
@@ -530,7 +595,138 @@ export class MailService {
       </div>
     `
 
-    await this.resend.send({
+    const pdf = input.pdf
+    const pdfFilename = input.pdfFilename?.trim() || `order-${input.order.orderNumber}.pdf`
+    const result = await this.resend.send({
+      from: identity.from,
+      to: input.to,
+      replyTo: identity.replyTo,
+      subject,
+      text,
+      html,
+      ...(pdf
+        ? {
+            attachments: [
+              {
+                filename: pdfFilename,
+                content: pdf,
+                contentType: 'application/pdf',
+              },
+            ],
+          }
+        : {}),
+    })
+    return { id: result.id, subject, text }
+  }
+
+  async sendManagerCancelledUnpaidEmail(input: {
+    to: string
+    countrySiteCode?: CountrySiteCode | null
+    order: {
+      orderId: string
+      orderNumber: string
+      createdAt: Date
+      cancelledAt: Date | null
+      totalAmount: number
+      currency: string
+      paymentMethod: string
+      deliveryMethod: string
+      deliveryCountryCode: string | null
+      countrySiteCode: string | null
+      customerFirstName: string
+      customerLastName: string
+      customerEmail: string | null
+      customerPhone: string
+      itemSummary?: string[]
+      itemCount: number
+    }
+  }): Promise<{ id: string | null; subject: string; text: string }> {
+    if (!this.isConfigured()) {
+      this.logger.warn('Resend не налаштовано — STAFF скасування неоплаченого замовлення не надіслано')
+      return { id: null, subject: '', text: '' }
+    }
+
+    const siteCode =
+      (input.countrySiteCode ?? input.order.countrySiteCode) as CountrySiteCode | null | undefined
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: siteCode,
+    })
+    if (!identity) return { id: null, subject: '', text: '' }
+
+    const origin = this.getShopPublicUrl(siteCode)
+    const backstageUrl = `${origin}/backstage/orders/${input.order.orderId}`
+    const money = `${input.order.totalAmount.toLocaleString('uk-UA', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })} ${input.order.currency}`
+    const customerName =
+      `${input.order.customerFirstName} ${input.order.customerLastName}`.trim()
+    const subject = `Скасовано (неоплачене) #${input.order.orderNumber} — ${money}`
+    const itemLines =
+      input.order.itemSummary?.length
+        ? input.order.itemSummary
+        : [`Товари: ${input.order.itemCount} позиції`]
+
+    const lines = [
+      'Замовлення існувало, але карткову оплату не було завершено — замовлення скасовано.',
+      '',
+      `Замовлення: #${input.order.orderNumber}`,
+      `Створено: ${input.order.createdAt.toISOString()}`,
+      input.order.cancelledAt
+        ? `Скасовано: ${input.order.cancelledAt.toISOString()}`
+        : null,
+      `Сайт: ${origin.replace(/^https?:\/\//, '')}`,
+      input.order.deliveryCountryCode
+        ? `Країна доставки: ${input.order.deliveryCountryCode}`
+        : null,
+      '',
+      'Клієнт:',
+      customerName,
+      input.order.customerEmail ?? null,
+      input.order.customerPhone,
+      '',
+      `Оплата: ${input.order.paymentMethod}`,
+      `Статус: CANCELLED (неоплачене)`,
+      `Доставка: ${input.order.deliveryMethod}`,
+      '',
+      ...itemLines,
+      `Сума: ${money}`,
+      '',
+      `Відкрити замовлення: ${backstageUrl}`,
+    ].filter((line) => line != null)
+
+    const text = lines.join('\n')
+    const html = `
+      <div style="font-family:system-ui,sans-serif;font-size:14px;line-height:1.5;color:#111">
+        <p>Замовлення існувало, але карткову оплату не було завершено — <strong>замовлення скасовано</strong>.</p>
+        <p><strong>Замовлення:</strong> #${escapeHtml(input.order.orderNumber)}<br/>
+        <strong>Створено:</strong> ${escapeHtml(input.order.createdAt.toISOString())}<br/>
+        ${
+          input.order.cancelledAt
+            ? `<strong>Скасовано:</strong> ${escapeHtml(input.order.cancelledAt.toISOString())}<br/>`
+            : ''
+        }
+        <strong>Сайт:</strong> ${escapeHtml(origin.replace(/^https?:\/\//, ''))}</p>
+        <p><strong>Клієнт</strong><br/>
+        ${escapeHtml(customerName)}<br/>
+        ${input.order.customerEmail ? `${escapeHtml(input.order.customerEmail)}<br/>` : ''}
+        ${escapeHtml(input.order.customerPhone)}</p>
+        <p><strong>Оплата:</strong> ${escapeHtml(input.order.paymentMethod)}<br/>
+        <strong>Статус:</strong> CANCELLED (неоплачене)<br/>
+        <strong>Доставка:</strong> ${escapeHtml(input.order.deliveryMethod)}<br/>
+        <strong>Сума:</strong> ${escapeHtml(money)}</p>
+        <p>${itemLines.map((l) => escapeHtml(l)).join('<br/>')}</p>
+        <p style="margin:24px 0">
+          <a href="${escapeHtml(backstageUrl)}"
+             style="display:inline-block;background:#4c9d1a;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none">
+            Відкрити замовлення
+          </a>
+        </p>
+      </div>
+    `
+
+    const result = await this.resend.send({
       from: identity.from,
       to: input.to,
       replyTo: identity.replyTo,
@@ -538,7 +734,111 @@ export class MailService {
       text,
       html,
     })
+    return { id: result.id, subject, text }
   }
+
+  async sendManagerLatePayRefundEmail(input: {
+    to: string
+    countrySiteCode?: CountrySiteCode | null
+    order: {
+      orderId: string
+      orderNumber: string
+      createdAt: Date
+      cancelledAt: Date | null
+      totalAmount: number
+      currency: string
+      paymentMethod: string
+      paymentStatus: string | null
+      customerFirstName: string
+      customerLastName: string
+      customerEmail: string | null
+      customerPhone: string
+      countrySiteCode: string | null
+    }
+  }): Promise<{ id: string | null; subject: string; text: string }> {
+    if (!this.isConfigured()) {
+      this.logger.warn('Resend не налаштовано — STAFF late-pay refund не надіслано')
+      return { id: null, subject: '', text: '' }
+    }
+
+    const siteCode =
+      (input.countrySiteCode ?? input.order.countrySiteCode) as CountrySiteCode | null | undefined
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: siteCode,
+    })
+    if (!identity) return { id: null, subject: '', text: '' }
+
+    const origin = this.getShopPublicUrl(siteCode)
+    const backstageUrl = `${origin}/backstage/orders/${input.order.orderId}`
+    const money = `${input.order.totalAmount.toLocaleString('uk-UA', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })} ${input.order.currency}`
+    const customerName =
+      `${input.order.customerFirstName} ${input.order.customerLastName}`.trim()
+    const subject = `Пізня оплата / повернення #${input.order.orderNumber} — ${money}`
+    const lines = [
+      'Оплату отримано після скасування замовлення. Це НЕ нове успішне замовлення.',
+      'Потрібне повернення коштів / перевірка refund. Замовлення залишається скасованим.',
+      '',
+      `Замовлення: #${input.order.orderNumber}`,
+      `Створено: ${input.order.createdAt.toISOString()}`,
+      input.order.cancelledAt
+        ? `Скасовано: ${input.order.cancelledAt.toISOString()}`
+        : null,
+      `Сайт: ${origin.replace(/^https?:\/\//, '')}`,
+      '',
+      'Клієнт:',
+      customerName,
+      input.order.customerEmail ?? null,
+      input.order.customerPhone,
+      '',
+      `Оплата: ${input.order.paymentMethod}`,
+      `Статус оплати: ${input.order.paymentStatus ?? 'unknown'}`,
+      `Сума: ${money}`,
+      '',
+      `Відкрити замовлення: ${backstageUrl}`,
+    ].filter((line) => line != null)
+
+    const text = lines.join('\n')
+    const html = `
+      <div style="font-family:system-ui,sans-serif;font-size:14px;line-height:1.5;color:#111">
+        <p><strong>Пізня оплата після скасування</strong> — це НЕ нове успішне замовлення.</p>
+        <p>Потрібне повернення коштів / перевірка refund. Замовлення залишається скасованим.</p>
+        <p><strong>Замовлення:</strong> #${escapeHtml(input.order.orderNumber)}<br/>
+        <strong>Сума:</strong> ${escapeHtml(money)}<br/>
+        <strong>Статус оплати:</strong> ${escapeHtml(input.order.paymentStatus ?? 'unknown')}</p>
+        <p><strong>Клієнт</strong><br/>
+        ${escapeHtml(customerName)}<br/>
+        ${input.order.customerEmail ? `${escapeHtml(input.order.customerEmail)}<br/>` : ''}
+        ${escapeHtml(input.order.customerPhone)}</p>
+        <p style="margin:24px 0">
+          <a href="${escapeHtml(backstageUrl)}"
+             style="display:inline-block;background:#4c9d1a;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none">
+            Відкрити замовлення
+          </a>
+        </p>
+      </div>
+    `
+
+    const result = await this.resend.send({
+      from: identity.from,
+      to: input.to,
+      replyTo: identity.replyTo,
+      subject,
+      text,
+      html,
+    })
+    return { id: result.id, subject, text }
+  }
+}
+
+function formatManagerPaymentStatus(status: string | null | undefined): string {
+  const normalized = (status ?? '').trim().toLowerCase()
+  if (normalized === 'success' || normalized === 'paid') return 'PAID'
+  if (!normalized || normalized === 'unpaid') return 'UNPAID'
+  return status!.trim().toUpperCase()
 }
 
 function escapeHtml(value: string): string {

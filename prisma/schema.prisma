@@ -68,6 +68,8 @@ model User {
   legalConsentEvents             LegalConsentEvent[]
   contractWithdrawals            ContractWithdrawal[]
   contractWithdrawalsProcessed   ContractWithdrawal[] @relation("ContractWithdrawalProcessedBy")
+  communications                 Communication[]
+  communicationsCreated          Communication[] @relation("CommunicationCreatedBy")
 
   @@unique([legacySource, legacyId])
   @@index([legacyId])
@@ -937,6 +939,8 @@ model Order {
   legalConsentEvents     LegalConsentEvent[]
   contractWithdrawals    ContractWithdrawal[]
   viesCheck              OrderViesCheck?
+  documents              OrderDocument[]
+  communications         Communication[]
   createdAt              DateTime             @default(now())
 
   @@unique([legacySource, legacyId])
@@ -953,6 +957,94 @@ model Order {
   @@index([status, paymentExpiresAt])
   @@index([userId, createdAt])
   @@index([deliveredAt])
+}
+
+enum OrderDocumentKind {
+  CONFIRMATION_PDF
+}
+
+/// Archived immutable Order PDF (private R2 bucket / local private root). One confirmation PDF per Order.
+model OrderDocument {
+  id             String            @id @default(uuid())
+  orderId        String
+  order          Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  kind           OrderDocumentKind
+  /// Object key inside the private bucket, e.g. orders/{orderId}/confirmation.pdf
+  storageKey     String
+  filename       String
+  contentType    String            @default("application/pdf")
+  byteSize       Int
+  sha256         String?
+  generatedAt    DateTime          @default(now())
+  createdAt      DateTime          @default(now())
+  communications Communication[]
+
+  @@unique([orderId, kind])
+  @@index([orderId])
+}
+
+enum CommunicationAudience {
+  CUSTOMER
+  STAFF
+}
+
+enum CommunicationType {
+  ORDER_CONFIRMATION_PDF
+  CUSTOMER_AWAITING_PAYMENT
+  CUSTOMER_PAYMENT_REMINDER
+  CUSTOMER_CANCELLED_UNPAID
+  CUSTOMER_LATE_PAY_REFUND
+  MANAGER_ORDER_READY
+  MANAGER_ORDER_CANCELLED_UNPAID
+  MANAGER_LATE_PAY_REFUND
+  MANUAL_CUSTOMER_EMAIL
+}
+
+enum CommunicationStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum CommunicationSource {
+  AUTOMATIC
+  MANUAL
+}
+
+/// Outbound transactional / staff email log (Resend). Idempotent via idempotencyKey.
+model Communication {
+  id                String                 @id @default(uuid())
+  orderId           String?
+  order             Order?                 @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  userId            String?
+  user              User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  audience          CommunicationAudience
+  type              CommunicationType
+  source            CommunicationSource    @default(AUTOMATIC)
+  status            CommunicationStatus    @default(PENDING)
+  /// Durable send gate, e.g. order:{orderId}:manager_order_ready
+  idempotencyKey    String                 @unique
+  toEmail           String?
+  subjectSnapshot   String?
+  bodySnapshot      String?                @db.Text
+  locale            String?
+  provider          String?
+  providerMessageId String?
+  orderDocumentId   String?
+  orderDocument     OrderDocument?         @relation(fields: [orderDocumentId], references: [id], onDelete: SetNull)
+  /// Backstage staff who sent a MANUAL email (Nest JWT userId).
+  createdByUserId   String?
+  createdBy         User?                  @relation("CommunicationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  errorMessage      String?                @db.Text
+  sentAt            DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  @@index([orderId, createdAt])
+  @@index([userId, createdAt])
+  @@index([audience, type, createdAt])
+  @@index([createdByUserId])
 }
 
 enum ContractWithdrawalScope {

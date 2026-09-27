@@ -1,14 +1,10 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq'
 import { Inject, Logger, forwardRef } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
 import { Job } from 'bullmq'
 
 import { CartPiiRetentionService } from '../carts/cart-pii-retention.service'
-import { MailService } from '../mail/mail.service'
-import { resolveShopPublicOrigin } from '../mail/country-hosts'
-import { OrderConfirmationTokenService } from '../orders/order-confirmation-token.service'
+import { OrderCommunicationService } from '../orders/order-communication.service'
 import { OrderPaymentLifecycleService } from '../orders/order-payment-lifecycle.service'
-import { OrdersService } from '../orders/orders.service'
 import { StockNotificationsService } from '../stock-notifications/stock-notifications.service'
 import { ONLINE_CARD_PAYMENT_METHOD } from '../payments/payments.constants'
 import { PrismaService } from '../prisma/prisma.service'
@@ -25,14 +21,10 @@ export class QueueProcessor extends WorkerHost {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly mail: MailService,
-    private readonly config: ConfigService,
-    private readonly confirmationTokens: OrderConfirmationTokenService,
     private readonly cartPiiRetention: CartPiiRetentionService,
+    private readonly orderCommunications: OrderCommunicationService,
     @Inject(forwardRef(() => OrderPaymentLifecycleService))
     private readonly paymentLifecycle: OrderPaymentLifecycleService,
-    @Inject(forwardRef(() => OrdersService))
-    private readonly orders: OrdersService,
     @Inject(forwardRef(() => StockNotificationsService))
     private readonly stockNotifications: StockNotificationsService,
   ) {
@@ -98,159 +90,42 @@ export class QueueProcessor extends WorkerHost {
   }
 
   private async processOrderEmail(orderId: string, emailType: OrderEmailJobType) {
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      select: {
-        id: true,
-        orderNumber: true,
-        status: true,
-        paymentMethod: true,
-        paymentStatus: true,
-        customerEmail: true,
-        countrySiteCode: true,
-        locale: true,
-        awaitingPaymentEmailSentAt: true,
-        paymentReminderEmailSentAt: true,
-        cancelledUnpaidEmailSentAt: true,
-        latePayRefundEmailSentAt: true,
-      },
-    })
-    if (!order) return
-
-    const to = order.customerEmail?.trim()
-    if (!to) return
-
-    const orderNumber = this.formatOrderNumber(order.orderNumber)
-    const confirmationToken = this.confirmationTokens.sign(orderNumber)
-    const countrySiteCode =
-      order.countrySiteCode === 'sk' ||
-      order.countrySiteCode === 'hu' ||
-      order.countrySiteCode === 'at'
-        ? order.countrySiteCode
-        : null
-    const shopOrigin = this.resolveShopOrigin(countrySiteCode)
-    const localeSegment = this.normalizeLocaleSegment(order.locale, countrySiteCode)
-    const resumeUrl = this.buildResumeUrl(
-      shopOrigin,
-      localeSegment,
-      orderNumber,
-      confirmationToken,
-    )
-    const shopUrl = localeSegment ? `${shopOrigin}/${localeSegment}` : shopOrigin
-
     switch (emailType) {
-      case 'awaiting_payment': {
-        if (order.awaitingPaymentEmailSentAt) return
-        if (order.status !== 'AWAITING_PAYMENT') return
-        if (order.paymentStatus === 'success') return
-        await this.mail.sendAwaitingPaymentEmail({
-          to,
-          orderNumber,
-          resumeUrl,
-          locale: order.locale,
-          countrySiteCode,
-        })
-        await this.prisma.order.updateMany({
-          where: { id: orderId, awaitingPaymentEmailSentAt: null },
-          data: { awaitingPaymentEmailSentAt: new Date() },
-        })
-        break
-      }
-      case 'payment_reminder': {
-        if (order.paymentReminderEmailSentAt) return
-        if (order.status !== 'AWAITING_PAYMENT') return
-        if (order.paymentStatus === 'success') return
-        await this.mail.sendPaymentReminderEmail({
-          to,
-          orderNumber,
-          resumeUrl,
-          locale: order.locale,
-          countrySiteCode,
-        })
-        await this.prisma.order.updateMany({
-          where: { id: orderId, paymentReminderEmailSentAt: null },
-          data: { paymentReminderEmailSentAt: new Date() },
-        })
-        break
-      }
-      case 'cancelled_unpaid': {
-        if (order.cancelledUnpaidEmailSentAt) return
-        if (order.status !== 'CANCELLED') return
-        await this.mail.sendCancelledUnpaidEmail({
-          to,
-          orderNumber,
-          shopUrl,
-          locale: order.locale,
-          countrySiteCode,
-        })
-        await this.prisma.order.updateMany({
-          where: { id: orderId, cancelledUnpaidEmailSentAt: null },
-          data: { cancelledUnpaidEmailSentAt: new Date() },
-        })
-        break
-      }
-      case 'late_pay_refund': {
-        if (order.latePayRefundEmailSentAt) return
-        await this.mail.sendLatePayRefundEmail({
-          to,
-          orderNumber,
-          shopUrl,
-          locale: order.locale,
-          countrySiteCode,
-        })
-        await this.prisma.order.updateMany({
-          where: { id: orderId, latePayRefundEmailSentAt: null },
-          data: { latePayRefundEmailSentAt: new Date() },
-        })
-        break
-      }
       case 'order_confirmation_pdf': {
-        if (order.paymentMethod === ONLINE_CARD_PAYMENT_METHOD && order.paymentStatus !== 'success') {
+        const order = await this.prisma.order.findUnique({
+          where: { id: orderId },
+          select: { paymentMethod: true, paymentStatus: true },
+        })
+        if (!order) return
+        if (
+          order.paymentMethod === ONLINE_CARD_PAYMENT_METHOD &&
+          order.paymentStatus !== 'success'
+        ) {
           return
         }
-        await this.orders.sendOrderConfirmationEmailById(orderId)
-        break
+        await this.orderCommunications.processOrderConfirmationBundle(orderId)
+        return
       }
+      case 'manager_cancelled_unpaid':
+        await this.orderCommunications.processManagerCancelledUnpaid(orderId)
+        return
+      case 'manager_late_pay_refund':
+        await this.orderCommunications.processManagerLatePayRefund(orderId)
+        return
+      case 'awaiting_payment':
+        await this.orderCommunications.processAwaitingPayment(orderId)
+        return
+      case 'payment_reminder':
+        await this.orderCommunications.processPaymentReminder(orderId)
+        return
+      case 'cancelled_unpaid':
+        await this.orderCommunications.processCancelledUnpaid(orderId)
+        return
+      case 'late_pay_refund':
+        await this.orderCommunications.processLatePayRefund(orderId)
+        return
       default:
-        break
+        this.logger.warn(`Unknown order email type: ${emailType as string}`)
     }
-  }
-
-  private formatOrderNumber(orderNumber: number): string {
-    return `ZY-${String(orderNumber).padStart(8, '0')}`
-  }
-
-  private resolveShopOrigin(countrySiteCode: 'sk' | 'hu' | 'at' | null): string {
-    return resolveShopPublicOrigin({
-      countrySiteCode,
-      countryHostsEnv: this.config.get<string>('GA_COUNTRY_HOSTS'),
-      shopPublicUrl: this.config.get<string>('SHOP_PUBLIC_URL'),
-      corsOrigin: this.config.get<string>('CORS_ORIGIN', 'http://localhost:3000'),
-    })
-  }
-
-  private normalizeLocaleSegment(
-    locale: string | null | undefined,
-    countrySiteCode: 'sk' | 'hu' | 'at' | null,
-  ): string {
-    const allowed = new Set(['uk', 'en', 'sk', 'hu', 'de', 'cs'])
-    const raw = (locale ?? '').trim().toLowerCase()
-    if (raw && allowed.has(raw)) return raw
-    if (countrySiteCode === 'at') return 'de'
-    if (countrySiteCode === 'hu') return 'hu'
-    if (countrySiteCode === 'sk') return 'sk'
-    return 'uk'
-  }
-
-  private buildResumeUrl(
-    shopOrigin: string,
-    localeSegment: string,
-    orderNumber: string,
-    confirmationToken: string,
-  ): string {
-    const base = shopOrigin.replace(/\/$/, '')
-    const loc = localeSegment.trim()
-    const prefix = loc ? `${base}/${loc}` : base
-    return `${prefix}/checkout/pay?order=${encodeURIComponent(orderNumber)}&confirmation=${encodeURIComponent(confirmationToken)}`
   }
 }

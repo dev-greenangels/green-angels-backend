@@ -20,6 +20,8 @@ export type OrderEmailJobType =
   | 'cancelled_unpaid'
   | 'late_pay_refund'
   | 'order_confirmation_pdf'
+  | 'manager_cancelled_unpaid'
+  | 'manager_late_pay_refund'
 
 export type AppJobPayload =
   | { type: 'ping'; message?: string }

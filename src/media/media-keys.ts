@@ -1,6 +1,12 @@
 /** Public URL prefix stored in Postgres (`ProductImage.url`, `Category.image`, …). */
 export const PUBLIC_UPLOAD_PREFIX = '/uploads'
 
+/** Legacy private-key prefix (pre two-bucket). Still readable for old OrderDocument rows. */
+export const LEGACY_PRIVATE_OBJECT_PREFIX = 'private/'
+
+/** Canonical OrderDocument keys live under this prefix inside the private bucket. */
+export const ORDER_DOCUMENT_KEY_PREFIX = 'orders/'
+
 export type MediaKind = 'product' | 'category' | 'blog' | 'review' | 'estimate'
 
 export type ClassifiedMediaFile =
@@ -9,6 +15,15 @@ export type ClassifiedMediaFile =
 
 export function normalizePosix(relative: string): string {
   return relative.replace(/\\/g, '/').replace(/^\/+/, '')
+}
+
+/** True for keys that must never use the public media bucket / public URL helpers. */
+export function isPrivateObjectKey(key: string): boolean {
+  const normalized = normalizePosix(key)
+  return (
+    normalized.startsWith(ORDER_DOCUMENT_KEY_PREFIX) ||
+    normalized.startsWith(LEGACY_PRIVATE_OBJECT_PREFIX)
+  )
 }
 
 /** Object key in R2 = public pathname without leading slash. */
@@ -27,11 +42,34 @@ export function diskRelativeToKey(diskRelative: string): string {
 }
 
 export function keyToPublicPath(key: string): string {
-  return `/${normalizePosix(key)}`
+  const normalized = normalizePosix(key)
+  if (isPrivateObjectKey(normalized)) {
+    throw new Error(`Приватний media key не має публічного URL: ${key}`)
+  }
+  return `/${normalized}`
 }
 
 export function estimateRelativeToKey(relativePath: string): string {
   return diskRelativeToKey(`estimate-photos/${normalizePosix(relativePath)}`)
+}
+
+/** Canonical private-bucket object key for the confirmation PDF. */
+export function orderConfirmationPdfKey(orderId: string): string {
+  const id = orderId.trim()
+  if (!id) throw new Error('orderId required for confirmation PDF key')
+  return `${ORDER_DOCUMENT_KEY_PREFIX}${id}/confirmation.pdf`
+}
+
+/** Local filesystem relative path under PRIVATE_STORAGE_ROOT. */
+export function privateKeyToLocalRelative(key: string): string {
+  const normalized = normalizePosix(key)
+  if (normalized.startsWith(LEGACY_PRIVATE_OBJECT_PREFIX)) {
+    return normalized.slice(LEGACY_PRIVATE_OBJECT_PREFIX.length)
+  }
+  if (normalized.startsWith(ORDER_DOCUMENT_KEY_PREFIX)) {
+    return normalized
+  }
+  throw new Error(`Некоректний private media key: ${key}`)
 }
 
 export function classifyUploadRootFile(diskRelative: string): ClassifiedMediaFile {

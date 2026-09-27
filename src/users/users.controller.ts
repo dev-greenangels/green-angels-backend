@@ -45,6 +45,18 @@ export class UsersController {
     return this.users.count({ segment })
   }
 
+  @Get(':id/communications')
+  listCommunications(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.users.listCommunications(id, {
+      page: page != null && page !== '' ? Number(page) : undefined,
+      pageSize: pageSize != null && pageSize !== '' ? Number(pageSize) : undefined,
+    })
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.users.findOne(id)

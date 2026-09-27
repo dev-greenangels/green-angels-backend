@@ -37,7 +37,7 @@ export class ResendTransport {
     return this.client
   }
 
-  async send(input: ResendSendInput): Promise<void> {
+  async send(input: ResendSendInput): Promise<{ id: string | null }> {
     const replyTo = input.replyTo?.trim() || undefined
     const { data, error } = await this.getClient().emails.send({
       from: input.from,
@@ -64,8 +64,10 @@ export class ResendTransport {
       throw new Error(error.message || 'Resend send failed')
     }
 
-    if (data?.id) {
-      this.logger.log(`Resend accepted message id=${data.id}`)
+    const id = data?.id ?? null
+    if (id) {
+      this.logger.log(`Resend accepted message id=${id}`)
     }
+    return { id }
   }
 }

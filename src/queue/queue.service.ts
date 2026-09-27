@@ -105,13 +105,22 @@ export class QueueService implements OnModuleInit {
     type: OrderEmailJobType
     delayMs?: number
   }) {
-    const jobId =
-      input.type === 'payment_reminder'
-        ? `order-email-${input.type}-${input.orderId}`
-        : `order-email-${input.type}-${input.orderId}-${Date.now()}`
+    const stableTypes: OrderEmailJobType[] = [
+      'payment_reminder',
+      'order_confirmation_pdf',
+      'manager_cancelled_unpaid',
+      'manager_late_pay_refund',
+      'awaiting_payment',
+      'cancelled_unpaid',
+      'late_pay_refund',
+    ]
+    const useStableId = stableTypes.includes(input.type)
+    const jobId = useStableId
+      ? `order-email-${input.type}-${input.orderId}`
+      : `order-email-${input.type}-${input.orderId}-${Date.now()}`
 
-    // Reminder uses stable jobId so create retries don't stack duplicates.
-    if (input.type === 'payment_reminder') {
+    // Stable jobId: create/webhook/cancel retries must not stack duplicates.
+    if (useStableId) {
       try {
         const existing = await this.queue.getJob(jobId)
         if (existing) {

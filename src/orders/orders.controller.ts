@@ -10,6 +10,7 @@ import {
   Query,
   Req,
   StreamableFile,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common'
 import { Role } from '@prisma/client'
@@ -23,9 +24,11 @@ import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard'
 import { CartsService } from '../carts/carts.service'
 import { CreateOrderDto } from './dto/create-order.dto'
 import { PatchOrderDto } from './dto/patch-order.dto'
+import { SendManualOrderEmailDto } from './dto/send-manual-order-email.dto'
 import { ORDER_IDEMPOTENCY_KEY_HEADER } from './order-idempotency.constants'
 import { PatchOrderStatusDto } from './dto/patch-order-status.dto'
 import { ORDER_CONFIRMATION_TOKEN_HEADER } from './order-confirmation.constants'
+import { OrderCommunicationService } from './order-communication.service'
 import { OrdersService } from './orders.service'
 
 @Controller('orders')
@@ -33,6 +36,7 @@ export class OrdersController {
   constructor(
     private readonly orders: OrdersService,
     private readonly carts: CartsService,
+    private readonly communications: OrderCommunicationService,
   ) {}
 
   @Get()
@@ -124,6 +128,28 @@ export class OrdersController {
   @Roles(Role.ADMIN, Role.MANAGER)
   findOne(@Param('id') id: string) {
     return this.orders.findOne(id)
+  }
+
+  @Post(':id/communications/manual')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  sendManualEmail(
+    @Param('id') id: string,
+    @Body() dto: SendManualOrderEmailDto,
+    @Req() req: Request & { user?: SessionJwtPayload },
+  ) {
+    const createdByUserId = req.user?.userId?.trim()
+    if (!createdByUserId) {
+      throw new UnauthorizedException()
+    }
+    return this.communications.sendManualCustomerEmail({
+      orderId: id,
+      subject: dto.subject,
+      body: dto.body,
+      attachConfirmationPdf: dto.attachConfirmationPdf === true,
+      idempotencyKey: dto.idempotencyKey,
+      createdByUserId,
+    })
   }
 
   @Post()
