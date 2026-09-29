@@ -42,6 +42,13 @@ export class ReviewsController {
     return this.reviews.create(req.user?.userId, dto)
   }
 
+  @Get('backstage/pending-count')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  pendingCount() {
+    return this.reviews.countPendingBackstage()
+  }
+
   @Get('backstage/all')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)

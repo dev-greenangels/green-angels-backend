@@ -725,7 +725,7 @@ export class AccountService {
       storeReply:
         review.storeReplyText && review.storeReplyAt
           ? {
-              authorName: review.storeReplyAuthorName?.trim() || 'Магазин',
+              authorName: review.storeReplyAuthorName?.trim() || '',
               text: review.storeReplyText,
               createdAt: review.storeReplyAt.toISOString(),
             }
@@ -773,7 +773,7 @@ export class AccountService {
       storeReply:
         review.storeReplyText && review.storeReplyAt
           ? {
-              authorName: review.storeReplyAuthorName?.trim() || 'Магазин',
+              authorName: review.storeReplyAuthorName?.trim() || '',
               text: review.storeReplyText,
               createdAt: review.storeReplyAt.toISOString(),
             }

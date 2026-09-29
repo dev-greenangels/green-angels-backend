@@ -127,7 +127,8 @@ export class ReviewsService {
     const text = review.storeReplyText?.trim()
     if (!text) return null
     return {
-      authorName: review.storeReplyAuthorName?.trim() || 'Зелені Янголи',
+      // Empty → storefront localizes via common.brand (do not hardcode UA).
+      authorName: review.storeReplyAuthorName?.trim() || '',
       text,
       createdAt: (review.storeReplyAt ?? review.updatedAt).toISOString(),
     }
@@ -319,6 +320,13 @@ export class ReviewsService {
     })
 
     return this.toListItem(created)
+  }
+
+  async countPendingBackstage(): Promise<{ count: number }> {
+    const count = await this.prisma.review.count({
+      where: { status: ReviewStatus.PENDING },
+    })
+    return { count }
   }
 
   async updateStatus(id: string, dto: UpdateReviewStatusDto): Promise<ReviewListItem> {
