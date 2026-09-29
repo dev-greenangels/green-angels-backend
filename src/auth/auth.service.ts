@@ -23,6 +23,7 @@ import { isOtpChannelEnabled, type OtpPurpose } from '../settings/market.types'
 import { SettingsService } from '../settings/settings.service'
 import { UsersService } from '../users/users.service'
 import { OtpService } from './otp.service'
+import { normalizeSessionOtpPurpose } from './session-otp-purpose'
 import { validatePhoneForPolicy } from './market-phone.util'
 import {
   BACKSTAGE_SESSION_COOKIE_NAME,
@@ -404,11 +405,12 @@ export class AuthService {
       this.assertCheckoutLockAllowsCreate(req)
     }
 
+    const sessionPurpose = normalizeSessionOtpPurpose(dto.purpose)
     const verified = await this.otp.consumeVerificationToken(
       dto.verificationToken,
       'phone',
       phone,
-      'login',
+      sessionPurpose,
     )
     if (!verified) {
       throw new UnauthorizedException('Невалідний або прострочений токен верифікації.')
@@ -445,11 +447,12 @@ export class AuthService {
       this.assertCheckoutLockAllowsCreate(req)
     }
 
+    const sessionPurpose = normalizeSessionOtpPurpose(dto.purpose)
     const verified = await this.otp.consumeVerificationToken(
       dto.verificationToken,
       'email',
       email,
-      'login',
+      sessionPurpose,
     )
     if (!verified) {
       throw new UnauthorizedException('Невалідний або прострочений токен верифікації.')

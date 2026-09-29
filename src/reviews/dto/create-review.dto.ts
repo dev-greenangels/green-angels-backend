@@ -13,14 +13,14 @@ import {
   MinLength,
 } from 'class-validator'
 
-import { CYRILLIC_FULL_NAME_REGEX, REVIEW_IMAGE_PATH_REGEX } from '../review.constants'
+import { PERSON_NAME_REGEX, REVIEW_IMAGE_PATH_REGEX } from '../review.constants'
 
 export class CreateReviewDto {
   @IsString()
   @MinLength(2)
   @MaxLength(120)
-  @Matches(CYRILLIC_FULL_NAME_REGEX, {
-    message: 'ПІБ має містити лише літери, пробіли та дефіс (2–120 символів).',
+  @Matches(PERSON_NAME_REGEX, {
+    message: 'ПІБ має містити лише літери, пробіли, апостроф, дефіс або крапку (2–120 символів).',
   })
   authorName!: string
 
