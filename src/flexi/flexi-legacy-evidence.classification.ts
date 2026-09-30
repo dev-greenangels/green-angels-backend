@@ -197,5 +197,10 @@ export const NORMAL_RUNTIME_DEPENDS_ON_JOURNAL = false as const
  */
 export const FLEXI_CHANGE_EVENT_CREATE_ENTRYPOINTS = ['FlexiChangeIntakeService.ingestChanges'] as const
 
-export const LEGACY_RETIRE_CONFIRM = 'RETIRE_LEGACY_FLEXI_JOURNAL'
+/** Explicit confirm for permanent journal wipe (no recovery gate). */
+export const LEGACY_DELETE_CONFIRM = 'DELETE_LEGACY_FLEXI_JOURNAL'
+
+/** @deprecated use LEGACY_DELETE_CONFIRM */
+export const LEGACY_RETIRE_CONFIRM = LEGACY_DELETE_CONFIRM
+
 export const LEGACY_DELETE_BATCH_SIZE = 1000

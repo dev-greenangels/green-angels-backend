@@ -29,7 +29,7 @@ import { FlexiFullRefreshService } from './flexi-full-refresh.service'
 import { FlexiHooksService } from './flexi-hooks.service'
 import { FlexiInboundHealthService } from './flexi-inbound-health.service'
 import { FlexiLegacyRetirementService } from './flexi-legacy-retirement.service'
-import { LEGACY_RETIRE_CONFIRM } from './flexi-legacy-evidence.classification'
+import { LEGACY_DELETE_CONFIRM } from './flexi-legacy-evidence.classification'
 import { FlexiLiveSyncService } from './flexi-live-sync.service'
 import { FlexiOperationLogService } from './flexi-operation-log.service'
 import { FlexiOrderReconcileService } from './flexi-order-reconcile.service'
@@ -328,8 +328,8 @@ export class FlexiAdminController {
   }
 
   /**
-   * READ-ONLY production preflight for legacy FlexiChangeEvent retirement.
-   * Aggregates only — does not mutate. ADMIN only.
+   * READ-ONLY FlexiChangeEvent journal statistics. ADMIN only.
+   * Evidence never blocks deletion.
    */
   @Get('recovery/legacy-journal/preflight')
   @Roles(Role.ADMIN)
@@ -355,10 +355,9 @@ export class FlexiAdminController {
   }
 
   /**
-   * Fail-closed legacy journal retirement:
-   * Auto Sync OFF → preflight → Full Refresh → order reconcile → batch delete → verify.
-   * Does NOT re-enable Auto Sync. Does NOT reset globalVersion from journal.
-   * ADMIN only. confirm=RETIRE_LEGACY_FLEXI_JOURNAL
+   * Permanently delete ALL FlexiChangeEvent rows.
+   * Does NOT Full Refresh / reconcile / Changes replay / webhook / Auto Sync / globalVersion.
+   * ADMIN only. confirm=DELETE_LEGACY_FLEXI_JOURNAL
    */
   @Post('recovery/retire-legacy-journal')
   @HttpCode(200)
@@ -378,19 +377,18 @@ export class FlexiAdminController {
   }
 
   /**
-   * @deprecated Prefer POST recovery/retire-legacy-journal with RETIRE_LEGACY_FLEXI_JOURNAL.
-   * Kept as alias that enforces the same fail-closed path.
+   * @deprecated Alias of retire-legacy-journal (same confirm token).
    */
   @Post('recovery/clear-legacy-journal')
   @HttpCode(200)
   @Roles(Role.ADMIN)
   async recoveryClearLegacyJournal(
     @Req() req: Request & { user: SessionJwtPayload },
-    @Body() body?: { confirm?: string; runRefreshFirst?: boolean },
+    @Body() body?: { confirm?: string },
   ) {
-    if (body?.confirm === 'CLEAR_LEGACY_JOURNAL') {
+    if (body?.confirm === 'CLEAR_LEGACY_JOURNAL' || body?.confirm === 'RETIRE_LEGACY_FLEXI_JOURNAL') {
       throw new BadRequestException(
-        `Використовуйте confirm=${LEGACY_RETIRE_CONFIRM} (fail-closed retirement). Старий CLEAR_LEGACY_JOURNAL більше не підтримується.`,
+        `Використовуйте confirm=${LEGACY_DELETE_CONFIRM}.`,
       )
     }
     return this.retireLegacyJournal(req, body)

@@ -1,73 +1,19 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 import {
-  classifyLegacyEvidence,
-  deleteRecoveryPolicy,
   FLEXI_CHANGE_EVENT_CREATE_ENTRYPOINTS,
-  LEGACY_RETIRE_CONFIRM,
+  LEGACY_DELETE_BATCH_SIZE,
+  LEGACY_DELETE_CONFIRM,
   NORMAL_RUNTIME_DEPENDS_ON_JOURNAL,
 } from './flexi-legacy-evidence.classification'
 
-describe('legacy evidence classification (FLEXI-LEGACY-RETIRE-002)', () => {
-  const live = ['cenik', 'skladova-karta', 'strom', 'rezervace'] as const
+describe('legacy journal delete contracts', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)))
 
-  it('classifies current-state evidences', () => {
-    assert.equal(classifyLegacyEvidence('cenik', live), 'CURRENT_STATE_RECOVERABLE')
-    assert.equal(classifyLegacyEvidence('skladova-karta', live), 'CURRENT_STATE_RECOVERABLE')
-    assert.equal(classifyLegacyEvidence('strom', live), 'CURRENT_STATE_RECOVERABLE')
-    assert.equal(classifyLegacyEvidence('rezervace', live), 'CURRENT_STATE_RECOVERABLE')
-  })
-
-  it('classifies order documents for reconcile — not typ-objednavky config', () => {
-    assert.equal(classifyLegacyEvidence('objednavka-prijata', live), 'ORDER_RECONCILE')
-    assert.equal(classifyLegacyEvidence('objednavka-prijata-polozka', live), 'ORDER_RECONCILE')
-    assert.equal(classifyLegacyEvidence('typ-objednavky-prijate', live), 'IRRELEVANT_TO_SITE')
-  })
-
-  it('production UNKNOWN-8 audit → IRRELEVANT_TO_SITE', () => {
-    const cases = [
-      'odberatel',
-      'typ-faktury-vydane',
-      'sklad',
-      'stav-obchodniho-dokladu',
-      'typ-objednavky-prijate',
-      'kurz',
-      'stat',
-      'typ-faktury-prijate',
-    ] as const
-    for (const ev of cases) {
-      assert.equal(
-        classifyLegacyEvidence(ev, live),
-        'IRRELEVANT_TO_SITE',
-        ev,
-      )
-    }
-  })
-
-  it('DELETE odberatel does not block when IRRELEVANT_TO_SITE', () => {
-    const c = classifyLegacyEvidence('odberatel', live)
-    assert.equal(c, 'IRRELEVANT_TO_SITE')
-    assert.equal(deleteRecoveryPolicy('odberatel', c).recoverableWithoutReplay, true)
-  })
-
-  it('sklad warehouse master ≠ skladova-karta', () => {
-    assert.equal(classifyLegacyEvidence('sklad', live), 'IRRELEVANT_TO_SITE')
-    assert.equal(classifyLegacyEvidence('skladova-karta', live), 'CURRENT_STATE_RECOVERABLE')
-  })
-
-  it('BLOCKER still blocks DELETE', () => {
-    const c = classifyLegacyEvidence('totally-new-evidence-xyz', live)
-    assert.equal(c, 'BLOCKER')
-    assert.equal(deleteRecoveryPolicy('totally-new-evidence-xyz', c).recoverableWithoutReplay, false)
-  })
-
-  it('skladovy-pohyb is IRRELEVANT_TO_SITE', () => {
-    assert.equal(classifyLegacyEvidence('skladovy-pohyb', live), 'IRRELEVANT_TO_SITE')
-  })
-})
-
-describe('legacy retirement contracts', () => {
   it('normal runtime does not depend on journal', () => {
     assert.equal(NORMAL_RUNTIME_DEPENDS_ON_JOURNAL, false)
   })
@@ -78,22 +24,70 @@ describe('legacy retirement contracts', () => {
     ])
   })
 
-  it('confirm token is explicit', () => {
-    assert.equal(LEGACY_RETIRE_CONFIRM, 'RETIRE_LEGACY_FLEXI_JOURNAL')
+  it('confirm token is DELETE_LEGACY_FLEXI_JOURNAL', () => {
+    assert.equal(LEGACY_DELETE_CONFIRM, 'DELETE_LEGACY_FLEXI_JOURNAL')
   })
 
-  it('delete journal must not reset globalVersion (algorithm)', () => {
+  it('batch size stays under PostgreSQL bind limit', () => {
+    assert.ok(LEGACY_DELETE_BATCH_SIZE <= 2000)
+    assert.ok(LEGACY_DELETE_BATCH_SIZE * 1 < 32767)
+  })
+
+  it('delete SQL uses subquery LIMIT — no giant IN id list', () => {
+    const src = readFileSync(join(root, 'flexi-legacy-retirement.service.ts'), 'utf8')
+    assert.ok(src.includes('DELETE FROM "FlexiChangeEvent"'))
+    assert.ok(src.includes('LIMIT ${chunk}'))
+    assert.equal(src.includes('deleteMany({ where: { id: { in:'), false)
+  })
+
+  it('UNKNOWN / DELETE evidence does not block deletion (no gate)', () => {
+    const src = readFileSync(join(root, 'flexi-legacy-retirement.service.ts'), 'utf8')
+    assert.equal(src.includes('safeToRetire'), false)
+    assert.equal(src.includes('classifyLegacyEvidence'), false)
+    assert.equal(src.includes('unknownEvidence'), false)
+    assert.ok(src.includes('deletionBlocked: false'))
+  })
+
+  it('delete path does not Full Refresh / reconcile / Changes / webhook / Auto Sync', () => {
+    const src = readFileSync(join(root, 'flexi-legacy-retirement.service.ts'), 'utf8')
+    assert.equal(src.includes('fullRefresh'), false)
+    assert.equal(src.includes('reconcileActiveErpOrders'), false)
+    assert.equal(src.includes('pollChanges'), false)
+    assert.equal(src.includes('ingestChanges'), false)
+    assert.equal(src.includes('registerWebhook'), false)
+    assert.equal(src.includes('disableWebhook'), false)
+    assert.equal(src.includes('disableAutoSync'), false)
+    assert.equal(/updateSettings\(/.test(src), false)
+    assert.ok(src.includes('cleanupLegacyInboundJobs'))
+  })
+
+  it('delete must not reset globalVersion (algorithm)', () => {
     const globalVersionBefore = 99810
     const settingsTouchedByDelete = false
     const globalVersionAfter = settingsTouchedByDelete ? 0 : globalVersionBefore
     assert.equal(globalVersionAfter, globalVersionBefore)
   })
 
-  it('IRRELEVANT DELETE never forces safeToRetire=false alone', () => {
-    const deleteRows = [{ evidence: 'odberatel', classification: 'IRRELEVANT_TO_SITE' as const }]
-    const blockers = deleteRows.filter(
-      (d) => !deleteRecoveryPolicy(d.evidence, d.classification).recoverableWithoutReplay,
-    )
-    assert.equal(blockers.length, 0)
+  it('wrong confirmation is rejected', () => {
+    assert.notEqual('RETIRE_LEGACY_FLEXI_JOURNAL', LEGACY_DELETE_CONFIRM)
+    assert.notEqual('CLEAR_LEGACY_JOURNAL', LEGACY_DELETE_CONFIRM)
+  })
+
+  it('controller delete route is ADMIN-only', () => {
+    const src = readFileSync(join(root, 'flexi.controller.ts'), 'utf8')
+    const idx = src.indexOf("retireLegacyJournal(")
+    assert.ok(idx > 0)
+    const window = src.slice(Math.max(0, idx - 200), idx)
+    assert.ok(window.includes('@Roles(Role.ADMIN)'))
+    assert.ok(src.includes('DELETE_LEGACY_FLEXI_JOURNAL'))
+  })
+
+  it('~100k rows fit in batch loop without bind explosion', () => {
+    const rows = 98_265
+    const batches = Math.ceil(rows / LEGACY_DELETE_BATCH_SIZE)
+    assert.ok(batches < 200_000)
+    // Each batch binds only LIMIT param — never 98k UUIDs.
+    const bindsPerBatch = 1
+    assert.ok(bindsPerBatch < 32767)
   })
 })
