@@ -11,7 +11,25 @@ export const FLEXI_JOB_NAMES = {
   EXPORT_ORDER: 'export-order',
   STORNO_ORDER: 'storno-order',
   IMPORT_NEW_PRODUCTS: 'import-new-products',
+  REFRESH_CURRENT: 'refresh-current',
+  FULL_REFRESH: 'full-refresh',
+  ORDER_RECONCILE: 'order-reconcile',
 } as const
+
+/** Debounce window for coalescing live current-state refreshes per evidence+object. */
+export const FLEXI_REFRESH_CURRENT_DELAY_MS = 2000
+export const FLEXI_REFRESH_CURRENT_ATTEMPTS = 5
+/** Redis lock for Full Refresh / Update&Enable / order reconcile. */
+export const FLEXI_SYNC_LOCK_KEY = 'flexi:inbound-sync-lock'
+export const FLEXI_SYNC_LOCK_TTL_SEC = 30 * 60
+export const FLEXI_OPERATION_LOG_KEY = 'integration.flexi.operationLog'
+export const FLEXI_OPERATION_LOG_MAX = 100
+
+/** Order statuses that no longer need ABRA → SITE reconcile. */
+export const FLEXI_ORDER_RECONCILE_FINAL_STATUSES = [
+  'CANCELLED',
+  'DELIVERED',
+] as const
 
 /** REL-003 / product: late-conflict / unconfirmed document status (live-verified). */
 export const FLEXI_ORDER_CONFLICT_USER_STATUS = 'stavDoklObch.nespec'

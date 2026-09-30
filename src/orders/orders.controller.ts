@@ -181,6 +181,13 @@ export class OrdersController {
     return this.orders.patch(id, dto)
   }
 
+  @Post(':id/mark-bank-paid')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  markBankPaid(@Param('id') id: string) {
+    return this.orders.markBankTransferPaid(id)
+  }
+
   @Post(':id/sync-tracking')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)

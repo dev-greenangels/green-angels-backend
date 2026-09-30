@@ -4,10 +4,12 @@ import {
   IsBoolean,
   IsEmail,
   IsIn,
+  IsInt,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
+  Max,
   Min,
   ValidateIf,
   ValidateNested,
@@ -389,6 +391,13 @@ export class UpdateCartCheckoutSettingsDto {
   @IsOptional()
   @IsIn(['immediate', 'on_paid'])
   onlineCardErpExportMode?: 'immediate' | 'on_paid'
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  bankPaymentTermBusinessDays?: number
 
   @IsOptional()
   @IsIn(['cart', 'store'])

@@ -47,4 +47,11 @@ export class WholesaleInquiriesController {
   updateStatus(@Param('id') id: string, @Body() dto: UpdateWholesaleInquiryStatusDto) {
     return this.inquiries.updateStatus(id, dto.status)
   }
+
+  @Post('backstage/:id/sync-abra')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  syncToAbra(@Param('id') id: string) {
+    return this.inquiries.syncToAbra(id)
+  }
 }

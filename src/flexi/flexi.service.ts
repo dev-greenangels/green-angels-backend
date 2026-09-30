@@ -16,17 +16,31 @@ import {
   FlexiExportRetryError,
 } from '../orders/erp-sync.errors'
 import { resolveErpSyncStatus } from '../orders/erp-sync.constants'
+import {
+  advanceExternalId,
+  isBankPaymentMethod,
+  isCardPaymentMethod,
+  isCodPaymentMethod,
+  resolveDatTerminIso,
+  stripePayExternalId,
+  toDateOnlyIso,
+  wholesaleAdresarExtId,
+} from '../orders/order-dispatch-dates'
 import { formatEuVatId } from '../vies/vies.types'
 import { FLEXI_ORDER_CONFLICT_USER_STATUS, FLEXI_ORDER_STORNO_USER_STATUS, FLEXI_CENIK_QUERY_BATCH, FLEXI_STOCK_FILTER_CHUNK, isFlexiMissingRecordError, isImplementedFlexiEvidence, normalizeFlexiEvidence } from './flexi.constants'
 import {
+  applyFlexiBankAccountMapping,
   applyFlexiOrderHeaderMapping,
   buildFlexiAncillaryExportLines,
   buildFlexiCatalogProductLine,
+  mapPaymentMethodToFlexiCode,
+  resolveBankovniUcetCode,
   resolveFlexiAddressCountryCode,
   resolveFlexiDocumentCountries,
   resolveFlexiDocumentStatCode,
   resolveFlexiLineVatFields,
   resolveFlexiOrderAddressMapping,
+  toFlexiRelationCode,
 } from './flexi-order-export-mapping'
 import { parseSizeLabel } from './flexi-size-label'
 import {
@@ -45,9 +59,12 @@ import {
   adresarRefFromRow,
   adresarRowMatchesTaxCandidates,
   buildTaxIdCandidates,
+  mergeStitkyCodesAdditive,
   normalizeAdresarEmail,
+  parseStitkyCodes,
   stableCustomerEmailExtId,
   stableCustomerTaxExtId,
+  stitkyCodesToWriteValue,
 } from './flexi-adresar-lookup'
 import { FlexiSettingsService } from './flexi.settings.service'
 import type {
@@ -440,44 +457,6 @@ export class FlexiService {
     return 'updated'
   }
 
-  /** Backup / manual: pull Changes API from stored cursor → durable intake → process. */
-  async pollChanges(): Promise<FlexiSyncResult> {
-    const configured = await this.isConfigured()
-    if (!configured) {
-      return { ok: false, itemsSynced: 0, unmatched: 0, message: 'ABRA Flexi не налаштовано.' }
-    }
-
-    try {
-      const settings = await this.settings.getSettings()
-      const { changes, nextVersion } = await this.client.fetchChanges(settings.globalVersion)
-      await this.intake.ingestChanges(changes)
-      const processed = await this.processDurableIntake({ flexiNextHint: nextVersion })
-      const message = `Changes: ${changes.length} записів, groups=${processed.groups}, fetched=${processed.fetched}, pollStart→${processed.pollStart}, lastSafe=${processed.lastSafeCursor}.`
-      await this.settings.updateSettings({
-        lastSyncAt: new Date().toISOString(),
-        lastSyncStatus: processed.failed > 0 ? 'error' : 'ok',
-        lastSyncMessage: message,
-      })
-      if (processed.failed > 0) {
-        return {
-          ok: false,
-          itemsSynced: processed.fetched,
-          unmatched: processed.failed,
-          message,
-        }
-      }
-      return { ok: true, itemsSynced: processed.fetched, unmatched: 0, message }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      await this.settings.updateSettings({
-        lastSyncAt: new Date().toISOString(),
-        lastSyncStatus: 'error',
-        lastSyncMessage: message,
-      })
-      return { ok: false, itemsSynced: 0, unmatched: 0, message }
-    }
-  }
-
   /** Rare full pass over cenik (existing SKUs only). */
   async syncCenikFull(): Promise<FlexiSyncResult> {
     const configured = await this.isConfigured()
@@ -522,15 +501,15 @@ export class FlexiService {
   }
 
   /**
-   * Legacy entry: persist durable evidence then process collapsed groups.
-   * Does NOT advance cursor from nextVersion when any GET fails.
+   * Legacy job entry — retired. Processor routes apply-changes → live.enqueueFromChangeEntries.
+   * Kept as no-op so accidental direct calls cannot write FlexiChangeEvent.
    */
-  async applyChanges(changes: FlexiChangeEntry[], nextVersion?: number): Promise<void> {
-    await this.intake.ingestChanges(changes)
-    const result = await this.processDurableIntake({ flexiNextHint: nextVersion })
-    if (result.failed > 0) {
-      throw new Error(`Flexi intake: ${result.failed} group(s) failed`)
-    }
+  async applyChanges(changes: FlexiChangeEntry[], _nextVersion?: number): Promise<void> {
+    void _nextVersion
+    if (changes.length === 0) return
+    this.logger.warn(
+      `applyChanges ignored (${changes.length} entries) — journal path retired; use FlexiLiveSyncService`,
+    )
   }
 
   /**
@@ -792,9 +771,15 @@ export class FlexiService {
     createMissing?: boolean
     /** Manual backstage run: close catalog journal so webhook does not re-apply backlog. */
     absorbJournal?: boolean
+    /**
+     * After sync: unpublish products / deactivate categories whose ABRA legacyId
+     * is no longer present in the imported strom set. Never hard-deletes.
+     */
+    reconcileMissing?: boolean
   }): Promise<FlexiStromSyncResult> {
     const createMissing = opts?.createMissing !== false
     const absorbJournal = opts?.absorbJournal === true
+    const reconcileMissing = opts?.reconcileMissing === true
     const configured = await this.isConfigured()
     if (!configured) {
       return {
@@ -822,6 +807,10 @@ export class FlexiService {
     let skippedMissingProducts = 0
     let skippedMissingVariants = 0
     let journalAbsorbed = 0
+    let unpublished = 0
+    let deactivatedCategories = 0
+    const seenCategoryLegacyIds = new Set<number>()
+    const seenProductLegacyIds = new Set<string>()
 
     try {
       const planned = resolveStromTreeAndShopRoot(
@@ -954,6 +943,10 @@ export class FlexiService {
             const categoryUpdate: {
               latinName?: string
               legacyId?: number
+              parentId?: string | null
+              position?: number
+              isCatalogRoot?: boolean
+              isActive?: boolean
             } = {}
             if (fields.categoryLatinName) categoryUpdate.latinName = content.latinName
             if (existing.legacyId == null && flexiLegacyId != null) {
@@ -968,7 +961,14 @@ export class FlexiService {
                 )
               }
             }
-            // Tree (parent/position/isCatalogRoot) and slug are never rewritten on update.
+            // Ownership: slug is SITE after create. parent/position/isCatalogRoot follow ABRA
+            // when importUpdateFields.categoryTree is enabled (authoritative Full Refresh).
+            if (fields.categoryTree) {
+              categoryUpdate.parentId = parentCategoryId
+              categoryUpdate.position = node.poradi
+              categoryUpdate.isCatalogRoot = !parentCategoryId
+              categoryUpdate.isActive = true
+            }
             if (Object.keys(categoryUpdate).length > 0) {
               await this.prisma.category.update({
                 where: { id: existing.id },
@@ -980,6 +980,7 @@ export class FlexiService {
               isUpdate: true,
             })
           }
+          if (flexiLegacyId != null) seenCategoryLegacyIds.add(flexiLegacyId)
           categoryIdByFlexiNode.set(node.id, existing.id)
           if (node.kod) categoryIdByFlexiNode.set(node.kod, existing.id)
           categoriesUpserted += 1
@@ -1138,6 +1139,7 @@ export class FlexiService {
             })
           }
           productsUpserted += 1
+          if (productLegacyId) seenProductLegacyIds.add(productLegacyId)
 
           for (const link of uniqueLinks) {
             const item =
@@ -1299,6 +1301,47 @@ export class FlexiService {
 
       void currency
 
+      // reconcileMissing only after a proven COMPLETE strom fetch.
+      // Incomplete/empty tree or shop-root miss ⇒ refuse mass unpublish/deactivate.
+      const shopRootMiss = errors.some((e) => e.includes('не знайдена в дереві'))
+      const stromFetchComplete =
+        nodes.length > 0 &&
+        !shopRootMiss &&
+        seenProductLegacyIds.size > 0 &&
+        seenCategoryLegacyIds.size > 0
+
+      if (reconcileMissing) {
+        if (!stromFetchComplete) {
+          this.logger.warn(
+            `reconcileMissing skipped — strom incomplete (nodes=${nodes.length}, productsSeen=${seenProductLegacyIds.size}, categoriesSeen=${seenCategoryLegacyIds.size}, shopRootMiss=${shopRootMiss})`,
+          )
+        } else {
+          const result = await this.prisma.product.updateMany({
+            where: {
+              isPublished: true,
+              AND: [
+                { legacyId: { not: null } },
+                { legacyId: { notIn: [...seenProductLegacyIds] } },
+              ],
+            },
+            data: { isPublished: false },
+          })
+          unpublished = result.count
+
+          const catResult = await this.prisma.category.updateMany({
+            where: {
+              isActive: true,
+              AND: [
+                { legacyId: { not: null } },
+                { legacyId: { notIn: [...seenCategoryLegacyIds] } },
+              ],
+            },
+            data: { isActive: false },
+          })
+          deactivatedCategories = catResult.count
+        }
+      }
+
       if (absorbJournal) {
         journalAbsorbed = await this.absorbCatalogJournalAfterManualSync()
       }
@@ -1312,11 +1355,15 @@ export class FlexiService {
           ? ` пропущено нових: cat ${skippedMissingCategories}, prod ${skippedMissingProducts}, var ${skippedMissingVariants}.`
           : ''
       const absorbPart = absorbJournal ? ` журнал поглинуто ${journalAbsorbed}.` : ''
+      const missingPart =
+        reconcileMissing && (unpublished > 0 || deactivatedCategories > 0)
+          ? ` знято з публікації ${unpublished}, деактивовано категорій ${deactivatedCategories}.`
+          : ''
       const errorPreview = errors.length
         ? ` Перші помилки: ${errors.slice(0, 5).join(' | ')}`
         : ''
       const message =
-        `Strom (${modeLabel}): категорій ${categoriesUpserted}, товарів ${productsUpserted}, варіантів ${variantsUpserted}, orphan ${orphansCreated}, помилок ${errors.length}.${skipPart}${absorbPart}${errorPreview}`
+        `Strom (${modeLabel}): категорій ${categoriesUpserted}, товарів ${productsUpserted}, варіантів ${variantsUpserted}, orphan ${orphansCreated}, помилок ${errors.length}.${skipPart}${absorbPart}${missingPart}${errorPreview}`
       await this.settings.updateSettings({
         lastStromSyncAt: new Date().toISOString(),
         lastStromSyncMessage: message,
@@ -1333,6 +1380,8 @@ export class FlexiService {
         skippedMissingProducts,
         skippedMissingVariants,
         journalAbsorbed,
+        unpublished,
+        deactivatedCategories,
         message,
         errors,
       }
@@ -1990,8 +2039,10 @@ export class FlexiService {
 
     document.doprava = addrDoc.doprava
 
-    if (order.preferredShipDate) {
-      document.datTermin = order.preferredShipDate.toISOString().slice(0, 10)
+    // preferredShipDate wins when set; else shipByDate (operational dispatch SLA).
+    const datTermin = resolveDatTerminIso(order)
+    if (datTermin) {
+      document.datTermin = datTermin
     }
 
     applyFlexiOrderHeaderMapping(document, {
@@ -2000,6 +2051,12 @@ export class FlexiService {
       deliveryMethod: order.deliveryMethod,
       deliveryBranch: order.deliveryBranch,
       deliveryMethodCodes: settings.deliveryMethodCodes,
+    })
+
+    applyFlexiBankAccountMapping(document, {
+      paymentMethod: order.paymentMethod,
+      bankAccountCodeCard: settings.bankAccountCodeCard,
+      bankAccountCodeBank: settings.bankAccountCodeBank,
     })
 
     const sendMode = this.resolveDocumentSendMode(isB2b, settings.documentSend)
@@ -2032,6 +2089,13 @@ export class FlexiService {
         },
       })
       await this.settings.updateSettings({ lastExportAt: new Date().toISOString() })
+      if (mode !== 'exception') {
+        await this.runPostExportPaymentDocs({
+          id: order.id,
+          paymentMethod: order.paymentMethod,
+          paymentStatus: order.paymentStatus,
+        })
+      }
       return {
         ok: true,
         externalId: extId,
@@ -2071,6 +2135,11 @@ export class FlexiService {
             },
           })
           await this.settings.updateSettings({ lastExportAt: new Date().toISOString() })
+          await this.runPostExportPaymentDocs({
+            id: order.id,
+            paymentMethod: order.paymentMethod,
+            paymentStatus: order.paymentStatus,
+          })
           this.logger.warn(
             `exportOrder(${orderId}): rezervace rejected — exported with rezervovat=false.`,
           )
@@ -2528,6 +2597,8 @@ export class FlexiService {
       email: order.customerEmail ?? '',
       mobil: order.customerPhone,
       tel: order.customerPhone,
+      // Website customers are always odběratel (buyer) — never odběr-dodav (wholesale partner).
+      typVztahuK: 'typVztahu.odberatel',
     }
     if (isB2b) {
       if (order.companyIco) adresar.ic = order.companyIco.replace(/\D/g, '') || order.companyIco
@@ -2560,6 +2631,475 @@ export class FlexiService {
     return createExt
   }
 
+  /**
+   * Soft-update Received Order datTermin from site preferredShipDate ?? shipByDate.
+   * Used after bank payment confirmation when shipByDate becomes available.
+   */
+  async syncOrderDatTerminFromSite(orderId: string): Promise<{ ok: boolean; message: string }> {
+    const configured = await this.isConfigured()
+    if (!configured) return { ok: false, message: 'ABRA Flexi не налаштовано.' }
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        preferredShipDate: true,
+        shipByDate: true,
+        externalErpId: true,
+        erpSyncStatus: true,
+      },
+    })
+    if (!order?.externalErpId?.trim()) {
+      return { ok: false, message: 'Замовлення ще не експортовано в ABRA.' }
+    }
+    const datTermin = resolveDatTerminIso(order)
+    if (!datTermin) {
+      return { ok: false, message: 'Немає preferredShipDate / shipByDate для datTermin.' }
+    }
+    try {
+      await this.client.putObjednavkaPrijata({
+        id: order.externalErpId.trim(),
+        datTermin,
+      })
+      return { ok: true, message: `datTermin=${datTermin}` }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`syncOrderDatTerminFromSite(${orderId}): ${message}`)
+      return { ok: false, message }
+    }
+  }
+
+  /**
+   * ERP-EU-CORE: soft-call after a successful (non-exception) SYNCED export.
+   * Never throws — exportOrder must succeed regardless of advance/clearing outcome.
+   */
+  private async runPostExportPaymentDocs(order: {
+    id: string
+    paymentMethod: string
+    paymentStatus: string | null
+  }): Promise<void> {
+    try {
+      if (isCodPaymentMethod(order.paymentMethod)) {
+        return
+      }
+      if (isBankPaymentMethod(order.paymentMethod)) {
+        await this.createAdvanceInvoice(order.id)
+        return
+      }
+      if (isCardPaymentMethod(order.paymentMethod) && order.paymentStatus === 'success') {
+        await this.createAdvanceInvoice(order.id)
+        await this.registerMatchPayment(order.id)
+      }
+    } catch (error) {
+      this.logger.warn(
+        `runPostExportPaymentDocs(${order.id}) soft-failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+  }
+
+  /**
+   * ERP-EU-CORE: create a 100% advance invoice (ZÁLOHA) for a bank-transfer or paid-card
+   * order via Flexi's official `tvorbaZalohy` sub-object on the order document.
+   * GET-before-create idempotent on ext:GA:ADVANCE:{orderId}. Never sets stavMailK
+   * (no automatic ZÁLOHA email — deferred, see sendAdvanceInvoiceToCustomer).
+   */
+  async createAdvanceInvoice(orderId: string): Promise<{
+    ok: boolean
+    message: string
+    externalId?: string
+    nativeId?: string
+    nativeKod?: string
+    skipped?: boolean
+  }> {
+    const configured = await this.isConfigured()
+    if (!configured) {
+      return { ok: false, message: 'ABRA Flexi не налаштовано.' }
+    }
+
+    const settings = await this.settings.getSettings()
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        paymentMethod: true,
+        paymentDueAt: true,
+        externalErpId: true,
+        erpNativeId: true,
+      },
+    })
+    if (!order) return { ok: false, message: 'Замовлення не знайдено.' }
+
+    const advExtId = advanceExternalId(order.id)
+
+    // GET-before-create — idempotent on retry / duplicate call.
+    try {
+      const existing = await this.client.fetchFakturaVydanaByExtId(advExtId)
+      if (existing) {
+        const nativeId = existing.id != null ? String(existing.id).trim() || null : null
+        const nativeKod = existing.kod != null ? String(existing.kod).trim() || null : null
+        await this.prisma.order.update({
+          where: { id: order.id },
+          data: {
+            erpAdvanceExternalId: advExtId,
+            erpAdvanceNativeId: nativeId,
+            erpAdvanceKod: nativeKod,
+            erpAdvanceSyncStatus: 'SYNCED',
+            erpAdvanceSyncedAt: new Date(),
+            erpAdvanceLastError: null,
+          },
+        })
+        return {
+          ok: true,
+          externalId: advExtId,
+          nativeId: nativeId ?? undefined,
+          nativeKod: nativeKod ?? undefined,
+          skipped: true,
+          message: 'Зальогова фактура вже існує в ABRA Flexi (GET-by-ext).',
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `createAdvanceInvoice(${orderId}) GET-before-PUT: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+
+    const orderRef = order.erpNativeId?.trim() || order.externalErpId?.trim() || ''
+    if (!orderRef) {
+      return { ok: false, message: 'Замовлення ще не експортовано в ABRA Flexi.' }
+    }
+
+    const paymentRef = toFlexiRelationCode(mapPaymentMethodToFlexiCode(order.paymentMethod))
+    const bankCode = resolveBankovniUcetCode({
+      paymentMethod: order.paymentMethod,
+      bankAccountCodeCard: settings.bankAccountCodeCard,
+      bankAccountCodeBank: settings.bankAccountCodeBank,
+    })
+
+    const zaloha: Record<string, unknown> = {
+      id: advExtId,
+      typDokl: `code:${settings.advanceDocTypeCode}`,
+      procent: 100,
+      varSym: String(order.orderNumber),
+    }
+    if (paymentRef) zaloha.formaUhradyCis = paymentRef
+    if (bankCode) zaloha.bankovniUcet = toFlexiRelationCode(bankCode)
+    if (isBankPaymentMethod(order.paymentMethod)) {
+      const datSplat = toDateOnlyIso(order.paymentDueAt)
+      if (datSplat) zaloha.datSplat = datSplat
+    }
+
+    try {
+      await this.client.putObjednavkaTvorbaZalohy(orderRef, zaloha)
+
+      let nativeId: string | null = null
+      let nativeKod: string | null = null
+      try {
+        const created = await this.client.fetchFakturaVydanaByExtId(advExtId)
+        if (created) {
+          nativeId = created.id != null ? String(created.id).trim() || null : null
+          nativeKod = created.kod != null ? String(created.kod).trim() || null : null
+        }
+      } catch (resolveError) {
+        this.logger.warn(
+          `createAdvanceInvoice(${orderId}) GET-after-PUT: ${
+            resolveError instanceof Error ? resolveError.message : String(resolveError)
+          }`,
+        )
+      }
+
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          erpAdvanceExternalId: advExtId,
+          erpAdvanceNativeId: nativeId,
+          erpAdvanceKod: nativeKod,
+          erpAdvanceSyncStatus: 'SYNCED',
+          erpAdvanceSyncedAt: new Date(),
+          erpAdvanceLastError: null,
+        },
+      })
+      return {
+        ok: true,
+        externalId: advExtId,
+        nativeId: nativeId ?? undefined,
+        nativeKod: nativeKod ?? undefined,
+        message: 'Зальогову фактуру створено в ABRA Flexi.',
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`createAdvanceInvoice(${orderId}) failed: ${message}`)
+      await this.prisma.order
+        .update({
+          where: { id: order.id },
+          data: { erpAdvanceSyncStatus: 'FAILED', erpAdvanceLastError: message.slice(0, 2000) },
+        })
+        .catch(() => {})
+      return { ok: false, message }
+    }
+  }
+
+  /**
+   * ERP-EU-CORE: Stripe-only. Records the clearing payment as a `banka` document and pairs
+   * it (sparovani) against the advance invoice. Skips silently for non-card / unpaid orders.
+   * Soft-fails (log + erpStripePaySyncStatus=FAILED) when stripeClearingBankDocTypeCode is
+   * unconfigured or the advance is missing — never throws.
+   */
+  async registerMatchPayment(orderId: string): Promise<{
+    ok: boolean
+    message: string
+    skipped?: boolean
+    externalId?: string
+    nativeId?: string
+  }> {
+    const configured = await this.isConfigured()
+    if (!configured) {
+      return { ok: false, message: 'ABRA Flexi не налаштовано.' }
+    }
+
+    const settings = await this.settings.getSettings()
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        paymentMethod: true,
+        paymentStatus: true,
+        erpAdvanceExternalId: true,
+        erpAdvanceNativeId: true,
+        erpStripePayExternalId: true,
+        erpStripePayNativeId: true,
+        erpStripePaySyncStatus: true,
+      },
+    })
+    if (!order) return { ok: false, message: 'Замовлення не знайдено.' }
+
+    if (!isCardPaymentMethod(order.paymentMethod) || order.paymentStatus !== 'success') {
+      return {
+        ok: true,
+        skipped: true,
+        message: 'Не карткова / неоплачена — sparovani не потрібне.',
+      }
+    }
+
+    if (order.erpStripePaySyncStatus === 'SYNCED' && order.erpStripePayExternalId?.trim()) {
+      return {
+        ok: true,
+        skipped: true,
+        externalId: order.erpStripePayExternalId,
+        nativeId: order.erpStripePayNativeId ?? undefined,
+        message: 'Stripe clearing вже синхронізовано.',
+      }
+    }
+
+    const docTypeCode = settings.stripeClearingBankDocTypeCode.trim()
+    if (!docTypeCode) {
+      const message =
+        'stripeClearingBankDocTypeCode не налаштовано — Stripe clearing (banka) пропущено.'
+      this.logger.warn(`registerMatchPayment(${orderId}): ${message}`)
+      await this.prisma.order
+        .update({
+          where: { id: order.id },
+          data: { erpStripePaySyncStatus: 'FAILED', erpStripePayLastError: message },
+        })
+        .catch(() => {})
+      return { ok: false, message }
+    }
+
+    const advanceRef = order.erpAdvanceNativeId?.trim() || order.erpAdvanceExternalId?.trim()
+    if (!advanceRef) {
+      const message = 'Немає зальогової фактури для sparovani — Stripe clearing пропущено.'
+      this.logger.warn(`registerMatchPayment(${orderId}): ${message}`)
+      await this.prisma.order
+        .update({
+          where: { id: order.id },
+          data: { erpStripePaySyncStatus: 'FAILED', erpStripePayLastError: message },
+        })
+        .catch(() => {})
+      return { ok: false, message }
+    }
+
+    const stripeExtId = stripePayExternalId(order.id)
+    const bankCode = settings.bankAccountCodeCard.trim()
+    const document: Record<string, unknown> = {
+      id: stripeExtId,
+      typDokl: `code:${docTypeCode}`,
+      varSym: String(order.orderNumber),
+      // Most common Flexi pairing pattern: banka.sparovani[].uhrazovanaFak → paid invoice ref.
+      sparovani: [{ uhrazovanaFak: advanceRef }],
+    }
+    if (bankCode) document.bankovniUcet = toFlexiRelationCode(bankCode)
+
+    try {
+      const write = await this.client.putBanka(document)
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          erpStripePayExternalId: stripeExtId,
+          erpStripePayNativeId: write.nativeId,
+          erpStripePaySyncStatus: 'SYNCED',
+          erpStripePayLastError: null,
+        },
+      })
+      return {
+        ok: true,
+        externalId: stripeExtId,
+        nativeId: write.nativeId ?? undefined,
+        message: 'Stripe clearing (banka) зареєстровано в ABRA Flexi.',
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`registerMatchPayment(${orderId}) failed: ${message}`)
+      await this.prisma.order
+        .update({
+          where: { id: order.id },
+          data: { erpStripePaySyncStatus: 'FAILED', erpStripePayLastError: message.slice(0, 2000) },
+        })
+        .catch(() => {})
+      return { ok: false, message }
+    }
+  }
+
+  /**
+   * ERP-EU-CORE: deferred. Sending the ZÁLOHA PDF/email to the customer is explicitly
+   * out of scope for this batch — stub only, never sends mail or touches stavMailK.
+   */
+  async sendAdvanceInvoiceToCustomer(
+    orderId: string,
+  ): Promise<{ ok: boolean; skipped: boolean; reason: string }> {
+    void orderId
+    return { ok: true, skipped: true, reason: 'deferred' }
+  }
+
+  /**
+   * ERP-EU-CORE / wholesale: dedup order is stored externalErpId → IČO/VAT → email →
+   * create new ext:GA-WHO:{id}. Matches get typVztahuK=odběr-dodav + additive štítky
+   * (never removeAll). Soft-fails — never throws.
+   */
+  async syncWholesaleInquiryToAdresar(inquiryId: string): Promise<{
+    ok: boolean
+    message: string
+    externalId?: string
+    nativeId?: string
+    nativeKod?: string
+    skipped?: boolean
+  }> {
+    const configured = await this.isConfigured()
+    if (!configured) {
+      return { ok: false, message: 'ABRA Flexi не налаштовано.' }
+    }
+
+    const settings = await this.settings.getSettings()
+    const inquiry = await this.prisma.wholesaleInquiry.findUnique({ where: { id: inquiryId } })
+    if (!inquiry) return { ok: false, message: 'Заявку не знайдено.' }
+
+    const labelCode = settings.wholesaleAdresarLabelCode.trim()
+
+    try {
+      let row: Record<string, unknown> | null = null
+
+      if (inquiry.externalErpId?.trim()) {
+        row = await this.client.findAdresarByExtId(inquiry.externalErpId.trim())
+      }
+
+      const taxCandidates = buildTaxIdCandidates({
+        ico: inquiry.companyIco,
+        vatId: inquiry.companyVatId,
+      })
+      if (!row && taxCandidates.length > 0) {
+        row = await this.client.findAdresarByTaxCandidates(taxCandidates)
+      }
+
+      const email = normalizeAdresarEmail(inquiry.email)
+      if (!row && email) {
+        row = await this.client.findAdresarByEmail(email)
+      }
+
+      let createExtId: string | null = null
+      let isNew = false
+      if (!row) {
+        createExtId = wholesaleAdresarExtId(inquiry.id)
+        const existingByCreateExt = await this.client.findAdresarByExtId(createExtId)
+        if (existingByCreateExt?.id != null) {
+          row = existingByCreateExt
+        } else {
+          isNew = true
+        }
+      }
+
+      if (isNew) {
+        const adresar: Record<string, unknown> = {
+          id: createExtId,
+          nazev: inquiry.companyName?.trim() || inquiry.fullName,
+          email: inquiry.email,
+          mobil: inquiry.phone,
+          tel: inquiry.phone,
+          // Wholesale leads are both customer and (potential) supplier relation.
+          typVztahuK: 'typVztahu.odberDodav',
+        }
+        if (inquiry.companyIco) adresar.ic = inquiry.companyIco
+        if (inquiry.companyVatId) adresar.vatId = inquiry.companyVatId
+        if (inquiry.city?.trim()) adresar.mesto = inquiry.city.trim()
+        if (labelCode) adresar.stitky = stitkyCodesToWriteValue([labelCode])
+
+        await this.client.putAdresar(adresar)
+        row = await this.client.findAdresarByExtId(createExtId!)
+      } else if (row) {
+        const rowRef = adresarRefFromRow(row) || String(row.id)
+        const existingStitky = parseStitkyCodes(row.stitky)
+        const mergedStitky = labelCode
+          ? mergeStitkyCodesAdditive(existingStitky, labelCode)
+          : existingStitky
+
+        const patch: Record<string, unknown> = {
+          id: rowRef,
+          typVztahuK: 'typVztahu.odberDodav',
+        }
+        if (mergedStitky.length > 0) {
+          patch.stitky = stitkyCodesToWriteValue(mergedStitky)
+        }
+        await this.client.putAdresar(patch)
+      }
+
+      const externalId = createExtId ?? (row?.id != null ? String(row.id).trim() : null)
+      const nativeId = row?.id != null ? String(row.id).trim() || null : null
+      const nativeKod = row?.kod != null ? String(row.kod).trim() || null : null
+
+      await this.prisma.wholesaleInquiry.update({
+        where: { id: inquiry.id },
+        data: {
+          externalErpId: externalId ?? inquiry.externalErpId ?? null,
+          erpNativeId: nativeId,
+          erpNativeKod: nativeKod,
+          erpSyncStatus: 'SYNCED',
+          erpSyncedAt: new Date(),
+          erpLastErrorMessage: null,
+        },
+      })
+      return {
+        ok: true,
+        externalId: externalId ?? undefined,
+        nativeId: nativeId ?? undefined,
+        nativeKod: nativeKod ?? undefined,
+        message: 'Заявку синхронізовано з ABRA Flexi (Adresář).',
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`syncWholesaleInquiryToAdresar(${inquiryId}) failed: ${message}`)
+      await this.prisma.wholesaleInquiry
+        .update({
+          where: { id: inquiry.id },
+          data: { erpSyncStatus: 'FAILED', erpLastErrorMessage: message.slice(0, 2000) },
+        })
+        .catch(() => {})
+      return { ok: false, message }
+    }
+  }
+
   /** Prefer Strom catalog sync; orphans for leftover SKUs. */
   async importNewProducts(): Promise<FlexiImportResult> {
     const settings = await this.settings.getSettings()
@@ -2571,7 +3111,11 @@ export class FlexiService {
       )
     }
 
-    const strom = await this.syncStromCatalog({ createMissing: true, absorbJournal: true })
+    const strom = await this.syncStromCatalog({
+      createMissing: true,
+      absorbJournal: false,
+      reconcileMissing: true,
+    })
     return {
       ok: strom.ok,
       created: strom.productsUpserted + strom.orphansCreated,
@@ -2583,7 +3127,21 @@ export class FlexiService {
     }
   }
 
-  async registerWebhook(): Promise<{ ok: boolean; message: string; remoteId?: string }> {
+  async listRemoteHooks(): Promise<
+    Array<{ id: string; url: string; lastVersion?: number; format?: string }>
+  > {
+    return this.client.listHooks()
+  }
+
+  /**
+   * Register (or reset) Flexi webhook at lastVersion.
+   * Does NOT set webhookAccepting unless opts.setAccepting === true.
+   * Existing hook with same URL is deleted and recreated so lastVersion is authoritative.
+   */
+  async registerWebhook(opts?: {
+    lastVersion?: number
+    setAccepting?: boolean
+  }): Promise<{ ok: boolean; message: string; remoteId?: string }> {
     const settings = await this.settings.getSettings()
     if (!settings.webhookUrl || !settings.webhookSecKey) {
       return {
@@ -2594,49 +3152,52 @@ export class FlexiService {
 
     const normalizeUrl = (u: string) => u.trim().replace(/\/$/, '').toLowerCase()
     const wanted = normalizeUrl(settings.webhookUrl)
+    const lastVersion =
+      typeof opts?.lastVersion === 'number' && Number.isFinite(opts.lastVersion)
+        ? Math.max(0, Math.trunc(opts.lastVersion))
+        : Math.max(0, Math.trunc(settings.globalVersion))
+    const setAccepting = opts?.setAccepting === true
 
     try {
-      // Idempotent: reuse existing remote hook with same URL (LIVE-VERIFIED GET /hooks)
       const existing = await this.client.listHooks()
-      const match = existing.find((h) => normalizeUrl(h.url) === wanted)
-      if (match) {
-        await this.settings.updateSettings({
-          webhookAccepting: true,
-          webhookRemoteId: match.id,
-          webhookLastRegisterAt: new Date().toISOString(),
-          webhookLastError: '',
-        })
-        return {
-          ok: true,
-          remoteId: match.id,
-          message: `Webhook уже зареєстровано в Flexi (id=${match.id}). Дублікат не створювався. Changes API poll залишається активним.`,
-        }
+      const matches = existing.filter((h) => normalizeUrl(h.url) === wanted)
+      for (const hook of matches) {
+        await this.client.deleteHook(hook.id)
       }
 
       const skipUrlTest =
         settings.webhookUrl.includes('localhost') || settings.webhookUrl.includes('127.0.0.1')
+      if (skipUrlTest) {
+        this.logger.warn(
+          `Webhook URL looks unreachable from ABRA (${settings.webhookUrl}) — registering with skipUrlTest; ABRA cannot deliver to localhost.`,
+        )
+      }
       await this.client.registerWebhook(
         settings.webhookUrl,
         settings.webhookSecKey,
-        settings.globalVersion,
+        lastVersion,
         skipUrlTest,
       )
 
       const after = await this.client.listHooks()
       const created = after.find((h) => normalizeUrl(h.url) === wanted)
       await this.settings.updateSettings({
-        webhookAccepting: true,
-          webhookRemoteId: created?.id ?? '',
-          webhookLastRegisterAt: new Date().toISOString(),
-          webhookLastError: '',
-        })
+        ...(setAccepting ? { webhookAccepting: true } : {}),
+        webhookRemoteId: created?.id ?? '',
+        webhookLastRegisterAt: new Date().toISOString(),
+        webhookLastError: skipUrlTest
+          ? `Webhook URL is not publicly reachable (${settings.webhookUrl}). ABRA cannot deliver. Use a public HTTPS API tunnel → Nest /flexi/webhook.`
+          : '',
+      })
 
       return {
         ok: true,
         remoteId: created?.id,
-        message: created
-          ? `Webhook зареєстровано в ABRA Flexi (id=${created.id}, format=JSON). Вимкнення webhook ≠ вимкнення ERP sync.`
-          : 'Webhook PUT виконано; id не знайдено в GET /hooks — статус UNKNOWN до наступної перевірки.',
+        message: skipUrlTest
+          ? `Hook записано в ABRA (id=${created?.id ?? '?'}, lastVersion=${lastVersion}), але URL localhost — ABRA НЕ зможе доставляти webhook. Вкажіть публічний HTTPS URL Nest API (/flexi/webhook).`
+          : created
+            ? `Webhook зареєстровано (id=${created.id}, lastVersion=${lastVersion}).`
+            : `Webhook PUT виконано (lastVersion=${lastVersion}); id не знайдено в GET /hooks.`,
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

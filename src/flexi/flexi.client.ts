@@ -1,11 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
 
 import {
-  FLEXI_API_WARN_THRESHOLD,
   FLEXI_CENIK_QUERY_BATCH,
   FLEXI_HTTP_TIMEOUT_MS,
   FLEXI_STOCK_FILTER_CHUNK,
 } from './flexi.constants'
+import {
+  FlexiApiUsageService,
+  type FlexiApiUsageCategory,
+} from './flexi-api-usage.service'
 import { FlexiSettingsService } from './flexi.settings.service'
 import { parseStromLocaleFields } from './flexi-locale-json'
 import { applyWarehouseStock } from './flexi-warehouse-stock'
@@ -43,7 +46,10 @@ export class FlexiClient {
   private readonly logger = new Logger(FlexiClient.name)
   private cachedPeriodId: { id: string; fetchedAt: number } | null = null
 
-  constructor(private readonly settingsService: FlexiSettingsService) {}
+  constructor(
+    private readonly settingsService: FlexiSettingsService,
+    private readonly apiUsage: FlexiApiUsageService,
+  ) {}
 
   private authHeader(settings: FlexiSettings): string {
     const token = Buffer.from(`${settings.username}:${settings.password}`).toString('base64')
@@ -59,6 +65,7 @@ export class FlexiClient {
     path: string,
     body?: unknown,
     settingsOverride?: FlexiSettings,
+    opts?: { usageCategory?: FlexiApiUsageCategory },
   ): Promise<T> {
     const settings = settingsOverride ?? (await this.settingsService.getSettings())
     if (!settings.baseUrl || !settings.companyId) {
@@ -83,13 +90,12 @@ export class FlexiClient {
         signal: controller.signal,
       })
 
-      void this.settingsService.incrementApiCalls(1).then((count) => {
-        if (count === FLEXI_API_WARN_THRESHOLD || count === FLEXI_API_WARN_THRESHOLD + 1) {
-          this.logger.warn(
-            `Flexi REST API calls today ≈ ${count} (поріг попередження ${FLEXI_API_WARN_THRESHOLD}).`,
-          )
-        }
-      })
+      // Count every actual outgoing HTTP attempt (including non-2xx). Webhooks inbound = 0.
+      const category =
+        opts?.usageCategory ??
+        this.apiUsage.activeCategory() ??
+        this.inferUsageCategory(path)
+      void this.apiUsage.increment(settings.companyId, category).catch(() => undefined)
 
       const text = await response.text()
       let json: unknown = null
@@ -111,6 +117,17 @@ export class FlexiClient {
     } finally {
       clearTimeout(timer)
     }
+  }
+
+  private inferUsageCategory(path: string): FlexiApiUsageCategory {
+    const p = path.toLowerCase()
+    if (p.includes('/hooks')) return 'other'
+    if (p.includes('/changes')) return 'live'
+    if (p.includes('objednavka') || p.includes('faktura') || p.includes('banka') || p.includes('zaloha'))
+      return 'orders'
+    if (p.includes('skladova-karta') && p.includes('filter')) return 'checkout'
+    if (p.includes('strom') || p.includes('cenik') || p.includes('skladova')) return 'catalog'
+    return 'other'
   }
 
   async testConnection(): Promise<{ ok: boolean; message: string }> {
@@ -466,6 +483,28 @@ export class FlexiClient {
     }
     if (typeof row.cenik === 'string' && /^\d+$/.test(row.cenik.trim())) {
       return row.cenik.trim()
+    }
+    return null
+  }
+
+  async resolveCenikIdFromRezervace(rezervaceId: string): Promise<string | null> {
+    const path = `/rezervace/${encodeURIComponent(rezervaceId)}.json?detail=custom:id,cenik,cenik(kod),mnozstvi,sklad`
+    const payload = await this.request<unknown>('GET', path)
+    const rows = this.extractEvidence<Record<string, unknown>>(payload, 'rezervace')
+    const row = rows[0]
+    if (!row) return null
+    const ref = row['cenik@ref']
+    if (typeof ref === 'string') {
+      const m = ref.match(/\/cenik\/([^/.]+)/i)
+      if (m?.[1]) return decodeURIComponent(m[1])
+    }
+    if (typeof row.cenik === 'string' && /^\d+$/.test(row.cenik.trim())) {
+      return row.cenik.trim()
+    }
+    const kod = this.extractCenikKod(row.cenik)
+    if (kod) {
+      const item = await this.fetchCenikByKod(kod)
+      return item?.id ?? null
     }
     return null
   }
@@ -873,6 +912,70 @@ export class FlexiClient {
   }
 
   /**
+   * ERP-EU-CORE: create a Flexi advance invoice (ZÁLOHA) from an existing order document via
+   * the official `tvorbaZalohy` sub-object on `objednavka-prijata` PUT.
+   * @see https://podpora.flexibee.eu/en/articles/4736468-tvorba-zalohy-z-objednavky
+   */
+  async putObjednavkaTvorbaZalohy(
+    orderRef: string,
+    zaloha: Record<string, unknown>,
+  ): Promise<{ nativeId: string | null; ref: string | null; raw: unknown }> {
+    const payload = await this.request<unknown>('PUT', '/objednavka-prijata.json', {
+      winstrom: {
+        '@version': '1.0',
+        'objednavka-prijata': [
+          {
+            id: orderRef,
+            tvorbaZalohy: zaloha,
+          },
+        ],
+      },
+    })
+    return this.parseWriteResult(payload)
+  }
+
+  /**
+   * ERP-EU-CORE: issued invoices (incl. ZÁLOHA created via tvorbaZalohy) live in
+   * `faktura-vydana`. Lookup by our own ext id (same path-filter class as objednavka).
+   */
+  async fetchFakturaVydanaByExtId(extId: string): Promise<Record<string, unknown> | null> {
+    const trimmed = extId.trim()
+    if (!trimmed) return null
+    const filter = encodeURIComponent(`id='${this.escapeFlexiLiteral(trimmed)}'`)
+    const path = `/faktura-vydana/(${filter}).json?detail=full`
+    try {
+      const payload = await this.request<unknown>('GET', path)
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'faktura-vydana')
+      return rows[0] ?? null
+    } catch (error) {
+      this.logger.debug(
+        `fetchFakturaVydanaByExtId(${extId}) failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+      return null
+    }
+  }
+
+  /**
+   * ERP-EU-CORE: Stripe clearing bank record (`banka` evidence). Used to record the
+   * incoming card payment and pair it (sparovani) against the advance invoice.
+   */
+  async putBanka(document: Record<string, unknown>): Promise<{
+    nativeId: string | null
+    ref: string | null
+    raw: unknown
+  }> {
+    const payload = await this.request<unknown>('PUT', '/banka.json', {
+      winstrom: {
+        '@version': '1.0',
+        banka: [document],
+      },
+    })
+    return this.parseWriteResult(payload)
+  }
+
+  /**
    * REL-003-PRE-A: direct `/objednavka-prijata/{extId}.json` returns 404 on live Flexi.
    * Use path-filter `/(id='ext:…')` (same class as WEBHOOK-002B multi-id). Never query `?filter=`.
    */
@@ -923,7 +1026,7 @@ export class FlexiClient {
         signal: controller.signal,
       })
 
-      void this.settingsService.incrementApiCalls(1)
+      void this.apiUsage.increment(settings.companyId, 'orders').catch(() => undefined)
 
       if (!response.ok) {
         const text = await response.text()
@@ -1019,10 +1122,16 @@ export class FlexiClient {
       inVersion?: number
     }>
     nextVersion: number
+    /** Current company tip from response root (authoritative). */
+    globalVersion?: number
+    nextIsNone: boolean
   }> {
-    const path = `/changes.json?start=${startVersion}&limit=500`
-    const payload = await this.request<Record<string, unknown>>('GET', path)
+    const path = `/changes.json?start=${startVersion}&limit=1000`
+    const payload = await this.request<Record<string, unknown>>('GET', path, undefined, undefined, {
+      usageCategory: 'live',
+    })
     const winstrom = (payload.winstrom ?? payload) as Record<string, unknown>
+    const rootGv = this.num(winstrom.globalVersion ?? winstrom['@globalVersion'] ?? 0, 0)
     const changes = this.asArray<Record<string, unknown>>(winstrom.change ?? winstrom.changes)
     const mapped = changes.map((c) => {
       const inRaw = c['@in-version'] ?? c.inVersion ?? c['in-version']
@@ -1036,14 +1145,155 @@ export class FlexiClient {
       }
     })
     const nextRaw = winstrom.next
-    const nextVersion =
-      nextRaw === 'none' || nextRaw === undefined || nextRaw === null
-        ? mapped.reduce(
-            (max, c) => Math.max(max, c.inVersion ?? c.globalVersion ?? 0),
-            startVersion,
-          )
-        : this.num(nextRaw, startVersion)
-    return { changes: mapped, nextVersion }
+    const nextIsNone =
+      nextRaw === 'none' || nextRaw === undefined || nextRaw === null || nextRaw === ''
+    const nextVersion = nextIsNone
+      ? mapped.reduce(
+          (max, c) => Math.max(max, c.inVersion ?? c.globalVersion ?? 0),
+          startVersion,
+        )
+      : this.num(nextRaw, startVersion)
+    return {
+      changes: mapped,
+      nextVersion,
+      globalVersion: rootGv > 0 ? rootGv : undefined,
+      nextIsNone,
+    }
+  }
+
+  /**
+   * Current Flexi Changes tip in O(1) via root `globalVersion` (no history walk).
+   * @see https://podpora.flexibee.eu/en/articles/4744362-changes-api
+   */
+  async fetchCurrentGlobalVersion(): Promise<number> {
+    // Any start works for reading root globalVersion; use 0 + limit=1 for a tiny payload.
+    const path = `/changes.json?start=0&limit=1`
+    const payload = await this.request<Record<string, unknown>>('GET', path, undefined, undefined, {
+      usageCategory: 'live',
+    })
+    const winstrom = (payload.winstrom ?? payload) as Record<string, unknown>
+    const rootGv = this.num(winstrom.globalVersion ?? winstrom['@globalVersion'] ?? 0, 0)
+    if (rootGv > 0) return rootGv
+    // Fallback: one page tip from stored-like start
+    const page = await this.fetchChanges(0)
+    if (page.globalVersion && page.globalVersion > 0) return page.globalVersion
+    if (page.nextIsNone) return Math.max(page.nextVersion, 0)
+    throw new Error('Flexi Changes API не повернув globalVersion — неможливо визначити baseline.')
+  }
+
+  /**
+   * Walk Changes pages until tip. Prefer fetchCurrentGlobalVersion() for Enable Without Update.
+   * End condition: next=none / empty — NEVER "page shorter than limit" alone (Flexi may return <limit mid-stream).
+   */
+  async fetchChangesTip(
+    startVersion: number,
+    maxPages = 500,
+  ): Promise<{ tip: number; complete: boolean; pages: number }> {
+    // Fast path: authoritative root tip (ignores startVersion history).
+    try {
+      const tip = await this.fetchCurrentGlobalVersion()
+      return { tip, complete: true, pages: 1 }
+    } catch (error) {
+      this.logger.warn(
+        `fetchCurrentGlobalVersion failed, falling back to walk: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+
+    let cursor = Math.max(0, Math.trunc(startVersion))
+    for (let page = 0; page < maxPages; page += 1) {
+      const { changes, nextVersion, nextIsNone, globalVersion } = await this.fetchChanges(cursor)
+      if (globalVersion && globalVersion > 0 && (nextIsNone || changes.length === 0)) {
+        return { tip: globalVersion, complete: true, pages: page + 1 }
+      }
+      if (nextIsNone || (changes.length === 0 && nextVersion <= cursor)) {
+        return {
+          tip: Math.max(cursor, nextVersion, globalVersion ?? 0),
+          complete: true,
+          pages: page + 1,
+        }
+      }
+      if (nextVersion <= cursor) {
+        return {
+          tip: Math.max(
+            cursor,
+            globalVersion ?? 0,
+            changes.reduce((m, c) => Math.max(m, c.inVersion ?? c.globalVersion ?? 0), cursor),
+          ),
+          complete: true,
+          pages: page + 1,
+        }
+      }
+      cursor = nextVersion
+    }
+    this.logger.warn(`fetchChangesTip incomplete: hit maxPages=${maxPages} at cursor=${cursor}`)
+    return { tip: cursor, complete: false, pages: maxPages }
+  }
+
+  /**
+   * Collect change notification metadata from start→tip for race bridge coalesce.
+   *
+   * Flexi Changes API treats `start` as INCLUSIVE (start=N returns the change at
+   * inVersion=N). Callers that want “changes after baseline B” must pass start=B+1
+   * (see runRaceBridge / enableWithoutUpdate).
+   *
+   * End only on next=none / empty / next<=cursor — not on short page length alone.
+   */
+  async collectChangeNotifications(
+    startVersion: number,
+    opts?: { maxPages?: number; /** Drop rows with inVersion <= this (safety). */ afterVersion?: number },
+  ): Promise<{
+    changes: Array<{
+      evidence?: string
+      id?: string | number
+      operation?: string
+      inVersion?: number
+    }>
+    nextVersion: number
+    complete: boolean
+    pages: number
+  }> {
+    const maxPages = opts?.maxPages ?? 500
+    const afterVersion =
+      typeof opts?.afterVersion === 'number' && Number.isFinite(opts.afterVersion)
+        ? Math.trunc(opts.afterVersion)
+        : undefined
+    const all: Array<{
+      evidence?: string
+      id?: string | number
+      operation?: string
+      inVersion?: number
+    }> = []
+    let cursor = Math.max(0, Math.trunc(startVersion))
+    for (let page = 0; page < maxPages; page += 1) {
+      const { changes, nextVersion, nextIsNone } = await this.fetchChanges(cursor)
+      for (const c of changes) {
+        if (afterVersion != null && (c.inVersion ?? 0) <= afterVersion) continue
+        all.push({
+          evidence: c.evidence,
+          id: c.id,
+          operation: c.operation,
+          inVersion: c.inVersion,
+        })
+      }
+      if (nextIsNone || changes.length === 0) {
+        return {
+          changes: all,
+          nextVersion: Math.max(cursor, nextVersion),
+          complete: true,
+          pages: page + 1,
+        }
+      }
+      if (nextVersion <= cursor) {
+        return { changes: all, nextVersion: cursor, complete: true, pages: page + 1 }
+      }
+      cursor = nextVersion
+    }
+    this.logger.warn(
+      `collectChangeNotifications incomplete: hit maxPages=${maxPages} at cursor=${cursor} (rows=${all.length})`,
+    )
+    return { changes: all, nextVersion: cursor, complete: false, pages: maxPages }
   }
 
   async fetchStromNodes(rootCode: string): Promise<FlexiStromNode[]> {

@@ -170,3 +170,61 @@ export function adresarRefFromRow(row: Record<string, unknown>): string {
   if (row.id != null) return String(row.id)
   return ''
 }
+
+/**
+ * Flexi štítky (labels) multi-relation: bare code (no `code:` prefix) for comparisons.
+ * Accepts array of strings / relation objects, or a comma-joined string — whichever
+ * shape a given Flexi instance returns for a multi-select attribute.
+ */
+export function parseStitkyCodes(raw: unknown): string[] {
+  const out: string[] = []
+  const pushCode = (value: unknown) => {
+    if (value == null) return
+    if (typeof value === 'string') {
+      const s = value.trim()
+      if (!s) return
+      const code = s.startsWith('code:') ? s.slice(5).trim() : s
+      if (code && !out.includes(code)) out.push(code)
+      return
+    }
+    if (typeof value === 'object') {
+      const o = value as Record<string, unknown>
+      const kod = o.kod ?? o.code
+      if (kod != null && String(kod).trim()) {
+        const code = String(kod).trim()
+        if (!out.includes(code)) out.push(code)
+        return
+      }
+      const show = o['@showAs'] ?? o.showAs
+      if (typeof show === 'string' && show.trim()) {
+        const head = show.split(':')[0]?.trim()
+        if (head && !out.includes(head)) out.push(head)
+      }
+    }
+  }
+  if (Array.isArray(raw)) {
+    for (const item of raw) pushCode(item)
+  } else if (typeof raw === 'string') {
+    for (const part of raw.split(',')) pushCode(part)
+  } else if (raw != null) {
+    pushCode(raw)
+  }
+  return out
+}
+
+/** Additive merge only — never drops an existing label code. */
+export function mergeStitkyCodesAdditive(existing: string[], addCode: string): string[] {
+  const code = addCode.trim()
+  if (!code) return [...existing]
+  const has = existing.some((c) => c.trim().toLowerCase() === code.toLowerCase())
+  return has ? [...existing] : [...existing, code]
+}
+
+/** Flexi multi-select write shape: comma-joined `code:` refs. */
+export function stitkyCodesToWriteValue(codes: string[]): string {
+  return codes
+    .map((c) => c.trim())
+    .filter(Boolean)
+    .map((c) => (c.startsWith('code:') ? c : `code:${c}`))
+    .join(',')
+}

@@ -5,10 +5,8 @@ import { Queue } from 'bullmq'
 import { PrismaService } from '../prisma/prisma.service'
 import {
   FLEXI_JOB_NAMES,
-  FLEXI_PROCESS_INTAKE_DELAY_MS,
   FLEXI_PROCESS_INTAKE_JOB_ID,
   FLEXI_QUEUE,
-  FLEXI_RECONCILE_OPEN_THRESHOLD_DEFAULT,
   FLEXI_REPEATABLE_FULL_SYNC_JOB_ID,
   FLEXI_REPEATABLE_POLL_JOB_ID,
 } from './flexi.constants'
@@ -31,7 +29,48 @@ export class FlexiQueueService implements OnModuleInit {
   async onModuleInit() {
     await this.rebuildRepeatableJobs()
     await this.reconcilePendingErpExports()
-    await this.reconcilePendingChangeIntake()
+    await this.cleanupLegacyInboundJobs()
+    // Intentionally do NOT drain FlexiChangeEvent backlog on startup.
+    // Historical journal path is retired — use Full Refresh / Recovery admin action.
+    this.logger.log(
+      'Flexi inbound: live current-state pipeline active; legacy FlexiChangeEvent auto-reconcile disabled',
+    )
+  }
+
+  /**
+   * Deploy-safe: remove waiting/delayed process-intake jobs left in Redis from old code.
+   * Does not touch FlexiChangeEvent DB rows. Does not replay backlog.
+   */
+  async cleanupLegacyInboundJobs(): Promise<void> {
+    try {
+      const intake = await this.queue.getJob(FLEXI_PROCESS_INTAKE_JOB_ID)
+      if (intake) {
+        const state = await intake.getState()
+        if (state === 'waiting' || state === 'delayed') {
+          await intake.remove()
+          this.logger.log(`Removed legacy ${FLEXI_PROCESS_INTAKE_JOB_ID} job (state=${state})`)
+        } else if (state === 'completed' || state === 'failed') {
+          await intake.remove().catch(() => undefined)
+        }
+      }
+
+      const candidates = await this.queue.getJobs(['waiting', 'delayed'])
+      let removed = 0
+      for (const job of candidates) {
+        const type = (job.data as { type?: string } | undefined)?.type
+        if (job.name === FLEXI_JOB_NAMES.PROCESS_INTAKE || type === 'process-intake') {
+          await job.remove().catch(() => undefined)
+          removed += 1
+        }
+      }
+      if (removed > 0) {
+        this.logger.log(`Removed ${removed} legacy process-intake job(s) from Redis`)
+      }
+    } catch (error) {
+      this.logger.warn(
+        `cleanupLegacyInboundJobs: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
   }
 
   async rebuildRepeatableJobs() {
@@ -57,7 +96,8 @@ export class FlexiQueueService implements OnModuleInit {
 
       const settings = await this.settings.getSettings()
 
-      if (settings.backupPollEveryHours > 0) {
+      // Auto Sync OFF (webhookAccepting=false) must stop inbound catalog poll.
+      if (settings.webhookAccepting !== false && settings.backupPollEveryHours > 0) {
         await this.queue.add(
           FLEXI_JOB_NAMES.POLL_CHANGES,
           { type: 'poll-changes' },
@@ -71,10 +111,15 @@ export class FlexiQueueService implements OnModuleInit {
         this.logger.log(
           `Scheduled Flexi Changes backup poll every ${settings.backupPollEveryHours}h`,
         )
+      } else {
+        this.logger.log(
+          'Flexi Changes backup poll disabled (Auto Sync OFF or backupPollEveryHours=0)',
+        )
       }
 
       const cron = buildFullSyncCron(settings.fullSyncSchedule)
-      if (cron) {
+      // Scheduled cenik sync is ABRA→SITE — respect Auto Sync OFF (webhookAccepting).
+      if (cron && settings.webhookAccepting !== false) {
         await this.queue.add(
           FLEXI_JOB_NAMES.SYNC_CENIK_FULL,
           { type: 'sync-cenik-full' },
@@ -86,6 +131,8 @@ export class FlexiQueueService implements OnModuleInit {
           },
         )
         this.logger.log(`Scheduled Flexi full cenik sync cron=${cron}`)
+      } else if (cron && settings.webhookAccepting === false) {
+        this.logger.log('Flexi scheduled cenik sync skipped — Auto Sync OFF')
       }
     } catch (error) {
       this.logger.warn(
@@ -95,48 +142,17 @@ export class FlexiQueueService implements OnModuleInit {
   }
 
   /**
-   * ERP-WEBHOOK-002A: persist is done by caller; this only wakes a coalesced worker.
-   * Stable jobId + delay debounce so webhook storms share one process pass.
+   * Legacy wake — retired. Must not schedule process-intake (would skip or confuse ops).
    */
   async enqueueProcessIntake(flexiNextHint?: number) {
-    try {
-      const existing = await this.queue.getJob(FLEXI_PROCESS_INTAKE_JOB_ID)
-      if (existing) {
-        const state = await existing.getState()
-        if (state === 'completed' || state === 'failed') {
-          await existing.remove().catch(() => undefined)
-        } else {
-          // Already waiting/delayed/active — coalesce
-          return existing
-        }
-      }
-    } catch {
-      // continue to add
-    }
-
-    try {
-      return await this.queue.add(
-        FLEXI_JOB_NAMES.PROCESS_INTAKE,
-        { type: 'process-intake', flexiNextHint },
-        {
-          jobId: FLEXI_PROCESS_INTAKE_JOB_ID,
-          delay: FLEXI_PROCESS_INTAKE_DELAY_MS,
-          attempts: 5,
-          backoff: { type: 'exponential', delay: 5000 },
-          removeOnComplete: 50,
-          removeOnFail: 50,
-        },
-      )
-    } catch (error) {
-      // Race: another producer created the same jobId
-      this.logger.debug(
-        `enqueueProcessIntake coalesce: ${error instanceof Error ? error.message : String(error)}`,
-      )
-      return this.queue.getJob(FLEXI_PROCESS_INTAKE_JOB_ID)
-    }
+    void flexiNextHint
+    this.logger.warn(
+      'enqueueProcessIntake no-op — legacy journal processor retired. Use Full Refresh.',
+    )
+    return null
   }
 
-  /** @deprecated Prefer ingest + enqueueProcessIntake; kept for older job payloads. */
+  /** @deprecated Routes to live coalesce; does not write FlexiChangeEvent. */
   enqueueApplyChanges(changes: FlexiChangeEntry[], nextVersion?: number) {
     return this.queue.add(
       FLEXI_JOB_NAMES.APPLY_CHANGES,
@@ -150,31 +166,14 @@ export class FlexiQueueService implements OnModuleInit {
     )
   }
 
-  /** After Nest/Redis restart: durable PENDING/FAILED rows must not wait for a new webhook. */
+  /**
+   * Legacy startup reconcile — permanently disabled.
+   * Historical FlexiChangeEvent must not auto-drain after deploy.
+   */
   async reconcilePendingChangeIntake() {
-    try {
-      const open = await this.prisma.flexiChangeEvent.count({
-        where: { status: { in: ['PENDING', 'FAILED', 'PROCESSING'] } },
-      })
-      if (open === 0) return
-      const settings = await this.settings.getSettings()
-      const threshold =
-        settings.reconcileOpenThreshold ?? FLEXI_RECONCILE_OPEN_THRESHOLD_DEFAULT
-      if (threshold > 0 && open > threshold) {
-        this.logger.warn(
-          `reconcilePendingChangeIntake: skipping wake — ${open} open events > threshold ${threshold}`,
-        )
-        return
-      }
-      this.logger.log(`Reconciling ${open} FlexiChangeEvent row(s) → process-intake`)
-      await this.enqueueProcessIntake()
-    } catch (error) {
-      this.logger.warn(
-        `reconcilePendingChangeIntake: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      )
-    }
+    this.logger.log(
+      'reconcilePendingChangeIntake skipped — legacy journal auto-drain disabled (use Full Refresh / ADMIN recovery)',
+    )
   }
 
   enqueuePollChanges() {

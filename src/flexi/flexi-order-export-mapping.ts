@@ -608,3 +608,44 @@ export function applyFlexiOrderHeaderMapping(
     if (pointId) document.branchId = pointId
   }
 }
+
+export type FlexiBankAccountMappingInput = {
+  paymentMethod: string
+  /** Flexi bankovni-ucet kod for card (e.g. STRIPE) */
+  bankAccountCodeCard?: string | null
+  /** Flexi bankovni-ucet kod for bank transfer (e.g. BANKOVNÍ ÚČET) */
+  bankAccountCodeBank?: string | null
+}
+
+/**
+ * Sets bankovniUcet (Platba na účet) for CARD/BANK.
+ * COD / pay-on-pickup: omit — do not send empty string (avoids confusing clears).
+ */
+export function applyFlexiBankAccountMapping(
+  document: Record<string, unknown>,
+  input: FlexiBankAccountMappingInput,
+): void {
+  const code = resolveBankovniUcetCode(input)
+  if (!code) {
+    // Explicitly remove if a prior default leaked onto the document object.
+    delete document.bankovniUcet
+    return
+  }
+  document.bankovniUcet = toFlexiRelationCode(code)
+}
+
+export function resolveBankovniUcetCode(
+  input: FlexiBankAccountMappingInput,
+): string | undefined {
+  const method = input.paymentMethod.trim()
+  if (method === 'card-online') {
+    const kod = input.bankAccountCodeCard?.trim()
+    return kod || undefined
+  }
+  if (method === 'bank-transfer' || method === 'bank-transfer-legal') {
+    const kod = input.bankAccountCodeBank?.trim()
+    return kod || undefined
+  }
+  // dobierka / pay-on-pickup / unknown → omit
+  return undefined
+}

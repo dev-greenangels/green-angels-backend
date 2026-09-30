@@ -77,6 +77,16 @@ export type FlexiSettings = {
   orderUserStatus: string
   /** Issued invoice type for typDoklNabFak, e.g. FAKTURA */
   issuedInvoiceTypeCode: string
+  /** Advance invoice (ZÁLOHA) typ dokladu kod for tvorbaZalohy */
+  advanceDocTypeCode: string
+  /** bankovniUcet kod for card/Stripe clearing (Platba na účet) */
+  bankAccountCodeCard: string
+  /** bankovniUcet kod for bank transfer */
+  bankAccountCodeBank: string
+  /** banka typDokl for Stripe clearing payment (optional until ops confirms) */
+  stripeClearingBankDocTypeCode: string
+  /** Adresar stitek kod for wholesale partners (additive) */
+  wholesaleAdresarLabelCode: string
   /** Received invoice type for faktura-prijata.typDokl (typ-faktury-prijate.kod), e.g. FAKTURA */
   receivedInvoiceDocTypeCode: string
   /** Cenik code for delivery fee line (empty = skip) */
@@ -128,6 +138,10 @@ export type FlexiSettings = {
   webhookRemoteId: string
   webhookLastRegisterAt?: string
   webhookLastError?: string
+  /** ISO timestamp of last accepted inbound webhook with business changes. */
+  lastWebhookReceivedAt?: string
+  /** ISO timestamp of last empty/test ABRA registration callback (not business data). */
+  lastWebhookTestAt?: string
   documentSend: {
     b2b: FlexiDocumentSendMode
     b2c: FlexiDocumentSendMode
@@ -138,6 +152,8 @@ export type FlexiSettings = {
   fullSyncSchedule: FlexiFullSyncSchedule
   apiCallsToday: number
   apiCallsDate: string
+  /** Soft daily REST budget for UI (local counter). Default 20000 Premium. */
+  apiDailyLimit: number
   lastExportAt?: string
   lastSyncAt?: string
   lastSyncStatus?: 'ok' | 'error' | 'never'
@@ -162,6 +178,11 @@ export const DEFAULT_FLEXI_SETTINGS: FlexiSettings = {
   centerCode: 'SITE',
   orderUserStatus: 'stavDoklObch.schvaleno',
   issuedInvoiceTypeCode: 'FAKTURA',
+  advanceDocTypeCode: 'ZÁLOHA',
+  bankAccountCodeCard: 'STRIPE',
+  bankAccountCodeBank: 'BANKOVNÍ ÚČET',
+  stripeClearingBankDocTypeCode: '',
+  wholesaleAdresarLabelCode: 'WHOLESALE',
   receivedInvoiceDocTypeCode: 'FAKTURA',
   shippingCenikKod: 'SHIPPING',
   boxesCenikKod: 'BOXES',
@@ -184,10 +205,12 @@ export const DEFAULT_FLEXI_SETTINGS: FlexiSettings = {
     b2c: 'site',
   },
   globalVersion: 0,
-  backupPollEveryHours: 6,
+  /** Legacy Changes backup poll. Default 0 — live webhook is primary; Auto Sync OFF forces poll off. */
+  backupPollEveryHours: 0,
   fullSyncSchedule: { ...DEFAULT_FULL_SYNC_SCHEDULE },
   apiCallsToday: 0,
   apiCallsDate: '',
+  apiDailyLimit: 20_000,
   lastSyncStatus: 'never',
   reconcileOpenThreshold: 500,
 }
@@ -202,6 +225,11 @@ export type FlexiPublicSettings = {
   centerCode: string
   orderUserStatus: string
   issuedInvoiceTypeCode: string
+  advanceDocTypeCode: string
+  bankAccountCodeCard: string
+  bankAccountCodeBank: string
+  stripeClearingBankDocTypeCode: string
+  wholesaleAdresarLabelCode: string
   receivedInvoiceDocTypeCode: string
   shippingCenikKod: string
   boxesCenikKod: string
@@ -224,6 +252,8 @@ export type FlexiPublicSettings = {
   webhookRegistrationStatus: FlexiWebhookRegistrationStatus
   webhookLastRegisterAt?: string
   webhookLastError?: string
+  lastWebhookReceivedAt?: string
+  lastWebhookTestAt?: string
   hasUsername: boolean
   documentSend: FlexiSettings['documentSend']
   globalVersion: number
@@ -233,6 +263,7 @@ export type FlexiPublicSettings = {
   apiCallsToday: number
   /** Soft warn for REST API daily usage (webhooks do not count). */
   apiCallsWarnThreshold: number
+  apiDailyLimit: number
   lastExportAt?: string
   lastSyncAt?: string
   lastSyncStatus?: 'ok' | 'error' | 'never'
@@ -365,6 +396,10 @@ export type FlexiStromSyncResult = {
   skippedMissingVariants?: number
   /** Catalog journal rows closed after manual snapshot (orders not included). */
   journalAbsorbed?: number
+  /** Products with ABRA legacyId no longer in strom → isPublished=false (no hard delete). */
+  unpublished?: number
+  /** Categories with ABRA legacyId no longer in strom → isActive=false (no hard delete). */
+  deactivatedCategories?: number
   message: string
   errors: string[]
 }
@@ -410,3 +445,12 @@ export type FlexiJobPayload =
   | { type: 'export-order'; orderId: string }
   | { type: 'storno-order'; orderId: string }
   | { type: 'import-new-products' }
+  /** Current-state refresh (not historical journal replay). */
+  | {
+      type: 'refresh-current'
+      evidence: string
+      objectId: string
+      operation?: string
+    }
+  | { type: 'full-refresh'; includeOrders?: boolean; initiatedBy?: string }
+  | { type: 'order-reconcile'; initiatedBy?: string }

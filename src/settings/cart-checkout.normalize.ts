@@ -829,6 +829,17 @@ export function normalizeCartCheckoutSettings(
     onlineCardErpExportMode: isOnlineCardErpExportMode(base.onlineCardErpExportMode)
       ? base.onlineCardErpExportMode
       : DEFAULT_CART_CHECKOUT_SETTINGS.onlineCardErpExportMode,
+    bankPaymentTermBusinessDays: (() => {
+      const raw = Number(
+        (source as { bankPaymentTermBusinessDays?: unknown }).bankPaymentTermBusinessDays ??
+          base.bankPaymentTermBusinessDays ??
+          DEFAULT_CART_CHECKOUT_SETTINGS.bankPaymentTermBusinessDays,
+      )
+      if (!Number.isFinite(raw)) {
+        return DEFAULT_CART_CHECKOUT_SETTINGS.bankPaymentTermBusinessDays
+      }
+      return Math.max(1, Math.min(60, Math.trunc(raw)))
+    })(),
     bankDetailsSource: base.bankDetailsSource === 'store' ? 'store' : 'cart',
     bankDetails: normalizeBankDetails(base.bankDetails),
     paymentPurposeTemplate,

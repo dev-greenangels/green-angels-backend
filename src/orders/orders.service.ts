@@ -17,7 +17,7 @@ import { convertEurToHuf, resolveCheckoutTax, assertDeliveryCountryAllowed, pick
 import { roundMoney } from '../pricing/pricing.helpers'
 import { packetaCheckoutOrderSnapshot } from '../packeta/packeta-fulfilment'
 import { PacketaService } from '../packeta/packeta.service'
-import { DispatchCalendarService } from '../settings/dispatch-calendar.service'
+import { DispatchCalendarService, resolveMarketTimeZone } from '../settings/dispatch-calendar.service'
 import {
   getCheckoutPaymentRuleError,
   isPayOnPickupPaymentMethod,
@@ -35,6 +35,11 @@ import { PatchOrderDto } from './dto/patch-order.dto'
 import { type OrderStatus } from './order-status.constants'
 import { ONLINE_CARD_PAYMENT_METHOD } from '../payments/payments.constants'
 import { PaymentsService } from '../payments/payments.service'
+import {
+  isBankPaymentMethod,
+  isCardPaymentMethod,
+  isCodPaymentMethod,
+} from './order-dispatch-dates'
 import { OrderStatusesService } from '../order-statuses/order-statuses.service'
 import { CancellationReasonsService } from '../cancellation-reasons/cancellation-reasons.service'
 import { ReferralsService } from '../referrals/referrals.service'
@@ -157,6 +162,10 @@ export type BackstageOrderDetail = BackstageOrderListItem & {
   monopayInvoiceId: string | null
   paidAt: string | null
   paymentExpiresAt: string | null
+  /** Bank-transfer only: end-of-business-day deadline (createdAt + bankPaymentTermBusinessDays). */
+  paymentDueAt: string | null
+  /** COD at create; card/bank set on payment success (paidAt + shippingLeadTimeMaxBusinessDays). */
+  shipByDate: string | null
   productsSubtotal: number | null
   deliveryAmount: number | null
   packagingAmount: number | null
@@ -247,6 +256,10 @@ export type CreatedOrderResponse = {
   publishableKey?: string
   /** Card online: customer payment deadline (ISO). */
   paymentExpiresAt?: string
+  /** Bank-transfer only: end-of-business-day payment deadline (ISO). */
+  paymentDueAt?: string
+  /** COD only at create (ISO); card/bank get it after payment. */
+  shipByDate?: string
   /** Line items for payment summary UI (products only). */
   items?: Array<{
     productName: string
@@ -299,6 +312,12 @@ export type PublicOrderConfirmation = {
   paymentStatus: string | null
   paymentProvider: string | null
   paymentExpiresAt: string | null
+  /** Bank-transfer only: end-of-business-day deadline (ISO). preferredShipDate never changes this. */
+  paymentDueAt: string | null
+  /** COD from create; card/bank set after payment. */
+  shipByDate: string | null
+  /** Customer-selected dispatch date, if the calendar was enabled at checkout. */
+  preferredShipDate: string | null
   canRetry: boolean
   clientSecret?: string
   publishableKey?: string
@@ -911,6 +930,8 @@ export class OrdersService {
       monopayInvoiceId: order.monopayInvoiceId,
       paidAt: order.paidAt?.toISOString() ?? null,
       paymentExpiresAt: order.paymentExpiresAt?.toISOString() ?? null,
+      paymentDueAt: order.paymentDueAt?.toISOString() ?? null,
+      shipByDate: order.shipByDate?.toISOString() ?? null,
       productsSubtotal:
         order.productsSubtotal != null ? Number(order.productsSubtotal) : null,
       deliveryAmount:
@@ -1121,6 +1142,9 @@ export class OrdersService {
       paymentStatus: order.paymentStatus,
       paymentProvider: order.paymentProvider,
       paymentExpiresAt: order.paymentExpiresAt?.toISOString() ?? null,
+      paymentDueAt: order.paymentDueAt?.toISOString() ?? null,
+      shipByDate: order.shipByDate?.toISOString() ?? null,
+      preferredShipDate: order.preferredShipDate?.toISOString() ?? null,
       canRetry,
       ...(clientSecret ? { clientSecret } : {}),
       ...(publishableKey ? { publishableKey } : {}),
@@ -1331,6 +1355,43 @@ export class OrdersService {
     }
 
     return this.findOne(updated.id)
+  }
+
+  /**
+   * Manual bank-transfer payment confirmation (no statement matching this phase).
+   * Applies paymentStatus=success, paidAt, shipByDate, AWAITING_PAYMENT→PROCESSING.
+   */
+  async markBankTransferPaid(id: string): Promise<BackstageOrderDetail> {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        paymentMethod: true,
+        paymentStatus: true,
+        status: true,
+      },
+    })
+    if (!order) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+    if (!isBankPaymentMethod(order.paymentMethod)) {
+      throw new BadRequestException(
+        'Позначити оплаченим вручну можна лише для банківського переказу.',
+      )
+    }
+    if (order.status === 'CANCELLED') {
+      throw new BadRequestException('Скасоване замовлення не можна позначити оплаченим.')
+    }
+    if (order.paymentStatus === 'success') {
+      return this.findOne(id)
+    }
+
+    await this.paymentLifecycle.applyPaymentSuccess(id, {
+      provider: 'manual-bank',
+      paymentId: `manual-bank:${id}`,
+    })
+
+    return this.findOne(id)
   }
 
   async cancelConfirmationOrder(
@@ -2413,8 +2474,12 @@ export class OrdersService {
     )
 
     const paymentMethod = dto.paymentMethod.trim()
+    // Card + bank-transfer require payment before fulfillment → AWAITING_PAYMENT.
+    // COD / pay-on-pickup: unpaid is normal — fulfillment may proceed (PENDING).
     const initialStatus: OrderStatus =
-      paymentMethod === ONLINE_CARD_PAYMENT_METHOD ? 'AWAITING_PAYMENT' : 'PENDING'
+      isCardPaymentMethod(paymentMethod) || isBankPaymentMethod(paymentMethod)
+        ? 'AWAITING_PAYMENT'
+        : 'PENDING'
 
     // ERP-CONNECTED-001: EXTERNAL + ERP up + immediate export → await accept before customer success.
     // Card + on_paid stays deferred (queue after payment). Offline path never awaits.
@@ -2569,12 +2634,41 @@ export class OrdersService {
         },
       })
 
-      // After create: set card paymentExpiresAt (+30m) in same TX.
-      if (paymentMethod === ONLINE_CARD_PAYMENT_METHOD) {
+      // After create: card → paymentExpiresAt (+30m); bank → paymentDueAt
+      // (createdAt + bankPaymentTermBusinessDays open days, end of business day,
+      // market TZ — preferredShipDate never affects this); COD → shipByDate at
+      // create (createdAt + shippingLeadTimeMaxBusinessDays). Card/bank shipByDate
+      // is set later, on payment success.
+      const marketTimeZone = resolveMarketTimeZone(marketSettings.region)
+      let paymentExpiresAtValue: Date | null = null
+      let paymentDueAtValue: Date | null = null
+      let shipByDateValue: Date | null = null
+      if (isCardPaymentMethod(paymentMethod)) {
+        paymentExpiresAtValue = this.paymentLifecycle.paymentExpiresAtFrom(created.createdAt)
+      } else if (isBankPaymentMethod(paymentMethod)) {
+        const dueIso = this.dispatchCalendar.addOpenBusinessDays(
+          created.createdAt,
+          cartSettings.bankPaymentTermBusinessDays,
+          dispatchSettings,
+          marketTimeZone,
+        )
+        paymentDueAtValue = this.dispatchCalendar.endOfBusinessDateUtc(dueIso, marketTimeZone)
+      } else if (isCodPaymentMethod(paymentMethod)) {
+        const shipIso = this.dispatchCalendar.addOpenBusinessDays(
+          created.createdAt,
+          dispatchSettings.shippingLeadTimeMaxBusinessDays,
+          dispatchSettings,
+          marketTimeZone,
+        )
+        shipByDateValue = this.dispatchCalendar.endOfBusinessDateUtc(shipIso, marketTimeZone)
+      }
+      if (paymentExpiresAtValue || paymentDueAtValue || shipByDateValue) {
         await tx.order.update({
           where: { id: created.id },
           data: {
-            paymentExpiresAt: this.paymentLifecycle.paymentExpiresAtFrom(created.createdAt),
+            ...(paymentExpiresAtValue ? { paymentExpiresAt: paymentExpiresAtValue } : {}),
+            ...(paymentDueAtValue ? { paymentDueAt: paymentDueAtValue } : {}),
+            ...(shipByDateValue ? { shipByDate: shipByDateValue } : {}),
           },
         })
       }
@@ -2664,7 +2758,7 @@ export class OrdersService {
         })
       }
 
-      return created
+      return { ...created, paymentExpiresAtValue, paymentDueAtValue, shipByDateValue }
     })
     this.products.flushRestockNotifications(restockNotifyIds)
 
@@ -2825,9 +2919,13 @@ export class OrdersService {
         if (payment.clientSecret) response.clientSecret = payment.clientSecret
         if (payment.publishableKey) response.publishableKey = payment.publishableKey
       }
-      response.paymentExpiresAt = this.paymentLifecycle
-        .paymentExpiresAtFrom(order.createdAt)
-        .toISOString()
+      response.paymentExpiresAt = (
+        order.paymentExpiresAtValue ?? this.paymentLifecycle.paymentExpiresAtFrom(order.createdAt)
+      ).toISOString()
+    } else if (isBankPaymentMethod(paymentMethod) && order.paymentDueAtValue) {
+      response.paymentDueAt = order.paymentDueAtValue.toISOString()
+    } else if (isCodPaymentMethod(paymentMethod) && order.shipByDateValue) {
+      response.shipByDate = order.shipByDateValue.toISOString()
     }
 
     // LOCAL async export, or EXTERNAL offline — never double-enqueue after successful connected await.

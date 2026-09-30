@@ -518,6 +518,11 @@ export type CartCheckoutSettings = {
    */
   onlineCardErpExportMode: OnlineCardErpExportMode
   /**
+   * Open business days after bank-transfer order create until customer paymentDueAt.
+   * preferredShipDate must NOT extend this. Editable in backoffice.
+   */
+  bankPaymentTermBusinessDays: number
+  /**
    * Джерело реквізитів для success / PDF:
    * `cart` — поля bankDetails нижче; `store` — companyDetails з Магазин.
    */
@@ -684,6 +689,7 @@ export const DEFAULT_CART_CHECKOUT_SETTINGS: CartCheckoutSettings = {
   codFeeMode: 'fixed',
   onlineCardProvider: 'monopay',
   onlineCardErpExportMode: 'on_paid',
+  bankPaymentTermBusinessDays: 5,
   bankDetailsSource: 'cart',
   bankDetails: { ...DEFAULT_CHECKOUT_BANK_DETAILS },
   paymentPurposeTemplate: 'Оплата за замовлення {orderNumber}',

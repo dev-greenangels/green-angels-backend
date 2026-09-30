@@ -21,22 +21,32 @@ import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import type { SessionJwtPayload } from '../auth/auth.constants'
 import { FlexiBacklogCleanupService } from './flexi.backlog-cleanup.service'
 import { FlexiChangeIntakeService } from './flexi.change-intake.service'
+import { FlexiApiUsageService } from './flexi-api-usage.service'
+import { FlexiAutoSyncService } from './flexi-auto-sync.service'
+import { FlexiFullRefreshService } from './flexi-full-refresh.service'
+import { FlexiInboundHealthService } from './flexi-inbound-health.service'
+import { FlexiLegacyRetirementService } from './flexi-legacy-retirement.service'
+import { LEGACY_RETIRE_CONFIRM } from './flexi-legacy-evidence.classification'
+import { FlexiLiveSyncService } from './flexi-live-sync.service'
+import { FlexiOperationLogService } from './flexi-operation-log.service'
+import { FlexiOrderReconcileService } from './flexi-order-reconcile.service'
 import { FlexiQueueService } from './flexi.queue.service'
 import { FlexiService } from './flexi.service'
 import { FlexiSettingsService } from './flexi.settings.service'
+import { FlexiSyncLockService } from './flexi-sync-lock.service'
+import { parseFlexiWebhookBody } from './flexi-webhook-parse'
 import type { FlexiBacklogTier, FlexiChangeEntry, FlexiSettings } from './flexi.types'
 
 @Controller('flexi')
 export class FlexiWebhookController {
   constructor(
     private readonly settings: FlexiSettingsService,
-    private readonly queue: FlexiQueueService,
-    private readonly intake: FlexiChangeIntakeService,
+    private readonly live: FlexiLiveSyncService,
   ) {}
 
   /**
    * Flexi Web Hook — must respond 2xx quickly with empty body (<15s).
-   * ERP-WEBHOOK-002A: durable Postgres intake before async process wake-up.
+   * Current-state pipeline: parse → coalesce → enqueue refresh-current (no FlexiChangeEvent).
    * @see https://podpora.flexibee.eu/en/articles/4744379-web-hooks
    */
   @Post('webhook')
@@ -54,56 +64,38 @@ export class FlexiWebhookController {
     if (!settings.enabled) {
       return
     }
-    // Empty notification during hook registration (no secKey match yet / empty body)
+    // Empty notification during hook registration / URL test — not business data.
     if (!body || (typeof body === 'object' && Object.keys(body as object).length === 0)) {
       if (settings.webhookSecKey && secKey && secKey !== settings.webhookSecKey) {
         throw new UnauthorizedException('Invalid Flexi webhook secret')
+      }
+      if (!settings.webhookSecKey || !secKey || secKey === settings.webhookSecKey) {
+        await this.settings.updateSettings({
+          lastWebhookTestAt: new Date().toISOString(),
+        })
       }
       return
     }
     if (!settings.webhookSecKey || !secKey || secKey !== settings.webhookSecKey) {
       throw new UnauthorizedException('Invalid Flexi webhook secret')
     }
-    // 002C: disable webhook ≠ disable ERP sync (Changes poll remains).
+    // Auto Sync OFF: accept (2xx) but do not enqueue inbound catalog/order refreshes.
     if (settings.webhookAccepting === false) {
+      await this.settings.updateSettings({
+        lastWebhookReceivedAt: new Date().toISOString(),
+      })
       return
     }
 
-    const root =
-      body && typeof body === 'object' && 'winstrom' in body
-        ? (body as { winstrom: Record<string, unknown> }).winstrom
-        : (body as Record<string, unknown> | null)
+    const changes: FlexiChangeEntry[] = parseFlexiWebhookBody(body)
 
-    const rawChanges = root?.change ?? root?.changes ?? []
-    const list = Array.isArray(rawChanges) ? rawChanges : rawChanges ? [rawChanges] : []
-    const changes: FlexiChangeEntry[] = list.map((c) => {
-      const row = c as Record<string, unknown>
-      const inRaw = row['@in-version'] ?? row.inVersion ?? row['in-version']
-      const inNum = Number(inRaw)
-      return {
-        evidence: String(row.evidence ?? row['@evidence'] ?? ''),
-        id: (row.id ?? row['@id']) as string | number | undefined,
-        operation: String(row.operation ?? row['@operation'] ?? ''),
-        globalVersion: Number(row.globalVersion ?? row['@globalVersion'] ?? 0) || undefined,
-        inVersion: Number.isFinite(inNum) && inNum > 0 ? Math.trunc(inNum) : undefined,
-      }
+    // Valid authenticated delivery (even if no parseable changes) proves reachability.
+    await this.settings.updateSettings({
+      lastWebhookReceivedAt: new Date().toISOString(),
     })
 
-    const nextRaw = root?.next
-    const nextVersion =
-      nextRaw === 'none' || nextRaw === undefined || nextRaw === null
-        ? undefined
-        : Number(nextRaw)
-
     if (changes.length > 0) {
-      // Durable before async — Postgres is source of truth for receipt
-      await this.intake.ingestChanges(changes)
-      await this.queue.enqueueProcessIntake(
-        Number.isFinite(nextVersion) ? nextVersion : undefined,
-      )
-    } else if (typeof nextVersion === 'number' && Number.isFinite(nextVersion)) {
-      // Cursor-only delivery (no change rows) — still wake processor for safe cursor catch-up
-      await this.queue.enqueueProcessIntake(nextVersion)
+      await this.live.enqueueFromChangeEntries(changes, { source: 'LIVE_WEBHOOK' })
     }
   }
 }
@@ -118,6 +110,15 @@ export class FlexiAdminController {
     private readonly queue: FlexiQueueService,
     private readonly intake: FlexiChangeIntakeService,
     private readonly backlogCleanup: FlexiBacklogCleanupService,
+    private readonly live: FlexiLiveSyncService,
+    private readonly autoSync: FlexiAutoSyncService,
+    private readonly fullRefresh: FlexiFullRefreshService,
+    private readonly orderReconcile: FlexiOrderReconcileService,
+    private readonly ops: FlexiOperationLogService,
+    private readonly lock: FlexiSyncLockService,
+    private readonly health: FlexiInboundHealthService,
+    private readonly apiUsage: FlexiApiUsageService,
+    private readonly legacyRetirement: FlexiLegacyRetirementService,
   ) {}
 
   @Get('settings')
@@ -138,11 +139,18 @@ export class FlexiAdminController {
   }
 
   @Post('register-webhook')
-  registerWebhook() {
-    return this.flexi.registerWebhook()
+  @HttpCode(200)
+  async registerWebhook() {
+    const settings = await this.settings.getSettings()
+    return this.flexi.registerWebhook({
+      lastVersion: settings.globalVersion,
+      // Manual diagnostic: only open accepting if Auto Sync is already ON.
+      setAccepting: settings.webhookAccepting !== false,
+    })
   }
 
   @Post('disable-webhook')
+  @HttpCode(200)
   disableWebhook() {
     return this.flexi.disableWebhook()
   }
@@ -161,7 +169,7 @@ export class FlexiAdminController {
 
   @Post('poll-changes/run')
   pollChangesRun() {
-    return this.flexi.pollChanges()
+    return this.live.pollChangesLive()
   }
 
   @Post('sync-now')
@@ -171,7 +179,160 @@ export class FlexiAdminController {
 
   @Post('sync-now/run')
   syncNowRun() {
-    return this.flexi.pollChanges()
+    return this.live.pollChangesLive()
+  }
+
+  @Post('auto-sync/disable')
+  @HttpCode(200)
+  autoSyncDisable(@Req() req: Request & { user: SessionJwtPayload }) {
+    return this.autoSync.disableAutoSync({ initiatedBy: req.user.userId })
+  }
+
+  @Post('auto-sync/enable-without-update')
+  @HttpCode(200)
+  autoSyncEnableWithoutUpdate(@Req() req: Request & { user: SessionJwtPayload }) {
+    return this.autoSync.enableWithoutUpdate({ initiatedBy: req.user.userId })
+  }
+
+  @Post('auto-sync/update-and-enable')
+  @HttpCode(200)
+  autoSyncUpdateAndEnable(@Req() req: Request & { user: SessionJwtPayload }) {
+    return this.autoSync.updateAndEnable({ initiatedBy: req.user.userId })
+  }
+
+  @Post('orders/reconcile/run')
+  @HttpCode(200)
+  orderReconcileRun(@Req() req: Request & { user: SessionJwtPayload }) {
+    return this.orderReconcile.reconcileActiveErpOrders({ initiatedBy: req.user.userId })
+  }
+
+  @Post('full-refresh/run')
+  @HttpCode(200)
+  fullRefreshRun(@Req() req: Request & { user: SessionJwtPayload }) {
+    return this.fullRefresh.runAuthoritative({
+      initiatedBy: req.user.userId,
+      includeOrders: true,
+      advanceBaseline: true,
+    })
+  }
+
+  @Get('operations')
+  async listOperations() {
+    const entries = await this.ops.list(40)
+    const settings = await this.settings.getSettings()
+    const jobs = await this.queue.getJobCounts()
+    const openFailures = await this.health.listOpenFailures()
+    const healthStatus = this.health.deriveStatus({
+      webhookAccepting: settings.webhookAccepting !== false,
+      openFailures,
+      lastSyncStatus: settings.lastSyncStatus,
+    })
+    const webhookDeliveryStatus = this.health.deriveWebhookDeliveryStatus({
+      webhookAccepting: settings.webhookAccepting !== false,
+      webhookUrl: settings.webhookUrl,
+      webhookRemoteId: settings.webhookRemoteId,
+      lastWebhookReceivedAt: settings.lastWebhookReceivedAt,
+      lastWebhookTestAt: settings.lastWebhookTestAt,
+      webhookLastError: settings.webhookLastError,
+    })
+    const apiUsage = await this.apiUsage.snapshot(settings.companyId, settings.apiDailyLimit)
+    let remoteHooks: Array<{ id: string; url: string; lastVersion?: number }> = []
+    try {
+      remoteHooks = await this.flexi.listRemoteHooks()
+    } catch {
+      remoteHooks = []
+    }
+    return {
+      entries,
+      webhookAccepting: settings.webhookAccepting !== false,
+      webhookRemoteId: settings.webhookRemoteId,
+      webhookUrl: settings.webhookUrl,
+      globalVersion: settings.globalVersion,
+      lastSyncAt: settings.lastSyncAt,
+      lastSyncStatus: settings.lastSyncStatus,
+      lastStromSyncAt: settings.lastStromSyncAt,
+      lastWebhookRegisterAt: settings.webhookLastRegisterAt,
+      lastWebhookReceivedAt: settings.lastWebhookReceivedAt,
+      lastWebhookTestAt: settings.lastWebhookTestAt,
+      webhookLastError: settings.webhookLastError,
+      ignoredEvidence: this.live.getIgnoredEvidenceCounters(),
+      jobs,
+      healthStatus,
+      webhookDeliveryStatus,
+      openFailures,
+      apiUsage,
+      remoteHooks,
+      registeredEvidences: undefined as string[] | undefined,
+    }
+  }
+
+  /**
+   * READ-ONLY production preflight for legacy FlexiChangeEvent retirement.
+   * Aggregates only — does not mutate. ADMIN only.
+   */
+  @Get('recovery/legacy-journal/preflight')
+  @Roles(Role.ADMIN)
+  legacyJournalPreflight() {
+    return this.legacyRetirement.preflight()
+  }
+
+  /**
+   * Stream JSONL backup of FlexiChangeEvent (paged). ADMIN only. No secrets.
+   */
+  @Get('recovery/legacy-journal/export')
+  @Roles(Role.ADMIN)
+  async legacyJournalExport(@Res() res: Response) {
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="flexi-change-event-legacy-${new Date().toISOString().slice(0, 10)}.jsonl"`,
+    )
+    for await (const chunk of this.legacyRetirement.exportJsonlPages(500)) {
+      res.write(chunk)
+    }
+    res.end()
+  }
+
+  /**
+   * Fail-closed legacy journal retirement:
+   * Auto Sync OFF → preflight → Full Refresh → order reconcile → batch delete → verify.
+   * Does NOT re-enable Auto Sync. Does NOT reset globalVersion from journal.
+   * ADMIN only. confirm=RETIRE_LEGACY_FLEXI_JOURNAL
+   */
+  @Post('recovery/retire-legacy-journal')
+  @HttpCode(200)
+  @Roles(Role.ADMIN)
+  async retireLegacyJournal(
+    @Req() req: Request & { user: SessionJwtPayload },
+    @Body() body?: { confirm?: string },
+  ) {
+    const result = await this.legacyRetirement.retire({
+      initiatedBy: req.user.userId,
+      confirm: body?.confirm ?? '',
+    })
+    if (!result.ok) {
+      throw new BadRequestException(result.message)
+    }
+    return result
+  }
+
+  /**
+   * @deprecated Prefer POST recovery/retire-legacy-journal with RETIRE_LEGACY_FLEXI_JOURNAL.
+   * Kept as alias that enforces the same fail-closed path.
+   */
+  @Post('recovery/clear-legacy-journal')
+  @HttpCode(200)
+  @Roles(Role.ADMIN)
+  async recoveryClearLegacyJournal(
+    @Req() req: Request & { user: SessionJwtPayload },
+    @Body() body?: { confirm?: string; runRefreshFirst?: boolean },
+  ) {
+    if (body?.confirm === 'CLEAR_LEGACY_JOURNAL') {
+      throw new BadRequestException(
+        `Використовуйте confirm=${LEGACY_RETIRE_CONFIRM} (fail-closed retirement). Старий CLEAR_LEGACY_JOURNAL більше не підтримується.`,
+      )
+    }
+    return this.retireLegacyJournal(req, body)
   }
 
   @Post('full-sync')
@@ -201,7 +362,11 @@ export class FlexiAdminController {
   @Post('sync-strom/run')
   syncStromRun(@Body() body?: { createMissing?: boolean }) {
     const createMissing = body?.createMissing !== false
-    return this.flexi.syncStromCatalog({ createMissing, absorbJournal: true })
+    return this.flexi.syncStromCatalog({
+      createMissing,
+      absorbJournal: false,
+      reconcileMissing: true,
+    })
   }
 
   @Post('backfill-category-legacy-ids/run')
@@ -240,15 +405,23 @@ export class FlexiAdminController {
   }
 
   @Post('queue/retry-failed')
+  @Roles(Role.ADMIN)
   async retryFailed() {
+    // Legacy journal processor is retired — do NOT wake process-intake (would only skip).
+    // Mark FAILED → PENDING for audit visibility; repair via Full Refresh.
     const count = await this.intake.retryFailedEvents()
-    if (count > 0) {
-      await this.queue.enqueueProcessIntake()
+    return {
+      ok: true,
+      count,
+      message:
+        count > 0
+          ? `Повернено в PENDING: ${count}. Journal processor вимкнено — запустіть Full Refresh для ремонту.`
+          : `Повернено в чергу: ${count}.`,
     }
-    return { ok: true, count, message: `Повернено в чергу: ${count}.` }
   }
 
   @Post('queue/skip-failed')
+  @Roles(Role.ADMIN)
   async skipFailed() {
     const count = await this.intake.skipFailedEvents()
     const cursor = await this.intake.recomputeAndPersistLastSafeCursor()
@@ -273,6 +446,7 @@ export class FlexiAdminController {
   }
 
   @Post('backlog/close')
+  @Roles(Role.ADMIN)
   backlogClose(
     @Req() req: Request & { user: SessionJwtPayload },
     @Body() body: { tier?: FlexiBacklogTier; dryRunHash?: string },

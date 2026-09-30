@@ -111,6 +111,14 @@ export function normalizeDispatchCalendarSettings(
   const horizon = Number(base.horizonDays)
   const lead = Number(base.minLeadDays)
   const capacity = Number(base.dailyCapacity)
+  const slaMin = Number(base.shippingLeadTimeMinBusinessDays)
+  const slaMax = Number(base.shippingLeadTimeMaxBusinessDays)
+  const minBd = Number.isFinite(slaMin)
+    ? Math.max(0, Math.min(30, Math.trunc(slaMin)))
+    : DEFAULT_DISPATCH_CALENDAR_SETTINGS.shippingLeadTimeMinBusinessDays
+  const maxBd = Number.isFinite(slaMax)
+    ? Math.max(0, Math.min(30, Math.trunc(slaMax)))
+    : DEFAULT_DISPATCH_CALENDAR_SETTINGS.shippingLeadTimeMaxBusinessDays
   return {
     enabled: Boolean(base.enabled),
     blockedWeekdays: asWeekdayList(
@@ -122,6 +130,8 @@ export function normalizeDispatchCalendarSettings(
     minLeadDays: Number.isFinite(lead) ? Math.max(0, Math.min(30, Math.trunc(lead))) : 0,
     dailyCapacity: Number.isFinite(capacity) ? Math.max(0, Math.trunc(capacity)) : 100,
     externalReservedByDate: asExternalMap(base.externalReservedByDate),
+    shippingLeadTimeMinBusinessDays: minBd,
+    shippingLeadTimeMaxBusinessDays: Math.max(minBd, maxBd),
     shippingLeadNotice: normalizeShippingLeadNotice(
       raw?.shippingLeadNotice ?? base.shippingLeadNotice,
     ),

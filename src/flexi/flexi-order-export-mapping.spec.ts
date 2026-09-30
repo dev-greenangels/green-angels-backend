@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
-
 import {
   DEFAULT_FLEXI_DELIVERY_METHOD_CODES,
+  applyFlexiBankAccountMapping,
   applyFlexiOrderHeaderMapping,
   buildFlexiAncillaryExportLines,
   buildFlexiCatalogProductLine,
   flexiIsoDate,
   mapPaymentMethodToFlexiCode,
   normalizeDeliveryMethodCodes,
+  resolveBankovniUcetCode,
   resolveDeliveryFlexiAbbreviation,
   resolveFlexiAddressCountryCode,
   resolveFlexiDocumentCountries,
@@ -422,5 +421,61 @@ describe('buildFlexiCatalogProductLine', () => {
    */
   it('documents Flexi omit-nazev manual smoke expectations', () => {
     assert.equal('nazev' in buildFlexiCatalogProductLine({ sku: 'X', quantity: 1, priceAtPurchase: 1 }), false)
+  })
+})
+
+describe('resolveBankovniUcetCode / applyFlexiBankAccountMapping', () => {
+  const settings = { bankAccountCodeCard: 'STRIPE', bankAccountCodeBank: 'BANKOVNÍ ÚČET' }
+
+  it('CARD: resolves bankAccountCodeCard and writes bankovniUcet', () => {
+    assert.equal(
+      resolveBankovniUcetCode({ paymentMethod: 'card-online', ...settings }),
+      'STRIPE',
+    )
+    const document: Record<string, unknown> = {}
+    applyFlexiBankAccountMapping(document, { paymentMethod: 'card-online', ...settings })
+    assert.equal(document.bankovniUcet, 'code:STRIPE')
+  })
+
+  it('BANK: resolves bankAccountCodeBank for both bank-transfer variants', () => {
+    assert.equal(
+      resolveBankovniUcetCode({ paymentMethod: 'bank-transfer', ...settings }),
+      'BANKOVNÍ ÚČET',
+    )
+    assert.equal(
+      resolveBankovniUcetCode({ paymentMethod: 'bank-transfer-legal', ...settings }),
+      'BANKOVNÍ ÚČET',
+    )
+    const document: Record<string, unknown> = {}
+    applyFlexiBankAccountMapping(document, { paymentMethod: 'bank-transfer', ...settings })
+    assert.equal(document.bankovniUcet, 'code:BANKOVNÍ ÚČET')
+  })
+
+  it('COD / pay-on-pickup: omits bankovniUcet entirely (does not send empty string)', () => {
+    assert.equal(resolveBankovniUcetCode({ paymentMethod: 'dobierka', ...settings }), undefined)
+    assert.equal(
+      resolveBankovniUcetCode({ paymentMethod: 'pay-on-pickup', ...settings }),
+      undefined,
+    )
+    const document: Record<string, unknown> = {}
+    applyFlexiBankAccountMapping(document, { paymentMethod: 'dobierka', ...settings })
+    assert.equal('bankovniUcet' in document, false)
+  })
+
+  it('clears a previously-set bankovniUcet when the resolved method has none (no stale leak)', () => {
+    const document: Record<string, unknown> = { bankovniUcet: 'code:STRIPE' }
+    applyFlexiBankAccountMapping(document, { paymentMethod: 'dobierka', ...settings })
+    assert.equal('bankovniUcet' in document, false)
+  })
+
+  it('empty configured code omits bankovniUcet rather than sending blank', () => {
+    assert.equal(
+      resolveBankovniUcetCode({
+        paymentMethod: 'card-online',
+        bankAccountCodeCard: '  ',
+        bankAccountCodeBank: 'BANKOVNÍ ÚČET',
+      }),
+      undefined,
+    )
   })
 })

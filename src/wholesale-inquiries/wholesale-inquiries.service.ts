@@ -11,6 +11,7 @@ import { WholesaleInquiryStatus } from '@prisma/client'
 
 import { resolveOtpRateLimitPeerIp } from '../auth/otp.service'
 import { validatePhoneForPolicy } from '../auth/market-phone.util'
+import { FlexiService } from '../flexi/flexi.service'
 import { MailService } from '../mail/mail.service'
 import { PrismaService } from '../prisma/prisma.service'
 import { RedisService } from '../redis/redis.service'
@@ -45,6 +46,14 @@ export type WholesaleInquiryListItem = {
   companyVatId: string | null
   consentAt: string | null
   createdAt: string
+  /** ABRA Flexi Adresář sync correlation id (ext:GA-WHO:{id} or matched existing). */
+  externalErpId: string | null
+  erpNativeId: string | null
+  erpNativeKod: string | null
+  /** NOT_REQUIRED | PENDING_ERP | SYNCED | FAILED */
+  erpSyncStatus: string | null
+  erpSyncedAt: string | null
+  erpLastErrorMessage: string | null
 }
 
 @Injectable()
@@ -56,6 +65,7 @@ export class WholesaleInquiriesService {
     private readonly redis: RedisService,
     private readonly mail: MailService,
     private readonly settings: SettingsService,
+    private readonly flexi: FlexiService,
   ) {}
 
   resolveClientIp(input: {
@@ -294,6 +304,12 @@ export class WholesaleInquiriesService {
     companyVatId: string | null
     consentAt: Date | null
     createdAt: Date
+    externalErpId?: string | null
+    erpNativeId?: string | null
+    erpNativeKod?: string | null
+    erpSyncStatus?: string | null
+    erpSyncedAt?: Date | null
+    erpLastErrorMessage?: string | null
   }): WholesaleInquiryListItem {
     return {
       id: row.id,
@@ -311,6 +327,12 @@ export class WholesaleInquiriesService {
       companyVatId: row.companyVatId,
       consentAt: row.consentAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
+      externalErpId: row.externalErpId ?? null,
+      erpNativeId: row.erpNativeId ?? null,
+      erpNativeKod: row.erpNativeKod ?? null,
+      erpSyncStatus: row.erpSyncStatus ?? null,
+      erpSyncedAt: row.erpSyncedAt?.toISOString() ?? null,
+      erpLastErrorMessage: row.erpLastErrorMessage ?? null,
     }
   }
 
@@ -345,6 +367,22 @@ export class WholesaleInquiriesService {
       where: { id },
       data: { status },
     })
+    if (status === WholesaleInquiryStatus.IN_PROGRESS) {
+      // Soft — never rolls back the status change on ERP failure.
+      this.flexi.syncWholesaleInquiryToAdresar(id).catch((error) => {
+        this.logger.warn(
+          `syncWholesaleInquiryToAdresar(${id}) soft-failed on IN_PROGRESS: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+      })
+    }
     return this.toListItem(updated)
+  }
+
+  async syncToAbra(id: string) {
+    const existing = await this.prisma.wholesaleInquiry.findUnique({ where: { id } })
+    if (!existing) throw new NotFoundException('Заявку не знайдено.')
+    return this.flexi.syncWholesaleInquiryToAdresar(id)
   }
 }

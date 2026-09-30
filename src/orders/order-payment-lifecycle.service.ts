@@ -18,8 +18,10 @@ import { PrismaService } from '../prisma/prisma.service'
 import { ProductsService } from '../products/products.service'
 import { QueueService } from '../queue/queue.service'
 import { ReferralsService } from '../referrals/referrals.service'
+import { DispatchCalendarService, resolveMarketTimeZone } from '../settings/dispatch-calendar.service'
 import { SettingsService } from '../settings/settings.service'
 import { resolveErpSyncStatus } from './erp-sync.constants'
+import { isBankPaymentMethod, isCardPaymentMethod } from './order-dispatch-dates'
 import type { CancellationSource } from './order-status.constants'
 import {
   CUSTOMER_PAYMENT_WINDOW_SEC,
@@ -38,7 +40,7 @@ export type CancelUnpaidOptions = {
 }
 
 export type ApplyPaymentSuccessOptions = {
-  provider: 'stripe' | 'monopay'
+  provider: 'stripe' | 'monopay' | 'manual-bank'
   paymentId?: string | null
   /** Provider-specific modified timestamp (Mono). */
   monopayModifiedAt?: Date | null
@@ -53,6 +55,7 @@ export class OrderPaymentLifecycleService {
     private readonly flexiQueue: FlexiQueueService,
     private readonly flexi: FlexiService,
     private readonly settings: SettingsService,
+    private readonly dispatchCalendar: DispatchCalendarService,
     private readonly products: ProductsService,
     private readonly referrals: ReferralsService,
     private readonly cancellationReasons: CancellationReasonsService,
@@ -77,6 +80,12 @@ export class OrderPaymentLifecycleService {
     orderId: string,
     opts: ApplyPaymentSuccessOptions,
   ): Promise<{ handled: 'paid' | 'late_refund' | 'noop' }> {
+    const [marketSettings, dispatchSettings] = await Promise.all([
+      this.settings.getMarketSettings(),
+      this.dispatchCalendar.getSettings(),
+    ])
+    const marketTimeZone = resolveMarketTimeZone(marketSettings.region)
+
     const result = await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT 1 FROM "Order" WHERE id = ${orderId} FOR UPDATE`
 
@@ -107,6 +116,21 @@ export class OrderPaymentLifecycleService {
           ? 'PROCESSING'
           : undefined
 
+      const paidAt = order.paidAt ?? new Date()
+
+      // Dispatch SLA starts once payment is received — card/bank only.
+      // COD already got shipByDate at create; pay-on-pickup gets none.
+      let shipByDate: Date | undefined
+      if (isCardPaymentMethod(order.paymentMethod) || isBankPaymentMethod(order.paymentMethod)) {
+        const shipIso = this.dispatchCalendar.addOpenBusinessDays(
+          paidAt,
+          dispatchSettings.shippingLeadTimeMaxBusinessDays,
+          dispatchSettings,
+          marketTimeZone,
+        )
+        shipByDate = this.dispatchCalendar.endOfBusinessDateUtc(shipIso, marketTimeZone)
+      }
+
       const updated = await tx.order.updateMany({
         where: {
           id: orderId,
@@ -119,8 +143,9 @@ export class OrderPaymentLifecycleService {
         },
         data: {
           paymentStatus: 'success',
-          paidAt: order.paidAt ?? new Date(),
+          paidAt,
           ...(nextStatus ? { status: nextStatus } : {}),
+          ...(shipByDate ? { shipByDate } : {}),
           ...(opts.provider === 'stripe' && opts.paymentId
             ? { stripePaymentId: opts.paymentId }
             : {}),
@@ -149,21 +174,33 @@ export class OrderPaymentLifecycleService {
       return { handled: 'late_refund' }
     }
 
-    void this.flexiQueue.enqueueExportOrderAfterOnlineCardPaid(orderId).catch((err) => {
-      this.logger.warn(
-        `Flexi export after paid failed for ${orderId}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      )
-    })
+    // Card ERP export-after-paid only. Bank already exported at create; manual-bank must not re-trigger card path.
+    if (opts.provider === 'stripe' || opts.provider === 'monopay') {
+      void this.flexiQueue.enqueueExportOrderAfterOnlineCardPaid(orderId).catch((err) => {
+        this.logger.warn(
+          `Flexi export after paid failed for ${orderId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
 
-    void this.queue.enqueueOrderEmail({ orderId, type: 'order_confirmation_pdf' }).catch((err) => {
-      this.logger.warn(
-        `PDF confirmation enqueue failed for ${orderId}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      )
-    })
+      void this.queue.enqueueOrderEmail({ orderId, type: 'order_confirmation_pdf' }).catch((err) => {
+        this.logger.warn(
+          `PDF confirmation enqueue failed for ${orderId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
+    } else if (opts.provider === 'manual-bank') {
+      // Soft-refresh ABRA datTermin now that shipByDate exists (preferredShipDate still wins).
+      void this.flexi.syncOrderDatTerminFromSite(orderId).catch((err) => {
+        this.logger.warn(
+          `Flexi datTermin sync after bank paid failed for ${orderId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
+    }
 
     return { handled: 'paid' }
   }
@@ -302,6 +339,14 @@ export class OrderPaymentLifecycleService {
 
       if (order.paymentStatus === 'success') {
         return { cancelled: false as const, reason: 'already_paid', order }
+      }
+
+      // Defense-in-depth: the SYSTEM auto-cancel clock (+40m) is card-only.
+      // Bank transfers get bankPaymentTermBusinessDays instead — never
+      // auto-cancelled by this short clock even if some future caller
+      // reaches here with a bank order.
+      if (options.source === 'SYSTEM' && !isCardPaymentMethod(order.paymentMethod)) {
+        return { cancelled: false as const, reason: 'not_card_payment_method', order }
       }
 
       const reasonId = await this.resolveCancellationReasonId(tx, options)

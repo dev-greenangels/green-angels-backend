@@ -7,6 +7,9 @@ import {
   FLEXI_BULL_LOCK_RENEW_MS,
   FLEXI_QUEUE,
 } from './flexi.constants'
+import { FlexiFullRefreshService } from './flexi-full-refresh.service'
+import { FlexiLiveSyncService } from './flexi-live-sync.service'
+import { FlexiOrderReconcileService } from './flexi-order-reconcile.service'
 import { FlexiService } from './flexi.service'
 import { FlexiQueueService } from './flexi.queue.service'
 import type { FlexiJobPayload } from './flexi.types'
@@ -22,6 +25,9 @@ export class FlexiProcessor extends WorkerHost {
   constructor(
     private readonly flexi: FlexiService,
     private readonly queue: FlexiQueueService,
+    private readonly live: FlexiLiveSyncService,
+    private readonly fullRefresh: FlexiFullRefreshService,
+    private readonly orderReconcile: FlexiOrderReconcileService,
   ) {
     super()
   }
@@ -30,29 +36,41 @@ export class FlexiProcessor extends WorkerHost {
     const data = job.data
     this.logger.log(`Flexi job ${job.id} type=${data.type}`)
     switch (data.type) {
-      case 'apply-changes':
-        await this.flexi.applyChanges(data.changes, data.nextVersion)
-        return { ok: true }
-      case 'process-intake': {
-        const result = await this.flexi.processDurableIntake({
-          flexiNextHint: data.flexiNextHint,
+      case 'refresh-current':
+        return this.live.processRefreshJob({
+          evidence: data.evidence,
+          objectId: data.objectId,
+          operation: data.operation,
         })
-        if (result.failed > 0) {
-          throw new Error(`Flexi intake: ${result.failed} group(s) failed`)
-        }
-        if (result.openRemaining > 0 && result.groups > 0) {
-          await this.queue.enqueueProcessIntake(data.flexiNextHint)
-        }
-        return result
-      }
+      case 'full-refresh':
+        return this.fullRefresh.runAuthoritative({
+          includeOrders: data.includeOrders === true,
+          initiatedBy: data.initiatedBy,
+          advanceBaseline: true,
+        })
+      case 'order-reconcile':
+        return this.orderReconcile.reconcileActiveErpOrders({
+          initiatedBy: data.initiatedBy,
+        })
+      case 'apply-changes':
+        // Legacy job payload — route through current-state coalesce (no FlexiChangeEvent).
+        await this.live.enqueueFromChangeEntries(data.changes)
+        return { ok: true, legacy: true }
+      case 'process-intake':
+        // Legacy durable intake — disabled for automatic drain of historical backlog.
+        this.logger.warn(
+          'process-intake skipped (legacy journal path retired). Use Full Refresh / live refresh-current.',
+        )
+        return { ok: true, skipped: true, reason: 'legacy-journal-disabled' }
       case 'poll-changes':
-        return this.flexi.pollChanges()
+        return this.live.pollChangesLive()
       case 'sync-cenik-full':
         return this.flexi.syncCenikFull()
       case 'sync-strom':
         return this.flexi.syncStromCatalog({
           createMissing: data.createMissing !== false,
-          absorbJournal: true,
+          absorbJournal: false,
+          reconcileMissing: true,
         })
       case 'export-order':
         await this.flexi.runExportOrderJob(data.orderId, {

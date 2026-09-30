@@ -11,6 +11,12 @@ export type DispatchCalendarSettings = {
   /** Manual overlay for orders counted in 1C (no API yet) */
   externalReservedByDate: Record<string, number>
   /**
+   * Structured shipping SLA (source of truth for shipByDate math).
+   * Customer-facing copy stays in shippingLeadNotice.texts — do not parse those texts.
+   */
+  shippingLeadTimeMinBusinessDays: number
+  shippingLeadTimeMaxBusinessDays: number
+  /**
    * Checkout / success notice about typical dispatch lead time.
    * CMS texts per storefront locale (uk/en/sk/cs/hu/de) — not next-intl.
    */
@@ -47,12 +53,12 @@ export const DEFAULT_SHIPPING_LEAD_NOTICE_TEXTS: Record<
   (typeof SHIPPING_LEAD_NOTICE_LOCALES)[number],
   string
 > = {
-  uk: 'Відправка замовлення зазвичай протягом 1–3 робочих днів після підтвердження.',
-  en: 'Orders are usually dispatched within 1–3 business days after confirmation.',
-  sk: 'Objednávku zvyčajne odosielame do 1–3 pracovných dní po potvrdení.',
-  cs: 'Objednávku obvykle odesíláme do 1–3 pracovních dnů po potvrzení.',
-  hu: 'A rendelést általában a visszaigazolástól számított 1–3 munkanapon belül feladjuk.',
-  de: 'Bestellungen werden in der Regel innerhalb von 1–3 Werktagen nach Bestätigung versendet.',
+  uk: 'Відправка замовлення зазвичай протягом 2–5 робочих днів після отримання оплати (для післяплати — після підтвердження замовлення).',
+  en: 'Orders are usually dispatched within 2–5 business days after payment is received (for COD — after order confirmation).',
+  sk: 'Objednávku zvyčajne odosielame do 2–5 pracovných dní od prijatia platby (pri dobierke — po potvrdení objednávky).',
+  cs: 'Objednávku obvykle odesíláme do 2–5 pracovních dnů od přijetí platby (u dobírky — po potvrzení objednávky).',
+  hu: 'A rendelést általában a fizetés beérkezésétől számított 2–5 munkanapon belül feladjuk (utánvétnél — a megrendelés visszaigazolása után).',
+  de: 'Bestellungen werden in der Regel innerhalb von 2–5 Werktagen nach Zahlungseingang versendet (bei Nachnahme — nach Auftragsbestätigung).',
 }
 
 export const DEFAULT_SHIPPING_LEAD_NOTICE: ShippingLeadNoticeSettings = {
@@ -69,7 +75,12 @@ export const DEFAULT_DISPATCH_CALENDAR_SETTINGS: DispatchCalendarSettings = {
   minLeadDays: 0,
   dailyCapacity: 100,
   externalReservedByDate: {},
-  shippingLeadNotice: { ...DEFAULT_SHIPPING_LEAD_NOTICE, texts: { ...DEFAULT_SHIPPING_LEAD_NOTICE_TEXTS } },
+  shippingLeadTimeMinBusinessDays: 2,
+  shippingLeadTimeMaxBusinessDays: 5,
+  shippingLeadNotice: {
+    ...DEFAULT_SHIPPING_LEAD_NOTICE,
+    texts: { ...DEFAULT_SHIPPING_LEAD_NOTICE_TEXTS },
+  },
 }
 
 export type DispatchDaySlot = {

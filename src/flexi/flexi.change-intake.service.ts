@@ -259,6 +259,27 @@ export class FlexiChangeIntakeService {
     })
   }
 
+  /** Explicit recovery only — wipe legacy historical journal table. */
+  async deleteAllEvents(): Promise<number> {
+    // Chunked deletes — avoid long single transaction / giant bind lists.
+    const CHUNK = 500
+    let total = 0
+    for (let guard = 0; guard < 200_000; guard += 1) {
+      const batch = await this.prisma.flexiChangeEvent.findMany({
+        select: { id: true },
+        take: CHUNK,
+        orderBy: { changeVersion: 'asc' },
+      })
+      if (batch.length === 0) break
+      const result = await this.prisma.flexiChangeEvent.deleteMany({
+        where: { id: { in: batch.map((row) => row.id) } },
+      })
+      total += result.count
+      if (batch.length < CHUNK) break
+    }
+    return total
+  }
+
   /**
    * Collapse strategy:
    * - Each FAILED row is its own group (must retry; must not be skipped by a later success).
