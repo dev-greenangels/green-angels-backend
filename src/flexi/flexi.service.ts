@@ -44,6 +44,10 @@ import {
 } from './flexi-order-export-mapping'
 import { parseSizeLabel } from './flexi-size-label'
 import {
+  isLocalOnlyWebhookUrl,
+  LOCAL_WEBHOOK_URL_REJECTED,
+} from './flexi-webhook-url'
+import {
   categoryTranslationCreates,
   mapStromCategoryContent,
   mapStromProductContent,
@@ -3135,6 +3139,8 @@ export class FlexiService {
 
   /**
    * Register (or reset) Flexi webhook at lastVersion.
+   * Always lets ABRA perform its URL test (never skipUrlTest).
+   * Local-only URLs are rejected without creating a remote hook.
    * Does NOT set webhookAccepting unless opts.setAccepting === true.
    * Existing hook with same URL is deleted and recreated so lastVersion is authoritative.
    */
@@ -3148,6 +3154,13 @@ export class FlexiService {
         ok: false,
         message: 'Вкажіть webhookUrl та webhookSecKey перед реєстрацією hook у Flexi.',
       }
+    }
+
+    if (isLocalOnlyWebhookUrl(settings.webhookUrl)) {
+      await this.settings.updateSettings({
+        webhookLastError: LOCAL_WEBHOOK_URL_REJECTED,
+      })
+      return { ok: false, message: LOCAL_WEBHOOK_URL_REJECTED }
     }
 
     const normalizeUrl = (u: string) => u.trim().replace(/\/$/, '').toLowerCase()
@@ -3165,18 +3178,32 @@ export class FlexiService {
         await this.client.deleteHook(hook.id)
       }
 
-      const skipUrlTest =
-        settings.webhookUrl.includes('localhost') || settings.webhookUrl.includes('127.0.0.1')
-      if (skipUrlTest) {
-        this.logger.warn(
-          `Webhook URL looks unreachable from ABRA (${settings.webhookUrl}) — registering with skipUrlTest; ABRA cannot deliver to localhost.`,
-        )
+      // Remove obsolete localhost / corrupt hooks left from local smokes.
+      // Does not run automatically on deploy — only when an admin registers/enables.
+      for (const hook of existing) {
+        const u = hook.url.toLowerCase()
+        if (
+          u.includes('localhost') ||
+          u.includes('127.0.0.1') ||
+          u.includes('::1') ||
+          u.startsWith('https://http://') ||
+          u.startsWith('http://http://')
+        ) {
+          if (matches.some((m) => m.id === hook.id)) continue
+          await this.client.deleteHook(hook.id).catch((error) => {
+            this.logger.warn(
+              `Could not delete obsolete hook id=${hook.id}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            )
+          })
+        }
       }
+
       await this.client.registerWebhook(
         settings.webhookUrl,
         settings.webhookSecKey,
         lastVersion,
-        skipUrlTest,
       )
 
       const after = await this.client.listHooks()
@@ -3185,35 +3212,38 @@ export class FlexiService {
         ...(setAccepting ? { webhookAccepting: true } : {}),
         webhookRemoteId: created?.id ?? '',
         webhookLastRegisterAt: new Date().toISOString(),
-        webhookLastError: skipUrlTest
-          ? `Webhook URL is not publicly reachable (${settings.webhookUrl}). ABRA cannot deliver. Use a public HTTPS API tunnel → Nest /flexi/webhook.`
-          : '',
+        webhookLastError: '',
       })
 
       return {
         ok: true,
         remoteId: created?.id,
-        message: skipUrlTest
-          ? `Hook записано в ABRA (id=${created?.id ?? '?'}, lastVersion=${lastVersion}), але URL localhost — ABRA НЕ зможе доставляти webhook. Вкажіть публічний HTTPS URL Nest API (/flexi/webhook).`
-          : created
-            ? `Webhook зареєстровано (id=${created.id}, lastVersion=${lastVersion}).`
-            : `Webhook PUT виконано (lastVersion=${lastVersion}); id не знайдено в GET /hooks.`,
+        message: created
+          ? `Webhook зареєстровано (id=${created.id}, lastVersion=${lastVersion}).`
+          : `Webhook PUT виконано (lastVersion=${lastVersion}); id не знайдено в GET /hooks.`,
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      await this.settings.updateSettings({ webhookLastError: message.slice(0, 2000) })
+      await this.settings.updateSettings({
+        webhookLastError: message.slice(0, 2000),
+        ...(setAccepting ? { webhookAccepting: false } : {}),
+      })
       return { ok: false, message }
     }
   }
 
   /**
    * Disable WebHook only: stop local intake + DELETE remote hook(s) matching our URL.
+   * When configured webhookUrl is public, also remove obsolete localhost / corrupt hooks
+   * (local-smoke leftovers) — does not auto-register a replacement.
    * Does NOT disable Flexi enabled, Changes poll, or ERP sync.
    */
   async disableWebhook(): Promise<{ ok: boolean; message: string }> {
     const settings = await this.settings.getSettings()
     const normalizeUrl = (u: string) => u.trim().replace(/\/$/, '').toLowerCase()
     const wanted = settings.webhookUrl ? normalizeUrl(settings.webhookUrl) : ''
+    const configuredPublic =
+      Boolean(settings.webhookUrl) && !isLocalOnlyWebhookUrl(settings.webhookUrl)
 
     try {
       let deleted = 0
@@ -3221,6 +3251,17 @@ export class FlexiService {
       const targets = hooks.filter((h) => {
         if (settings.webhookRemoteId && h.id === settings.webhookRemoteId) return true
         if (wanted && normalizeUrl(h.url) === wanted) return true
+        if (configuredPublic) {
+          const u = h.url.toLowerCase()
+          if (
+            u.includes('localhost') ||
+            u.includes('127.0.0.1') ||
+            u.startsWith('https://http://') ||
+            u.startsWith('http://http://')
+          ) {
+            return true
+          }
+        }
         return false
       })
 

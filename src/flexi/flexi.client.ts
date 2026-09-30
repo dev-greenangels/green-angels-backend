@@ -146,7 +146,6 @@ export class FlexiClient {
     url: string,
     secKey: string,
     lastVersion = 0,
-    skipUrlTest = false,
   ): Promise<void> {
     const settings = await this.settingsService.getSettings()
     const qs = new URLSearchParams({
@@ -155,7 +154,7 @@ export class FlexiClient {
       lastVersion: String(lastVersion),
       secKey,
     })
-    if (skipUrlTest) qs.set('skipUrlTest', 'true')
+    // Never send skipUrlTest — ABRA must validate the URL (2xx) itself.
     await this.request('PUT', `/hooks.json?${qs.toString()}`, undefined, settings)
   }
 

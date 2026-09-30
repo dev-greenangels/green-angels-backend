@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { isLocalOnlyWebhookUrl } from './flexi-webhook-url'
 
 const HEALTH_KEY = 'integration.flexi.liveOpenFailures'
 const MAX_OPEN = 40
@@ -82,14 +83,7 @@ export class FlexiInboundHealthService {
     | 'receiving'
     | 'error' {
     if (opts.webhookAccepting === false) return 'off'
-    const url = (opts.webhookUrl || '').toLowerCase()
-    if (
-      !url ||
-      url.includes('localhost') ||
-      url.includes('127.0.0.1') ||
-      url.startsWith('https://http://') ||
-      url.startsWith('http://http://')
-    ) {
+    if (!opts.webhookUrl?.trim() || isLocalOnlyWebhookUrl(opts.webhookUrl)) {
       return 'unreachable_url'
     }
     if (opts.webhookLastError) return 'error'

@@ -41,7 +41,9 @@ export type LegacyJournalPreflight = {
   total: number
   byEvidence: LegacyJournalEvidenceAgg[]
   byOperation: Array<{ operation: string; count: number }>
+  /** BLOCKER evidences (formerly labelled unknownEvidence). */
   unknownEvidence: Array<{ evidence: string; count: number }>
+  blockerEvidence: Array<{ evidence: string; count: number }>
   deleteByEvidence: Array<{
     evidence: string
     count: number
@@ -206,7 +208,7 @@ export class FlexiLegacyRetirementService {
       .sort((a, b) => b.count - a.count)
 
     const unknownEvidence = byEvidence
-      .filter((e) => e.classification === 'UNKNOWN')
+      .filter((e) => e.classification === 'BLOCKER')
       .map((e) => ({ evidence: e.evidence, count: e.count }))
 
     const deleteByEvidence = [...deleteMap.entries()]
@@ -229,16 +231,17 @@ export class FlexiLegacyRetirementService {
     }
     if (unknownEvidence.length > 0) {
       blockers.push(
-        `UNKNOWN evidence present: ${unknownEvidence
+        `BLOCKER evidence present: ${unknownEvidence
           .slice(0, 12)
           .map((u) => `${u.evidence}(${u.count})`)
           .join(', ')}`,
       )
     }
+    // DELETE blocks only when that evidence owns unrecovered SITE state (BLOCKER).
     for (const d of deleteByEvidence) {
       if (!d.recoverableWithoutReplay) {
         blockers.push(
-          `DELETE on ${d.evidence} (×${d.count}) not recoverable without journal replay.`,
+          `DELETE on BLOCKER ${d.evidence} (×${d.count}): ${d.reason}`,
         )
       }
     }
@@ -253,6 +256,7 @@ export class FlexiLegacyRetirementService {
       byEvidence,
       byOperation,
       unknownEvidence,
+      blockerEvidence: unknownEvidence,
       deleteByEvidence,
       globalVersion: settings.globalVersion,
       webhookAccepting: settings.webhookAccepting !== false,

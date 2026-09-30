@@ -12,6 +12,9 @@ export type FlexiOperationType =
   | 'ENABLE_WITHOUT_UPDATE'
   | 'ORDER_RECONCILE'
   | 'RECOVERY'
+  | 'WEBHOOK_HOOK_DELETE'
+  | 'WEBHOOK_HOOKS_DELETE_ORPHANS'
+  | 'WEBHOOK_HOOKS_DELETE_ALL'
   | 'ERROR'
 
 export type FlexiOperationLogEntry = {

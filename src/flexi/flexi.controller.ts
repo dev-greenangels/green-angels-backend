@@ -2,9 +2,11 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
+  Param,
   Patch,
   Post,
   Req,
@@ -24,6 +26,7 @@ import { FlexiChangeIntakeService } from './flexi.change-intake.service'
 import { FlexiApiUsageService } from './flexi-api-usage.service'
 import { FlexiAutoSyncService } from './flexi-auto-sync.service'
 import { FlexiFullRefreshService } from './flexi-full-refresh.service'
+import { FlexiHooksService } from './flexi-hooks.service'
 import { FlexiInboundHealthService } from './flexi-inbound-health.service'
 import { FlexiLegacyRetirementService } from './flexi-legacy-retirement.service'
 import { LEGACY_RETIRE_CONFIRM } from './flexi-legacy-evidence.classification'
@@ -113,6 +116,7 @@ export class FlexiAdminController {
     private readonly live: FlexiLiveSyncService,
     private readonly autoSync: FlexiAutoSyncService,
     private readonly fullRefresh: FlexiFullRefreshService,
+    private readonly hooks: FlexiHooksService,
     private readonly orderReconcile: FlexiOrderReconcileService,
     private readonly ops: FlexiOperationLogService,
     private readonly lock: FlexiSyncLockService,
@@ -158,6 +162,57 @@ export class FlexiAdminController {
   @Get('webhook-status')
   webhookStatus() {
     return this.flexi.refreshWebhookStatus()
+  }
+
+  /**
+   * Live GET /hooks from ABRA with CURRENT/OTHER labels vs settings.webhookUrl.
+   * ADMIN+MANAGER (read). Destructive deletes are ADMIN-only below.
+   */
+  @Get('webhooks')
+  listWebhooks() {
+    return this.hooks.listAnnotated()
+  }
+
+  /**
+   * Delete exactly one remote ABRA hook by id.
+   * Does not change globalVersion, Auto Sync, journal, or recreate a hook.
+   */
+  @Delete('webhooks/:id')
+  @Roles(Role.ADMIN)
+  deleteWebhook(
+    @Param('id') id: string,
+    @Req() req: Request & { user: SessionJwtPayload },
+  ) {
+    return this.hooks.deleteOne(id, { initiatedBy: req.user.userId })
+  }
+
+  /**
+   * Delete remote hooks whose URL ≠ configured webhookUrl.
+   * Body: { confirm: "DELETE_ORPHAN_ABRA_HOOKS" }
+   */
+  @Post('webhooks/delete-orphans')
+  @HttpCode(200)
+  @Roles(Role.ADMIN)
+  deleteOrphanWebhooks(
+    @Body() body: { confirm?: string },
+    @Req() req: Request & { user: SessionJwtPayload },
+  ) {
+    return this.hooks.deleteOrphans(body?.confirm, { initiatedBy: req.user.userId })
+  }
+
+  /**
+   * Delete ALL remote ABRA hooks for the company.
+   * Body: { confirm: "DELETE_ALL_ABRA_HOOKS" }
+   * Does NOT recreate a hook — use Enable Without Update / Update and Enable after.
+   */
+  @Post('webhooks/delete-all')
+  @HttpCode(200)
+  @Roles(Role.ADMIN)
+  deleteAllWebhooks(
+    @Body() body: { confirm?: string },
+    @Req() req: Request & { user: SessionJwtPayload },
+  ) {
+    return this.hooks.deleteAll(body?.confirm, { initiatedBy: req.user.userId })
   }
 
   /** Backup: poll Changes API now */
@@ -236,9 +291,15 @@ export class FlexiAdminController {
       webhookLastError: settings.webhookLastError,
     })
     const apiUsage = await this.apiUsage.snapshot(settings.companyId, settings.apiDailyLimit)
-    let remoteHooks: Array<{ id: string; url: string; lastVersion?: number }> = []
+    let remoteHooks: Array<{
+      id: string
+      url: string
+      lastVersion?: number
+      classification?: 'CURRENT' | 'OTHER'
+    }> = []
     try {
-      remoteHooks = await this.flexi.listRemoteHooks()
+      const listed = await this.hooks.listAnnotated()
+      remoteHooks = listed.hooks
     } catch {
       remoteHooks = []
     }

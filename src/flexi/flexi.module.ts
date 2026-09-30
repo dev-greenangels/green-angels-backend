@@ -14,6 +14,7 @@ import { FlexiBacklogCleanupService } from './flexi.backlog-cleanup.service'
 import { FlexiChangeIntakeService } from './flexi.change-intake.service'
 import { FlexiClient } from './flexi.client'
 import { FlexiFullRefreshService } from './flexi-full-refresh.service'
+import { FlexiHooksService } from './flexi-hooks.service'
 import { FlexiInboundHealthService } from './flexi-inbound-health.service'
 import { FlexiLegacyRetirementService } from './flexi-legacy-retirement.service'
 import { FlexiLiveSyncService } from './flexi-live-sync.service'
@@ -58,6 +59,7 @@ import { FlexiStromEvidenceHandler } from './evidence/handlers/flexi-strom.evide
     FlexiOrderReconcileService,
     FlexiFullRefreshService,
     FlexiAutoSyncService,
+    FlexiHooksService,
     FlexiLegacyRetirementService,
     FlexiCenikEvidenceHandler,
     FlexiSkladovaEvidenceHandler,

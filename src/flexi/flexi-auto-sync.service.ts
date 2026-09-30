@@ -7,6 +7,10 @@ import { FlexiQueueService } from './flexi.queue.service'
 import { FlexiService } from './flexi.service'
 import { FlexiSettingsService } from './flexi.settings.service'
 import { FlexiSyncLockService } from './flexi-sync-lock.service'
+import {
+  isLocalOnlyWebhookUrl,
+  LOCAL_WEBHOOK_URL_REJECTED,
+} from './flexi-webhook-url'
 
 export type FlexiAutoSyncResult = {
   ok: boolean
@@ -79,6 +83,30 @@ export class FlexiAutoSyncService {
         detail: 'source=ENABLE_WITHOUT_UPDATE; no OFF-period catch-up',
       })
       try {
+        const before = await this.settings.getSettings()
+        const previousGlobalVersion = before.globalVersion
+
+        // Reject local URL before touching baseline — ABRA cannot deliver.
+        if (isLocalOnlyWebhookUrl(before.webhookUrl)) {
+          await this.settings.updateSettings({
+            webhookAccepting: false,
+            webhookLastError: LOCAL_WEBHOOK_URL_REJECTED,
+          })
+          await this.queue.rebuildRepeatableJobs()
+          await this.ops.finish(log.id, {
+            status: 'error',
+            durationMs: Date.now() - started,
+            error: LOCAL_WEBHOOK_URL_REJECTED,
+            webhookAccepting: false,
+          })
+          return {
+            ok: false,
+            message: LOCAL_WEBHOOK_URL_REJECTED,
+            webhookAccepting: false,
+            baseline: previousGlobalVersion,
+          }
+        }
+
         // Stop inbound poll before baseline move.
         await this.settings.updateSettings({ webhookAccepting: false })
         await this.queue.rebuildRepeatableJobs()
@@ -94,20 +122,32 @@ export class FlexiAutoSyncService {
           setAccepting: false,
         })
         if (!registered.ok) {
-          await this.settings.updateSettings({ webhookAccepting: false })
+          // Restore prior baseline — failed registration must not advance cursor alone.
+          await this.settings.updateSettings({
+            webhookAccepting: false,
+            globalVersion: previousGlobalVersion,
+          })
           await this.ops.finish(log.id, {
             status: 'error',
             durationMs: Date.now() - started,
             error: registered.message,
             webhookAccepting: false,
           })
-          return { ok: false, message: registered.message, webhookAccepting: false, baseline }
+          return {
+            ok: false,
+            message: registered.message,
+            webhookAccepting: false,
+            baseline: previousGlobalVersion,
+          }
         }
 
         // Registration-gap only (max a few pages). Must not refresh OFF-period entities.
         const postGap = await this.fullRefresh.runRaceBridge(baseline, { maxPages: 20 })
         if (!postGap.ok) {
-          await this.settings.updateSettings({ webhookAccepting: false })
+          await this.settings.updateSettings({
+            webhookAccepting: false,
+            globalVersion: previousGlobalVersion,
+          })
           await this.ops.finish(log.id, {
             status: 'error',
             durationMs: Date.now() - started,
@@ -115,7 +155,12 @@ export class FlexiAutoSyncService {
             webhookAccepting: false,
             detail: `source=RACE_BRIDGE; ${postGap.message}`,
           })
-          return { ok: false, message: postGap.message, webhookAccepting: false }
+          return {
+            ok: false,
+            message: postGap.message,
+            webhookAccepting: false,
+            baseline: previousGlobalVersion,
+          }
         }
         baseline = postGap.baselineAfter
 
@@ -153,6 +198,27 @@ export class FlexiAutoSyncService {
     const started = Date.now()
     const log = await this.ops.start('UPDATE_AND_ENABLE', { initiatedBy: opts?.initiatedBy })
 
+    const before = await this.settings.getSettings()
+    if (isLocalOnlyWebhookUrl(before.webhookUrl)) {
+      await this.settings.updateSettings({
+        webhookAccepting: false,
+        webhookLastError: LOCAL_WEBHOOK_URL_REJECTED,
+      })
+      await this.queue.rebuildRepeatableJobs()
+      await this.ops.finish(log.id, {
+        status: 'error',
+        durationMs: Date.now() - started,
+        error: LOCAL_WEBHOOK_URL_REJECTED,
+        webhookAccepting: false,
+      })
+      return {
+        ok: false,
+        message: LOCAL_WEBHOOK_URL_REJECTED,
+        webhookAccepting: false,
+        baseline: before.globalVersion,
+      }
+    }
+
     await this.settings.updateSettings({ webhookAccepting: false })
     await this.queue.rebuildRepeatableJobs()
 
@@ -183,17 +249,31 @@ export class FlexiAutoSyncService {
       lastVersion: baseline,
       setAccepting: false,
     })
+    if (!registered.ok) {
+      // Full Refresh already advanced baseline intentionally; do not enable Auto Sync.
+      await this.settings.updateSettings({ webhookAccepting: false, globalVersion: baseline })
+      await this.queue.rebuildRepeatableJobs()
+      const message = `Дані оновлено, але webhook: ${registered.message}`
+      await this.ops.finish(log.id, {
+        status: 'error',
+        durationMs: Date.now() - started,
+        refreshed: refresh.bridgeRefreshed ?? 0,
+        detail: message,
+        webhookAccepting: false,
+        error: message,
+      })
+      return { ok: false, message, webhookAccepting: false, baseline }
+    }
+
     const postGap = await this.fullRefresh.runRaceBridge(baseline, { maxPages: 50 })
     if (postGap.ok) {
       baseline = postGap.baselineAfter
     }
 
-    if (!registered.ok || !postGap.ok) {
+    if (!postGap.ok) {
       await this.settings.updateSettings({ webhookAccepting: false, globalVersion: baseline })
       await this.queue.rebuildRepeatableJobs()
-      const message = !postGap.ok
-        ? `Дані оновлено, але post-register bridge: ${postGap.message}`
-        : `Дані оновлено, але webhook: ${registered.message}`
+      const message = `Дані оновлено, але post-register bridge: ${postGap.message}`
       await this.ops.finish(log.id, {
         status: 'error',
         durationMs: Date.now() - started,

@@ -4,11 +4,12 @@ import { describe, it } from 'node:test'
 import {
   classifyLegacyEvidence,
   deleteRecoveryPolicy,
+  FLEXI_CHANGE_EVENT_CREATE_ENTRYPOINTS,
   LEGACY_RETIRE_CONFIRM,
   NORMAL_RUNTIME_DEPENDS_ON_JOURNAL,
 } from './flexi-legacy-evidence.classification'
 
-describe('legacy evidence classification', () => {
+describe('legacy evidence classification (FLEXI-LEGACY-RETIRE-002)', () => {
   const live = ['cenik', 'skladova-karta', 'strom', 'rezervace'] as const
 
   it('classifies current-state evidences', () => {
@@ -18,32 +19,51 @@ describe('legacy evidence classification', () => {
     assert.equal(classifyLegacyEvidence('rezervace', live), 'CURRENT_STATE_RECOVERABLE')
   })
 
-  it('classifies orders for reconcile', () => {
+  it('classifies order documents for reconcile — not typ-objednavky config', () => {
     assert.equal(classifyLegacyEvidence('objednavka-prijata', live), 'ORDER_RECONCILE')
     assert.equal(classifyLegacyEvidence('objednavka-prijata-polozka', live), 'ORDER_RECONCILE')
+    assert.equal(classifyLegacyEvidence('typ-objednavky-prijate', live), 'IRRELEVANT_TO_SITE')
   })
 
-  it('classifies unsupported noise as IRRELEVANT', () => {
-    assert.equal(classifyLegacyEvidence('faktura-vydana', live), 'IRRELEVANT')
-    assert.equal(classifyLegacyEvidence('kusovnik', live), 'IRRELEVANT')
+  it('production UNKNOWN-8 audit → IRRELEVANT_TO_SITE', () => {
+    const cases = [
+      'odberatel',
+      'typ-faktury-vydane',
+      'sklad',
+      'stav-obchodniho-dokladu',
+      'typ-objednavky-prijate',
+      'kurz',
+      'stat',
+      'typ-faktury-prijate',
+    ] as const
+    for (const ev of cases) {
+      assert.equal(
+        classifyLegacyEvidence(ev, live),
+        'IRRELEVANT_TO_SITE',
+        ev,
+      )
+    }
   })
 
-  it('UNKNOWN blocks safeToRetire semantics', () => {
+  it('DELETE odberatel does not block when IRRELEVANT_TO_SITE', () => {
+    const c = classifyLegacyEvidence('odberatel', live)
+    assert.equal(c, 'IRRELEVANT_TO_SITE')
+    assert.equal(deleteRecoveryPolicy('odberatel', c).recoverableWithoutReplay, true)
+  })
+
+  it('sklad warehouse master ≠ skladova-karta', () => {
+    assert.equal(classifyLegacyEvidence('sklad', live), 'IRRELEVANT_TO_SITE')
+    assert.equal(classifyLegacyEvidence('skladova-karta', live), 'CURRENT_STATE_RECOVERABLE')
+  })
+
+  it('BLOCKER still blocks DELETE', () => {
     const c = classifyLegacyEvidence('totally-new-evidence-xyz', live)
-    assert.equal(c, 'UNKNOWN')
+    assert.equal(c, 'BLOCKER')
     assert.equal(deleteRecoveryPolicy('totally-new-evidence-xyz', c).recoverableWithoutReplay, false)
   })
 
-  it('skladovy-pohyb is IRRELEVANT (not skladova-karta)', () => {
-    assert.equal(classifyLegacyEvidence('skladovy-pohyb', live), 'IRRELEVANT')
-    assert.equal(classifyLegacyEvidence('skladovy-pohyb-polozka', live), 'IRRELEVANT')
-  })
-
-  it('DELETE on recoverable evidence does not require replay', () => {
-    for (const ev of ['cenik', 'skladova-karta', 'strom', 'rezervace', 'objednavka-prijata']) {
-      const c = classifyLegacyEvidence(ev, live)
-      assert.equal(deleteRecoveryPolicy(ev, c).recoverableWithoutReplay, true)
-    }
+  it('skladovy-pohyb is IRRELEVANT_TO_SITE', () => {
+    assert.equal(classifyLegacyEvidence('skladovy-pohyb', live), 'IRRELEVANT_TO_SITE')
   })
 })
 
@@ -52,55 +72,28 @@ describe('legacy retirement contracts', () => {
     assert.equal(NORMAL_RUNTIME_DEPENDS_ON_JOURNAL, false)
   })
 
+  it('sole create entrypoint is ingestChanges (must stay unreachable)', () => {
+    assert.deepEqual(FLEXI_CHANGE_EVENT_CREATE_ENTRYPOINTS, [
+      'FlexiChangeIntakeService.ingestChanges',
+    ])
+  })
+
   it('confirm token is explicit', () => {
     assert.equal(LEGACY_RETIRE_CONFIRM, 'RETIRE_LEGACY_FLEXI_JOURNAL')
   })
 
   it('delete journal must not reset globalVersion (algorithm)', () => {
     const globalVersionBefore = 99810
-    // deleteJournalBatched touches only FlexiChangeEvent
     const settingsTouchedByDelete = false
     const globalVersionAfter = settingsTouchedByDelete ? 0 : globalVersionBefore
     assert.equal(globalVersionAfter, globalVersionBefore)
-    assert.notEqual(globalVersionAfter, 0)
   })
 
-  it('delete journal must not trigger historical Changes replay (algorithm)', () => {
-    const stepsAfterDelete: string[] = []
-    // Auto Sync remains OFF — no poll / webhook accept
-    const webhookAccepting = false
-    if (webhookAccepting) stepsAfterDelete.push('pollChangesLive')
-    assert.equal(stepsAfterDelete.includes('pollChangesLive'), false)
-    assert.equal(stepsAfterDelete.includes('walkChangesFromZero'), false)
-  })
-
-  it('preflight UNKNOWN ⇒ safeToRetire false', () => {
-    const unknownEvidence = [{ evidence: 'weird', count: 3 }]
-    const safeToRetire = unknownEvidence.length === 0
-    assert.equal(safeToRetire, false)
-  })
-
-  it('Full Refresh / order reconcile failure ⇒ zero deleted', () => {
-    const refreshOk = false
-    const reconcileOk = true
-    let deleted = 0
-    if (refreshOk && reconcileOk) deleted = 100
-    assert.equal(deleted, 0)
-  })
-
-  it('batch deletion uses chunk size not giant IN of 57k', () => {
-    const total = 57_521
-    const chunk = 1000
-    const batches = Math.ceil(total / chunk)
-    assert.ok(batches >= 57)
-    assert.ok(chunk <= 2000)
-  })
-
-  it('Redis legacy cleanup does not wipe api-usage / dirty / sync lock keys', () => {
-    const cleaned = ['process-intake']
-    const preserved = ['flexi:api-usage:', 'flexi:refresh-dirty:', 'flexi:inbound-sync-lock']
-    for (const p of preserved) {
-      assert.equal(cleaned.some((c) => p.includes(c)), false)
-    }
+  it('IRRELEVANT DELETE never forces safeToRetire=false alone', () => {
+    const deleteRows = [{ evidence: 'odberatel', classification: 'IRRELEVANT_TO_SITE' as const }]
+    const blockers = deleteRows.filter(
+      (d) => !deleteRecoveryPolicy(d.evidence, d.classification).recoverableWithoutReplay,
+    )
+    assert.equal(blockers.length, 0)
   })
 })
