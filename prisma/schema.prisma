@@ -729,6 +729,8 @@ model PromoCodeUsage {
 
 model Cart {
   id                String     @id @default(uuid())
+  /// Human-readable cart number for backoffice (like Order.orderNumber).
+  cartNumber        Int        @unique @default(autoincrement())
   /// Owner of this shopping attempt. Not unique — many historical carts per user.
   userId            String?
   user              User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -742,6 +744,10 @@ model Cart {
   locale            String?
   /// Customer display currency at cart origin (EUR|HUF|UAH|…). Not tax currency.
   currencyCode      String?
+  /// mobile | tablet | desktop | unknown — best-effort from User-Agent at cart origin.
+  deviceClass       String?
+  /// Optional coarse device model from UA when present (e.g. iPhone). Never required.
+  deviceModel       String?
   /// Best-effort checkout form recovery / Backoffice PII — never order authority.
   checkoutDraft     Json?
   /// Set once when checkout is first entered; not reset on later edits.

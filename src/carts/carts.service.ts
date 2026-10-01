@@ -308,11 +308,21 @@ export class CartsService {
       Boolean(normalized.countrySiteCode) ||
       Boolean(normalized.sourceHost) ||
       Boolean(normalized.locale) ||
-      Boolean(normalized.currencyCode)
+      Boolean(normalized.currencyCode) ||
+      Boolean(normalized.deviceClass)
     if (!hasAny) {
       return normalized
     }
     if (normalized.currencyCode) return normalized
+    // Device-only updates still skip currency resolution.
+    if (
+      !normalized.countrySiteCode &&
+      !normalized.sourceHost &&
+      !normalized.locale &&
+      normalized.deviceClass
+    ) {
+      return normalized
+    }
     const currency = await this.resolveCurrencyForCountrySite(normalized.countrySiteCode)
     return {
       ...normalized,
@@ -330,7 +340,8 @@ export class CartsService {
       Boolean(enriched.countrySiteCode) ||
       Boolean(enriched.sourceHost) ||
       Boolean(enriched.locale) ||
-      Boolean(enriched.currencyCode)
+      Boolean(enriched.currencyCode) ||
+      Boolean(enriched.deviceClass)
     if (!hasIncoming) return
     const merged = applySourceContextSetOnce(existing, enriched)
     if (!merged.changed) return
@@ -341,6 +352,8 @@ export class CartsService {
         sourceHost: merged.sourceHost,
         locale: merged.locale,
         currencyCode: merged.currencyCode,
+        deviceClass: merged.deviceClass,
+        deviceModel: merged.deviceModel,
       },
     })
   }
@@ -373,6 +386,8 @@ export class CartsService {
             sourceHost: enriched.sourceHost,
             locale: enriched.locale,
             currencyCode,
+            deviceClass: enriched.deviceClass,
+            deviceModel: enriched.deviceModel,
           }
         : {
             guestSessionId: owner.guestSessionId,
@@ -380,6 +395,8 @@ export class CartsService {
             sourceHost: enriched.sourceHost,
             locale: enriched.locale,
             currencyCode,
+            deviceClass: enriched.deviceClass,
+            deviceModel: enriched.deviceModel,
           }
 
     try {
@@ -691,6 +708,8 @@ export class CartsService {
       sourceHost: true,
       locale: true,
       currencyCode: true,
+      deviceClass: true,
+      deviceModel: true,
       closedAt: true,
     } as const
     const guestCart = guestSessionId
@@ -742,6 +761,8 @@ export class CartsService {
                   sourceHost: sourceOutcome.sourceHost,
                   locale: sourceOutcome.locale,
                   currencyCode: sourceOutcome.currencyCode,
+                  deviceClass: sourceOutcome.deviceClass,
+                  deviceModel: sourceOutcome.deviceModel,
                 }
               : {}),
           },
@@ -799,6 +820,8 @@ export class CartsService {
                   sourceHost: sourceOutcome.sourceHost,
                   locale: sourceOutcome.locale,
                   currencyCode: sourceOutcome.currencyCode,
+                  deviceClass: sourceOutcome.deviceClass,
+                  deviceModel: sourceOutcome.deviceModel,
                 }
               : {}),
           },
@@ -951,7 +974,13 @@ export class CartsService {
     const search = params.search?.trim()
     if (search) {
       const orderNumber = Number(search)
+      const cartNumberRaw = search.replace(/^c-/i, '').trim()
+      const cartNumber = Number(cartNumberRaw)
       const searchClause: Prisma.CartWhereInput[] = [
+        { id: { equals: search } },
+        ...(Number.isFinite(cartNumber) && cartNumberRaw !== ''
+          ? [{ cartNumber }]
+          : []),
         { guestSessionId: { contains: search, mode: 'insensitive' } },
         { sourceHost: { contains: search, mode: 'insensitive' } },
         {
@@ -1084,6 +1113,10 @@ export class CartsService {
     return `ZY-${String(orderNumber).padStart(8, '0')}`
   }
 
+  private formatCartNumber(cartNumber: number): string {
+    return `C-${String(cartNumber).padStart(8, '0')}`
+  }
+
   async listBackstage(params: {
     search?: string
     kind?: 'guest' | 'user' | 'all'
@@ -1180,6 +1213,8 @@ export class CartsService {
 
       return {
         id: cart.id,
+        cartNumber: cart.cartNumber,
+        cartNumberFormatted: this.formatCartNumber(cart.cartNumber),
         kind: cart.userId ? ('user' as const) : ('guest' as const),
         state,
         activityBucket: cartActivityBucket(state),
@@ -1219,6 +1254,8 @@ export class CartsService {
         locale: cart.locale,
         /** Captured Cart origin currency only — never deploy-default invention. */
         currencyCode: cart.currencyCode,
+        deviceClass: cart.deviceClass,
+        deviceModel: cart.deviceModel,
         /** Checkout-draft context (not immutable origin). */
         checkoutDraftCountryCode: draftSummary.countryCode,
         checkoutDraftLocale: draftSummary.locale,
@@ -1349,6 +1386,8 @@ export class CartsService {
 
     return {
       id: cart.id,
+      cartNumber: cart.cartNumber,
+      cartNumberFormatted: this.formatCartNumber(cart.cartNumber),
       kind: cart.userId ? ('user' as const) : ('guest' as const),
       state,
       activityBucket: cartActivityBucket(state),
@@ -1406,6 +1445,8 @@ export class CartsService {
         sourceHost: cart.sourceHost,
         locale: cart.locale,
         currencyCode: cart.currencyCode,
+        deviceClass: cart.deviceClass,
+        deviceModel: cart.deviceModel,
         /** Checkout-draft context (not origin). */
         checkoutDraftCountryCode: draftSummary.countryCode,
         checkoutDraftLocale: draftSummary.locale,

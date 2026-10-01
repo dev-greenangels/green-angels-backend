@@ -93,17 +93,22 @@ describe('Cart storefront context authority (source contracts)', () => {
         sourceHost: 'green-angels.sk',
         locale: 'de',
         currencyCode: 'EUR',
+        deviceClass: 'desktop',
+        deviceModel: null,
       },
       {
         countrySiteCode: 'hu',
         sourceHost: 'green-angels.hu',
         locale: 'sk',
         currencyCode: 'HUF',
+        deviceClass: 'mobile',
+        deviceModel: null,
       },
     )
     assert.equal(merged.locale, 'de')
     assert.equal(merged.currencyCode, 'EUR')
     assert.equal(merged.countrySiteCode, 'sk')
+    assert.equal(merged.deviceClass, 'desktop')
     assert.equal(merged.changed, false)
   })
 

@@ -6,6 +6,12 @@
  */
 
 import { SUPPORTED_LOCALES } from '../settings/localization.types'
+import {
+  normalizeDeviceClass,
+  normalizeDeviceModel,
+  parseUserAgentDevice,
+  type CartDeviceClass,
+} from './cart-device-ua'
 
 export const CART_COUNTRY_SITE_CODES = ['sk', 'hu', 'at'] as const
 export type CartCountrySiteCode = (typeof CART_COUNTRY_SITE_CODES)[number]
@@ -15,6 +21,11 @@ export type CartSourceContextInput = {
   sourceHost?: string | null
   locale?: string | null
   currencyCode?: string | null
+  /** Raw UA from BFF (truncated). Parsed server-side — never stored on Cart. */
+  userAgent?: string | null
+  /** Pre-normalized class (optional; UA parse wins when both present). */
+  deviceClass?: string | null
+  deviceModel?: string | null
 }
 
 export type CartSourceContext = {
@@ -22,6 +33,8 @@ export type CartSourceContext = {
   sourceHost: string | null
   locale: string | null
   currencyCode: string | null
+  deviceClass: CartDeviceClass | null
+  deviceModel: string | null
 }
 
 export function isCartCountrySiteCode(value: string): value is CartCountrySiteCode {
@@ -71,14 +84,33 @@ export function normalizeCurrencyCode(raw: string | null | undefined): string | 
   return code
 }
 
+function resolveDeviceFromInput(
+  input: CartSourceContextInput | null | undefined,
+): Pick<CartSourceContext, 'deviceClass' | 'deviceModel'> {
+  if (input?.userAgent?.trim()) {
+    const fromUa = parseUserAgentDevice(input.userAgent)
+    return {
+      deviceClass: fromUa.deviceClass,
+      deviceModel: fromUa.deviceModel,
+    }
+  }
+  return {
+    deviceClass: normalizeDeviceClass(input?.deviceClass),
+    deviceModel: normalizeDeviceModel(input?.deviceModel),
+  }
+}
+
 export function normalizeCartSourceContext(
   input: CartSourceContextInput | null | undefined,
 ): CartSourceContext {
+  const device = resolveDeviceFromInput(input)
   return {
     countrySiteCode: normalizeCountrySiteCode(input?.countrySiteCode),
     sourceHost: normalizeSourceHost(input?.sourceHost),
     locale: normalizeLocaleCode(input?.locale),
     currencyCode: normalizeCurrencyCode(input?.currencyCode),
+    deviceClass: device.deviceClass,
+    deviceModel: device.deviceModel,
   }
 }
 
@@ -94,12 +126,16 @@ export function applySourceContextSetOnce(
     sourceHost: existing.sourceHost ?? incoming.sourceHost,
     locale: existing.locale ?? incoming.locale,
     currencyCode: existing.currencyCode ?? incoming.currencyCode,
+    deviceClass: existing.deviceClass ?? incoming.deviceClass,
+    deviceModel: existing.deviceModel ?? incoming.deviceModel,
   }
   const changed =
     next.countrySiteCode !== existing.countrySiteCode ||
     next.sourceHost !== existing.sourceHost ||
     next.locale !== existing.locale ||
-    next.currencyCode !== existing.currencyCode
+    next.currencyCode !== existing.currencyCode ||
+    next.deviceClass !== existing.deviceClass ||
+    next.deviceModel !== existing.deviceModel
   return { ...next, changed }
 }
 
@@ -135,6 +171,8 @@ export function resolveSourceContextAfterMerge(input: {
       sourceHost: guest.sourceHost ?? user.sourceHost,
       locale: guest.locale ?? user.locale,
       currencyCode: guest.currencyCode ?? user.currencyCode,
+      deviceClass: guest.deviceClass ?? user.deviceClass,
+      deviceModel: guest.deviceModel ?? user.deviceModel,
     }
   }
 
@@ -147,6 +185,8 @@ export function resolveSourceContextAfterMerge(input: {
     sourceHost: user.sourceHost ?? guest.sourceHost,
     locale: user.locale ?? guest.locale,
     currencyCode: user.currencyCode ?? guest.currencyCode,
+    deviceClass: user.deviceClass ?? guest.deviceClass,
+    deviceModel: user.deviceModel ?? guest.deviceModel,
   }
 }
 
@@ -155,11 +195,15 @@ export function cartSourceFieldsFromRow(row: {
   sourceHost?: string | null
   locale?: string | null
   currencyCode?: string | null
+  deviceClass?: string | null
+  deviceModel?: string | null
 } | null): CartSourceContext {
   return {
     countrySiteCode: row?.countrySiteCode ?? null,
     sourceHost: row?.sourceHost ?? null,
     locale: row?.locale ?? null,
     currencyCode: row?.currencyCode ?? null,
+    deviceClass: normalizeDeviceClass(row?.deviceClass),
+    deviceModel: normalizeDeviceModel(row?.deviceModel),
   }
 }

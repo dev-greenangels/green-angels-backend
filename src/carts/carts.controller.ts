@@ -89,6 +89,7 @@ function readCartSourceFromRequest(req: Request): CartSourceContextInput {
     sourceHost: get(CART_SOURCE_HEADERS.sourceHost),
     locale: get(CART_SOURCE_HEADERS.locale),
     currencyCode: get(CART_SOURCE_HEADERS.currency),
+    userAgent: get(CART_SOURCE_HEADERS.userAgent),
   }
 }
 

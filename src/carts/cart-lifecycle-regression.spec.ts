@@ -71,6 +71,7 @@ describe('backstage pagination (source contract)', () => {
   it('listBackstage exposes origin source context + conversion + progress', () => {
     assert.match(cartsSrc, /countrySiteCode: cart\.countrySiteCode/)
     assert.match(cartsSrc, /sourceHost: cart\.sourceHost/)
+    assert.match(cartsSrc, /deviceClass: cart\.deviceClass/)
     assert.match(cartsSrc, /checkoutProgress/)
     assert.match(cartsSrc, /convertedOrder/)
     assert.match(cartsSrc, /deriveCartCheckoutProgress/)
@@ -187,7 +188,7 @@ describe('cart lifecycle regression contracts', () => {
 
   it('login merge triggered from CartProvider (frontend)', () => {
     assert.match(cartProvider, /fetchCartMergePreview/)
-    assert.match(cartProvider, /applyCartMerge\('keep_guest'\)/)
+    assert.match(cartProvider, /applyCartMerge\(\s*['"]keep_guest['"]/)
     assert.match(cartProvider, /hasConflict/)
   })
 
