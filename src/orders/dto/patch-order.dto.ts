@@ -1,4 +1,3 @@
-import { Type } from 'class-transformer'
 import {
   IsBoolean,
   IsIn,
@@ -9,6 +8,14 @@ import {
   ValidateIf,
 } from 'class-validator'
 
+/**
+ * Backstage order patch — operational fields only.
+ *
+ * INVARIANT: deliveryCountryCode / taxRegime / taxRatePercent / taxAmount are
+ * intentionally absent. For intra-EU B2B, delivery country is tax-relevant;
+ * mutating it after checkout would invalidate a reverse_charge snapshot.
+ * If delivery-country editing is added in the future, require an explicit tax review.
+ */
 export class PatchOrderDto {
   @IsOptional()
   @IsString()

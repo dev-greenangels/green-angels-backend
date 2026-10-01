@@ -639,11 +639,17 @@ export class AccountService {
     )
 
     const items: AccountOrderDetailItem[] = order.items.map((item) => {
-      const lineTotal = Math.round(Number(item.priceAtPurchase) * item.quantity * 100) / 100
+      const price = Number(item.priceAtPurchase)
+      const commercialLine =
+        item.commercialLineAmount != null ? Number(item.commercialLineAmount) : null
+      const lineTotal =
+        commercialLine != null
+          ? commercialLine
+          : Math.round(price * item.quantity * 100) / 100
       return {
         id: item.id,
         quantity: item.quantity,
-        priceAtPurchase: Number(item.priceAtPurchase),
+        priceAtPurchase: price,
         lineTotal,
         productName: item.productName,
         latinName: item.latinName ?? null,

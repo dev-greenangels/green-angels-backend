@@ -118,4 +118,59 @@ describe('Packeta COD normalize + resolve', () => {
     })
     assert.equal(customer?.fee, 1.5)
   })
+
+  it('country byService.customerPrice overrides global Packeta customer price', () => {
+    const settings = normalizeCartCheckoutSettings({
+      carrierConfigs: {
+        packeta: {
+          cod: {
+            customerPrice: {
+              mode: 'fixed',
+              fixedAmount: 1,
+              feeAmountsAreNet: true,
+              feeBase: 'products_subtotal',
+              maxAmount: null,
+              tiers: [],
+            },
+            byService: {
+              'packeta-courier:AT': {
+                supportsCod: true,
+                maxAmount: null,
+                carrierCost: {
+                  enabled: false,
+                  basis: 'COD_AMOUNT',
+                  amountsAreNet: true,
+                  tiers: [],
+                },
+                customerPrice: {
+                  mode: 'fixed',
+                  fixedAmount: 2.5,
+                  feeAmountsAreNet: true,
+                  feeBase: 'products_subtotal',
+                  maxAmount: null,
+                  tiers: [],
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    const sk = resolvePacketaCustomerCodFee(settings, {
+      paymentMethod: 'dobierka',
+      deliveryMethod: 'packeta-courier',
+      productsSubtotal: 50,
+      grandTotalBeforeCod: 50,
+      countryCode: 'SK',
+    })
+    assert.equal(sk?.fee, 1)
+    const at = resolvePacketaCustomerCodFee(settings, {
+      paymentMethod: 'dobierka',
+      deliveryMethod: 'packeta-courier',
+      productsSubtotal: 50,
+      grandTotalBeforeCod: 50,
+      countryCode: 'AT',
+    })
+    assert.equal(at?.fee, 2.5)
+  })
 })

@@ -5,15 +5,26 @@ export type CartActivityState =
   | 'CHECKOUT_ACTIVE'
   | 'CART_ABANDONED'
   | 'CHECKOUT_ABANDONED'
+  | 'CONVERTED'
 
-export type CartActivityBucket = 'active' | 'abandoned'
+export type CartActivityBucket = 'active' | 'abandoned' | 'converted'
 
 export function classifyCartActivity(input: {
   hasItems: boolean
   checkoutStartedAt: Date | string | null | undefined
   updatedAt: Date | string
   now?: Date
+  /**
+   * Closed shopping attempt (Order conversion). Takes precedence over abandonment.
+   * Prefer closedAt; orderId/convertedOrderId accepted for API compatibility.
+   */
+  closedAt?: Date | string | null
+  orderId?: string | null
+  /** @deprecated use closedAt / orderId — kept for transitional callers */
+  convertedOrderId?: string | null
 }): CartActivityState | null {
+  if (input.closedAt || input.orderId || input.convertedOrderId) return 'CONVERTED'
+
   if (!input.hasItems) return null
 
   const now = input.now ?? new Date()
@@ -33,6 +44,7 @@ export function cartActivityBucket(
   state: CartActivityState | null,
 ): CartActivityBucket | null {
   if (!state) return null
+  if (state === 'CONVERTED') return 'converted'
   if (state === 'CART_ONLY' || state === 'CHECKOUT_ACTIVE') return 'active'
   return 'abandoned'
 }

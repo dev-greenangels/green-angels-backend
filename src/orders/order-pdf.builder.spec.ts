@@ -75,6 +75,8 @@ function baseOrder(overrides: Partial<Order> = {}): Order & { items: OrderItem[]
         productVariantId: 'var-1',
         quantity: 1,
         priceAtPurchase: 4.95 as never,
+        commercialUnitPrice: 4.95 as never,
+        commercialLineAmount: 4.95 as never,
         productName: 'Plant',
         latinName: null,
         productSlug: 'plant',

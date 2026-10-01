@@ -53,7 +53,7 @@ model User {
 
   accounts                       Account[]
   contractorProfiles             ContractorProfile[]
-  cart                           Cart?
+  carts                          Cart[]
   orders                         Order[]
   reviews                        Review[]
   favorites                      UserFavorite[]
@@ -67,9 +67,9 @@ model User {
   pointsLedger                   PointsLedgerEntry[]
   legalConsentEvents             LegalConsentEvent[]
   contractWithdrawals            ContractWithdrawal[]
-  contractWithdrawalsProcessed   ContractWithdrawal[] @relation("ContractWithdrawalProcessedBy")
+  contractWithdrawalsProcessed   ContractWithdrawal[]  @relation("ContractWithdrawalProcessedBy")
   communications                 Communication[]
-  communicationsCreated          Communication[] @relation("CommunicationCreatedBy")
+  communicationsCreated          Communication[]       @relation("CommunicationCreatedBy")
 
   @@unique([legacySource, legacyId])
   @@index([legacyId])
@@ -170,18 +170,18 @@ model Product {
 
 /// Підписка «повідомити, коли зʼявиться на складі» (будь-який розмір товару)
 model ProductStockNotification {
-  id         String    @id @default(uuid())
-  productId  String
-  product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
-  name       String
-  phone      String?
-  email      String?
-  locale     String    @default("uk")
+  id              String    @id @default(uuid())
+  productId       String
+  product         Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name            String
+  phone           String?
+  email           String?
+  locale          String    @default("uk")
   /// SK host country site when subscribed (sk|hu|at). Null on UA.
   countrySiteCode String?
-  consentAt  DateTime?
-  notifiedAt DateTime?
-  createdAt  DateTime  @default(now())
+  consentAt       DateTime?
+  notifiedAt      DateTime?
+  createdAt       DateTime  @default(now())
 
   @@index([productId])
   @@index([productId, email])
@@ -729,18 +729,37 @@ model PromoCodeUsage {
 
 model Cart {
   id                String     @id @default(uuid())
-  userId            String?    @unique
+  /// Owner of this shopping attempt. Not unique — many historical carts per user.
+  userId            String?
   user              User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  guestSessionId    String?    @unique
+  /// Guest owner of this shopping attempt. Not unique — many historical carts per session.
+  guestSessionId    String?
+  /// Storefront country-site at cart origin (sk|hu|at). NOT delivery/billing/tax country.
+  countrySiteCode   String?
+  /// Normalized hostname at cart origin (e.g. green-angels.sk). No protocol/path.
+  sourceHost        String?
+  /// UI locale when the cart origin was first established (uk|en|sk|…).
+  locale            String?
+  /// Customer display currency at cart origin (EUR|HUF|UAH|…). Not tax currency.
+  currencyCode      String?
   /// Best-effort checkout form recovery / Backoffice PII — never order authority.
   checkoutDraft     Json?
   /// Set once when checkout is first entered; not reset on later edits.
   checkoutStartedAt DateTime?
+  /// When this shopping attempt was closed (successful Order). Null = OPEN cart.
+  closedAt          DateTime?
+  /// Order created from this attempt (0..1). Reverse of Order.cartId.
+  order             Order?     @relation("OrderOriginCart")
   items             CartItem[]
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
   @@index([updatedAt])
+  @@index([countrySiteCode])
+  @@index([locale])
+  @@index([closedAt])
+  @@index([userId, closedAt])
+  @@index([guestSessionId, closedAt])
 }
 
 model CartItem {
@@ -791,175 +810,186 @@ model CancellationReason {
 }
 
 model Order {
-  id                     String               @id @default(uuid())
-  orderNumber            Int                  @unique @default(autoincrement())
-  status                 String               @default("PENDING")
-  totalAmount            Decimal              @db.Decimal(10, 2)
-  productsSubtotal       Decimal?             @db.Decimal(10, 2)
-  deliveryAmount         Decimal?             @db.Decimal(10, 2)
-  packagingAmount        Decimal?             @db.Decimal(10, 2)
+  id                            String               @id @default(uuid())
+  orderNumber                   Int                  @unique @default(autoincrement())
+  status                        String               @default("PENDING")
+  totalAmount                   Decimal              @db.Decimal(10, 2)
+  productsSubtotal              Decimal?             @db.Decimal(10, 2)
+  deliveryAmount                Decimal?             @db.Decimal(10, 2)
+  packagingAmount               Decimal?             @db.Decimal(10, 2)
   /// Snapshot: boxes used for packaging fee (packagingMode=boxes)
-  packagingBoxCount      Int?
+  packagingBoxCount             Int?
   /// Snapshot: full pallets charged in packaging fee
-  packagingPalletCount   Int?
-  taxAmount              Decimal?             @db.Decimal(10, 2)
+  packagingPalletCount          Int?
+  taxAmount                     Decimal?             @db.Decimal(10, 2)
   /// Snapshot of applied VAT % at checkout (SK multi-domain / OSS)
-  taxRatePercent         Float?
+  taxRatePercent                Float?
   /// Destination / seller country code used for VAT (sk|hu|at)
-  taxCountryCode         String?
+  taxCountryCode                String?
   /// seller | destination | reverse_charge
-  taxRegime              String?
+  taxRegime                     String?
   /// EUR→HUF rate used when currency is HUF
-  fxRateUsed             Float?
+  fxRateUsed                    Float?
   /// individual | company
-  buyerType              String?
+  buyerType                     String?
   /// Комісія за післяплату (dobierka / COD), якщо застосовна
-  codFeeAmount           Decimal?             @db.Decimal(10, 2)
-  pointsDiscountAmount   Decimal?             @db.Decimal(10, 2)
-  currency               String               @default("UAH")
-  customerFirstName      String
-  customerLastName       String
-  customerPatronymic     String?
-  customerPhone          String
-  customerEmail          String?
-  receiverFirstName      String
-  receiverLastName       String
-  receiverPatronymic     String?
-  receiverPhone          String
-  deliveryMethod         String               @default("nova-poshta-branch")
-  deliveryCity           String?
-  deliveryBranch         String?
-  deliveryStreet         String?
-  deliveryHouseNumber    String?
+  codFeeAmount                  Decimal?             @db.Decimal(10, 2)
+  pointsDiscountAmount          Decimal?             @db.Decimal(10, 2)
+  currency                      String               @default("UAH")
+  customerFirstName             String
+  customerLastName              String
+  customerPatronymic            String?
+  customerPhone                 String
+  customerEmail                 String?
+  receiverFirstName             String
+  receiverLastName              String
+  receiverPatronymic            String?
+  receiverPhone                 String
+  deliveryMethod                String               @default("nova-poshta-branch")
+  deliveryCity                  String?
+  deliveryBranch                String?
+  deliveryStreet                String?
+  deliveryHouseNumber           String?
   /// SK/EU courier postal code (PSČ)
-  deliveryPostalCode     String?
+  deliveryPostalCode            String?
   /// Shipping destination country (sk|hu|at) for SK multi-site
-  deliveryCountryCode    String?
+  deliveryCountryCode           String?
   /// Storefront host country site at checkout (sk|hu|at). Null on UA. Never delivery/tax country.
-  countrySiteCode        String?
+  countrySiteCode               String?
   /// Checkout UI locale snapshot (uk|en|sk|…). Used for email resume links.
-  locale                 String?
+  locale                        String?
   /// Optional company/org name on package recipient (not billing entity)
-  receiverCompanyName    String?
+  receiverCompanyName           String?
   /// Human-readable Packeta / branch label (id stored in deliveryBranch)
-  deliveryBranchLabel    String?
+  deliveryBranchLabel           String?
   /// Packeta internal serviceKey snapshot at order create (immutable for shipment).
-  packetaServiceKey      String?
+  packetaServiceKey             String?
   /// Opaque Packeta external carrier id snapshot (string form of feed numeric id).
-  packetaCarrierId       String?
+  packetaCarrierId              String?
   /// Pickup point kind snapshot: branch | box | carrier. Null for courier / non-Packeta.
-  packetaPickupPointKind String?
-  paymentMethod          String
-  comment                String?              @db.Text
+  packetaPickupPointKind        String?
+  paymentMethod                 String
+  comment                       String?              @db.Text
   /// B2B buyer identity (SK IČO / DIČ / IČ DPH or UA ЄДРПОУ)
-  companyLegalName       String?
-  companyIco             String?
-  companyDic             String?
-  companyVatId           String?
+  companyLegalName              String?
+  companyIco                    String?
+  companyDic                    String?
+  companyVatId                  String?
   /// ISO VAT country prefix at checkout (SK, HU, AT, …)
-  vatCountryCode         String?
+  vatCountryCode                String?
   /// B2B company seat address (not B2C billing storage)
-  companyStreet          String?
-  companyCity            String?
-  companyPostalCode      String?
+  companyStreet                 String?
+  companyCity                   String?
+  companyPostalCode             String?
   /// Immutable billing/invoice address snapshot (SK/EU new orders; null on legacy)
-  billingStreet          String?
-  billingHouseNumber     String?
-  billingCity            String?
-  billingPostalCode      String?
+  billingStreet                 String?
+  billingHouseNumber            String?
+  billingCity                   String?
+  billingPostalCode             String?
   /// ISO country code for billing (sk|hu|at|…)
-  billingCountryCode     String?
+  billingCountryCode            String?
   /// B2C invoice person (independent of customer*). Null on legacy → fall back to customer*.
-  billingFirstName       String?
-  billingLastName        String?
+  billingFirstName              String?
+  billingLastName               String?
   /// Customer-selected preferred dispatch / ship date
-  preferredShipDate      DateTime?
-  monopayInvoiceId       String?              @unique
+  preferredShipDate             DateTime?
+  monopayInvoiceId              String?              @unique
   /// Stripe PaymentIntent / Checkout Session id
-  stripePaymentId        String?              @unique
-  paymentProvider        String?
-  paymentStatus          String?
-  monopayModifiedAt      DateTime?
-  privacyConsentAt       DateTime?
-  privacyConsentVersion  String?
-  createAccountRequested Boolean              @default(false)
+  stripePaymentId               String?              @unique
+  paymentProvider               String?
+  paymentStatus                 String?
+  monopayModifiedAt             DateTime?
+  privacyConsentAt              DateTime?
+  privacyConsentVersion         String?
+  createAccountRequested        Boolean              @default(false)
   /// Nova Poshta TTN / tracking number
-  trackingNumber         String?
-  trackingCarrier        String?
-  npDocumentRef          String?
-  trackingSyncedAt       DateTime?
-  shippedAt              DateTime?
+  trackingNumber                String?
+  trackingCarrier               String?
+  npDocumentRef                 String?
+  trackingSyncedAt              DateTime?
+  shippedAt                     DateTime?
   /// Actual customer delivery date when known (not derived from order status or ABRA realization dates).
-  deliveredAt            DateTime?
+  deliveredAt                   DateTime?
   /// Backstage per-order toggle: hides account withdrawal CTA only (public form unaffected).
-  onlineWithdrawalActionEnabled Boolean @default(true)
-  cancellationReasonId   String?
-  cancellationReason     CancellationReason?  @relation(fields: [cancellationReasonId], references: [id], onDelete: SetNull)
+  onlineWithdrawalActionEnabled Boolean              @default(true)
+  cancellationReasonId          String?
+  cancellationReason            CancellationReason?  @relation(fields: [cancellationReasonId], references: [id], onDelete: SetNull)
   /// ADMIN | USER | SYSTEM
-  cancellationSource     String?
-  cancellationNote       String?              @db.Text
-  cancelledAt            DateTime?
+  cancellationSource            String?
+  cancellationNote              String?              @db.Text
+  cancelledAt                   DateTime?
   /// REL-002 release gate — set once when reserved stock is returned (or intentionally skipped for EXTERNAL).
-  stockReleasedAt        DateTime?
+  stockReleasedAt               DateTime?
   /// Customer-facing card payment deadline (createdAt + 30m). SYSTEM cancel runs at +40m.
-  paymentExpiresAt       DateTime?
+  paymentExpiresAt              DateTime?
   /// Customer-facing BANK TRANSFER payment deadline (open business days). Not used for card.
-  paymentDueAt           DateTime?
+  paymentDueAt                  DateTime?
   /// Operational dispatch SLA deadline (open business days from paid/accepted anchor).
-  shipByDate             DateTime?
+  shipByDate                    DateTime?
   /// First successful card payment timestamp.
-  paidAt                 DateTime?
-  awaitingPaymentEmailSentAt DateTime?
-  paymentReminderEmailSentAt DateTime?
-  cancelledUnpaidEmailSentAt DateTime?
-  latePayRefundEmailSentAt   DateTime?
+  paidAt                        DateTime?
+  awaitingPaymentEmailSentAt    DateTime?
+  paymentReminderEmailSentAt    DateTime?
+  cancelledUnpaidEmailSentAt    DateTime?
+  latePayRefundEmailSentAt      DateTime?
   /// ERP correlation id only (Flexi ext:GA:{uuid} / legacy). NOT the native ERP document number.
-  externalErpId          String?
+  externalErpId                 String?
   /// @deprecated Use externalErpId
-  externalId1C           String?
+  externalId1C                  String?
   /// ERP-SYNC-001: sync FSM separate from Order.status (customer lifecycle).
   /// NOT_REQUIRED | PENDING_ERP | RETRYING | SYNCED | ERP_CONFLICT | FAILED | CANCEL_*
-  erpSyncStatus          String?
+  erpSyncStatus                 String?
   /// Native ERP/Flexi internal document id when known (populated in later batches).
-  erpNativeId            String?
+  erpNativeId                   String?
   /// Native ERP/Flexi document number/kod for display when known.
-  erpNativeKod           String?
-  erpSyncAttempts        Int                  @default(0)
-  erpLastErrorCode       String?
-  erpLastErrorMessage    String?              @db.Text
-  erpLastSyncAt          DateTime?
-  erpSyncedAt            DateTime?
+  erpNativeKod                  String?
+  erpSyncAttempts               Int                  @default(0)
+  erpLastErrorCode              String?
+  erpLastErrorMessage           String?              @db.Text
+  erpLastSyncAt                 DateTime?
+  erpSyncedAt                   DateTime?
   /// Flexi issued advance (ZÁLOHA): ext:GA:ADVANCE:{orderId}
-  erpAdvanceExternalId   String?
-  erpAdvanceNativeId     String?
-  erpAdvanceKod          String?
+  erpAdvanceExternalId          String?
+  erpAdvanceNativeId            String?
+  erpAdvanceKod                 String?
   /// NOT_REQUIRED | PENDING | SYNCED | FAILED
-  erpAdvanceSyncStatus   String?
-  erpAdvanceSyncedAt     DateTime?
-  erpAdvanceLastError    String?              @db.Text
+  erpAdvanceSyncStatus          String?
+  erpAdvanceSyncedAt            DateTime?
+  erpAdvanceLastError           String?              @db.Text
   /// Flexi Stripe clearing banka: ext:GA:STRIPEPAY:{orderId}
-  erpStripePayExternalId String?
-  erpStripePayNativeId   String?
+  erpStripePayExternalId        String?
+  erpStripePayNativeId          String?
   /// NOT_REQUIRED | PENDING | SYNCED | FAILED
-  erpStripePaySyncStatus String?
-  erpStripePayLastError  String?              @db.Text
-  legacyId               String?
-  legacySource           String?
-  legacyReference        String?
-  userId                 String?
-  user                   User?                @relation(fields: [userId], references: [id])
-  promoCodeId            String?
-  promoCode              PromoCode?           @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
-  promoCodes             OrderPromoCode[]
-  items                  OrderItem[]
-  referralAttribution    ReferralAttribution?
-  pointsLedger           PointsLedgerEntry[]
-  legalConsentEvents     LegalConsentEvent[]
-  contractWithdrawals    ContractWithdrawal[]
-  viesCheck              OrderViesCheck?
-  documents              OrderDocument[]
-  communications         Communication[]
-  createdAt              DateTime             @default(now())
+  erpStripePaySyncStatus        String?
+  erpStripePayLastError         String?              @db.Text
+  /// Flexi bank-transfer clearing banka: ext:GA:BANKPAY:{orderId}
+  erpBankPayExternalId          String?
+  erpBankPayNativeId            String?
+  erpBankPayNativeKod           String?
+  /// NOT_REQUIRED | WAITING | PENDING | SYNCED | FAILED
+  erpBankPaySyncStatus          String?
+  erpBankPaySyncedAt            DateTime?
+  erpBankPayLastError           String?              @db.Text
+  legacyId                      String?
+  legacySource                  String?
+  legacyReference               String?
+  userId                        String?
+  user                          User?                @relation(fields: [userId], references: [id])
+  promoCodeId                   String?
+  promoCode                     PromoCode?           @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
+  promoCodes                    OrderPromoCode[]
+  items                         OrderItem[]
+  referralAttribution           ReferralAttribution?
+  pointsLedger                  PointsLedgerEntry[]
+  legalConsentEvents            LegalConsentEvent[]
+  contractWithdrawals           ContractWithdrawal[]
+  viesCheck                     OrderViesCheck?
+  documents                     OrderDocument[]
+  communications                Communication[]
+  /// Originating shopping-attempt Cart (Option A). SetNull if Cart deleted; Order remains.
+  cartId                        String?              @unique
+  originCart                    Cart?                @relation("OrderOriginCart", fields: [cartId], references: [id], onDelete: SetNull)
+  createdAt                     DateTime             @default(now())
 
   @@unique([legacySource, legacyId])
   @@index([trackingNumber])
@@ -975,6 +1005,7 @@ model Order {
   @@index([status, paymentDueAt])
   @@index([erpAdvanceExternalId])
   @@index([erpStripePayExternalId])
+  @@index([erpBankPayExternalId])
   @@index([createdAt])
   @@index([status, createdAt])
   @@index([status, paymentExpiresAt])
@@ -1037,32 +1068,32 @@ enum CommunicationSource {
 
 /// Outbound transactional / staff email log (Resend). Idempotent via idempotencyKey.
 model Communication {
-  id                String                 @id @default(uuid())
+  id                String                @id @default(uuid())
   orderId           String?
-  order             Order?                 @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  order             Order?                @relation(fields: [orderId], references: [id], onDelete: SetNull)
   userId            String?
-  user              User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user              User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
   audience          CommunicationAudience
   type              CommunicationType
-  source            CommunicationSource    @default(AUTOMATIC)
-  status            CommunicationStatus    @default(PENDING)
+  source            CommunicationSource   @default(AUTOMATIC)
+  status            CommunicationStatus   @default(PENDING)
   /// Durable send gate, e.g. order:{orderId}:manager_order_ready
-  idempotencyKey    String                 @unique
+  idempotencyKey    String                @unique
   toEmail           String?
   subjectSnapshot   String?
-  bodySnapshot      String?                @db.Text
+  bodySnapshot      String?               @db.Text
   locale            String?
   provider          String?
   providerMessageId String?
   orderDocumentId   String?
-  orderDocument     OrderDocument?         @relation(fields: [orderDocumentId], references: [id], onDelete: SetNull)
+  orderDocument     OrderDocument?        @relation(fields: [orderDocumentId], references: [id], onDelete: SetNull)
   /// Backstage staff who sent a MANUAL email (Nest JWT userId).
   createdByUserId   String?
-  createdBy         User?                  @relation("CommunicationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  errorMessage      String?                @db.Text
+  createdBy         User?                 @relation("CommunicationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  errorMessage      String?               @db.Text
   sentAt            DateTime?
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
 
   @@index([orderId, createdAt])
   @@index([userId, createdAt])
@@ -1107,42 +1138,42 @@ enum ContractWithdrawalRefundMethod {
 
 /// Consumer exercise of the right to withdraw from a distance contract (§20a / 108/2024).
 model ContractWithdrawal {
-  id                             String                   @id @default(uuid())
-  referenceNumber                String                   @unique
+  id                             String                          @id @default(uuid())
+  referenceNumber                String                          @unique
   orderId                        String?
-  order                          Order?                   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  order                          Order?                          @relation(fields: [orderId], references: [id], onDelete: SetNull)
   submittedOrderNumber           String
   userId                         String?
-  user                           User?                    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user                           User?                           @relation(fields: [userId], references: [id], onDelete: SetNull)
   customerName                   String
   customerEmail                  String
   customerPhone                  String?
   scope                          ContractWithdrawalScope
-  partialItemsText               String?                  @db.Text
+  partialItemsText               String?                         @db.Text
   locale                         String
   source                         ContractWithdrawalSource
-  status                         ContractWithdrawalStatus @default(SUBMITTED)
-  submittedAt                    DateTime                 @default(now())
+  status                         ContractWithdrawalStatus        @default(SUBMITTED)
+  submittedAt                    DateTime                        @default(now())
   acknowledgementSentAt          DateTime?
   acknowledgementLocale          String?
   acknowledgementSubjectSnapshot String?
-  acknowledgementBodySnapshot    String?                  @db.Text
+  acknowledgementBodySnapshot    String?                         @db.Text
   ipHash                         String?
   /// When goods were marked received (manual ops).
   returnReceivedAt               DateTime?
   /// Manual refund tracking — never triggers Stripe/bank automation.
-  refundRequired                 Boolean                  @default(true)
-  refundAmount                   Decimal?                 @db.Decimal(12, 2)
+  refundRequired                 Boolean                         @default(true)
+  refundAmount                   Decimal?                        @db.Decimal(12, 2)
   refundCurrency                 String?
   refundedAt                     DateTime?
   refundMethod                   ContractWithdrawalRefundMethod?
   refundReference                String?
-  internalNote                   String?                  @db.Text
+  internalNote                   String?                         @db.Text
   processedByUserId              String?
-  processedBy                    User?                    @relation("ContractWithdrawalProcessedBy", fields: [processedByUserId], references: [id], onDelete: SetNull)
+  processedBy                    User?                           @relation("ContractWithdrawalProcessedBy", fields: [processedByUserId], references: [id], onDelete: SetNull)
   lineItems                      ContractWithdrawalLineItem[]
-  createdAt                      DateTime                 @default(now())
-  updatedAt                      DateTime                 @updatedAt
+  createdAt                      DateTime                        @default(now())
+  updatedAt                      DateTime                        @updatedAt
 
   @@index([orderId])
   @@index([userId])
@@ -1177,21 +1208,26 @@ model OrderPromoCode {
 }
 
 model OrderItem {
-  id               String          @id @default(uuid())
-  quantity         Int
+  id                   String          @id @default(uuid())
+  quantity             Int
   /// Exact units decremented from ProductVariant.stock at create (0 for gift/preorder).
-  stockDecremented Int             @default(0)
-  priceAtPurchase  Decimal         @db.Decimal(10, 2)
-  productName      String
+  stockDecremented     Int             @default(0)
+  /// Catalog/quote-basis unit after tiers/discounts/promos (SK inc_vat = gross). Not RC-stripped.
+  priceAtPurchase      Decimal         @db.Decimal(10, 2)
+  /// Payable commercial unit for Flexi cenaMj (RC = net; B2C = same as priceAtPurchase). Null = legacy.
+  commercialUnitPrice  Decimal?        @db.Decimal(16, 6)
+  /// Payable commercial line total; Σ(new rows) === Order.productsSubtotal (pre-referral). Null = legacy.
+  commercialLineAmount Decimal?        @db.Decimal(10, 2)
+  productName          String
   /// Immutable botanical Latin snapshot from Product.latinName at order create (null on legacy rows).
-  latinName        String?
-  productSlug      String
-  variantLabel     String?
-  sku              String?
-  orderId          String
-  order            Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productVariantId String?
-  productVariant   ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+  latinName            String?
+  productSlug          String
+  variantLabel         String?
+  sku                  String?
+  orderId              String
+  order                Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productVariantId     String?
+  productVariant       ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
 }
 
 /// Immutable VIES audit snapshot at order placement (EU B2B reverse charge evidence).
@@ -1233,31 +1269,31 @@ enum WholesaleInquiryStatus {
 
 /// Public wholesale / B2B cooperation leads (storefront form).
 model WholesaleInquiry {
-  id                   String                  @id @default(uuid())
-  status               WholesaleInquiryStatus  @default(NEW)
-  locale               String
-  marketRegion         String
-  fullName             String
-  companyName          String
-  phone                String
-  email                String
-  city                 String
-  website              String?
-  message              String?                 @db.Text
-  companyIco           String?
-  companyVatId         String?
-  consentAt            DateTime?
-  ipHash               String?
+  id                  String                 @id @default(uuid())
+  status              WholesaleInquiryStatus @default(NEW)
+  locale              String
+  marketRegion        String
+  fullName            String
+  companyName         String
+  phone               String
+  email               String
+  city                String
+  website             String?
+  message             String?                @db.Text
+  companyIco          String?
+  companyVatId        String?
+  consentAt           DateTime?
+  ipHash              String?
   /// Flexi Adresar ext id (ext:GA-WHO:{id} or matched existing).
-  externalErpId        String?
-  erpNativeId          String?
-  erpNativeKod         String?
+  externalErpId       String?
+  erpNativeId         String?
+  erpNativeKod        String?
   /// NOT_REQUIRED | PENDING_ERP | SYNCED | FAILED
-  erpSyncStatus        String?
-  erpSyncedAt          DateTime?
-  erpLastErrorMessage  String?                 @db.Text
-  createdAt            DateTime                @default(now())
-  updatedAt            DateTime                @updatedAt
+  erpSyncStatus       String?
+  erpSyncedAt         DateTime?
+  erpLastErrorMessage String?                @db.Text
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
 
   @@index([status, createdAt(sort: Desc)])
   @@index([email, createdAt(sort: Desc)])
@@ -1523,20 +1559,20 @@ model PointsLedgerEntry {
 
 /// EU VAT rates by country (seed + TEDB sync). Manual rows are not overwritten by TEDB.
 model VatCountryRate {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   /// ISO 3166-1 alpha-2 lowercase (sk, cz, de, …)
   countryCode String
   /// standard | reduced
   rateType    String
   percent     Float
   /// CN prefixes that qualify for this reduced rate, e.g. ["0601","0602"]
-  cnPrefixes  String[] @default([])
+  cnPrefixes  String[]  @default([])
   /// tedb | manual | seed
-  source      String   @default("seed")
-  validFrom   DateTime @default(now())
+  source      String    @default("seed")
+  validFrom   DateTime  @default(now())
   syncedAt    DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@unique([countryCode, rateType, percent])
   @@index([countryCode, rateType])
@@ -1600,29 +1636,29 @@ enum LegalConsentAction {
 
 /// Immutable published legal texts (GDPR accountability). Edits create a new revision.
 model LegalDocument {
-  id        String                   @id @default(uuid())
-  type      LegalDocumentType        @unique
-  createdAt DateTime                 @default(now())
-  updatedAt DateTime                 @updatedAt
+  id        String                  @id @default(uuid())
+  type      LegalDocumentType       @unique
+  createdAt DateTime                @default(now())
+  updatedAt DateTime                @updatedAt
   revisions LegalDocumentRevision[]
 }
 
 model LegalDocumentRevision {
-  id            String               @id @default(uuid())
+  id            String              @id @default(uuid())
   documentId    String
-  document      LegalDocument        @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  document      LegalDocument       @relation(fields: [documentId], references: [id], onDelete: Restrict)
   locale        String
   version       Int
   title         String
-  intro         String               @db.Text
-  content       String               @db.Text
+  intro         String              @db.Text
+  content       String              @db.Text
   contentHash   String
-  status        LegalRevisionStatus  @default(DRAFT)
-  effectiveAt   DateTime             @default(now())
+  status        LegalRevisionStatus @default(DRAFT)
+  effectiveAt   DateTime            @default(now())
   publishedAt   DateTime?
   createdById   String?
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
   consentEvents LegalConsentEvent[]
 
   @@unique([documentId, locale, version])
@@ -1632,11 +1668,11 @@ model LegalDocumentRevision {
 
 /// Append-only consent / acknowledgement log. Withdrawal inserts a new row.
 model LegalConsentEvent {
-  id                 String              @id @default(uuid())
+  id                 String                @id @default(uuid())
   userId             String?
-  user               User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user               User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
   orderId            String?
-  order              Order?              @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  order              Order?                @relation(fields: [orderId], references: [id], onDelete: SetNull)
   anonymousConsentId String?
   revisionId         String
   revision           LegalDocumentRevision @relation(fields: [revisionId], references: [id], onDelete: Restrict)
@@ -1646,7 +1682,7 @@ model LegalConsentEvent {
   source             String
   documentHash       String
   metadata           Json?
-  occurredAt         DateTime            @default(now())
+  occurredAt         DateTime              @default(now())
 
   @@index([userId, occurredAt])
   @@index([anonymousConsentId, occurredAt])
@@ -1658,9 +1694,9 @@ model LegalConsentEvent {
 /// REL-004: Stripe webhook event.id dedupe (Mono untouched).
 model StripeWebhookEvent {
   /// Stripe Event.id (evt_…)
-  id          String   @id
-  type        String
-  createdAt   DateTime @default(now())
+  id        String   @id
+  type      String
+  createdAt DateTime @default(now())
 
   @@index([createdAt])
 }

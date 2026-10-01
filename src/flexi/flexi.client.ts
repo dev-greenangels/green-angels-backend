@@ -957,6 +957,29 @@ export class FlexiClient {
   }
 
   /**
+   * ERP-EU-CORE: lookup Stripe clearing banka by our ext id (GET-before-create).
+   * Same path-filter class as fetchFakturaVydanaByExtId / fetchObjednavkaByExtId.
+   */
+  async fetchBankaByExtId(extId: string): Promise<Record<string, unknown> | null> {
+    const trimmed = extId.trim()
+    if (!trimmed) return null
+    const filter = encodeURIComponent(`id='${this.escapeFlexiLiteral(trimmed)}'`)
+    const path = `/banka/(${filter}).json?detail=custom:id,kod,sumOsv,sumCelkem,varSym,konSym,datVyst,banka,rada,typPohybuK`
+    try {
+      const payload = await this.request<unknown>('GET', path)
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'banka')
+      return rows[0] ?? null
+    } catch (error) {
+      this.logger.debug(
+        `fetchBankaByExtId(${extId}) failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+      return null
+    }
+  }
+
+  /**
    * ERP-EU-CORE: Stripe clearing bank record (`banka` evidence). Used to record the
    * incoming card payment and pair it (sparovani) against the advance invoice.
    */

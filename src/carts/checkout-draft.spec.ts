@@ -6,6 +6,7 @@ import { resolve } from 'node:path'
 import {
   normalizeCheckoutDraft,
   parseStoredCheckoutDraft,
+  resolveBackstageCheckoutTotals,
   summarizeCheckoutDraft,
 } from './checkout-draft'
 
@@ -36,6 +37,31 @@ describe('checkout draft normalize', () => {
     assert.equal('privacyConsent' in draft, false)
     assert.equal('productsSubtotal' in draft, false)
     assert.equal('viesValid' in draft, false)
+  })
+
+  it('keeps nested lastQuote for BO informational display', () => {
+    const draft = normalizeCheckoutDraft({
+      v: 1,
+      email: 'a@b.c',
+      lastQuote: {
+        quotedAt: '2026-10-01T12:00:00.000Z',
+        currencyCode: 'eur',
+        deliveryAmount: 3.5,
+        packagingAmount: 1,
+        taxAmount: 2,
+        grandTotal: 45.5,
+        productsSubtotal: 40,
+      },
+      totalAmount: 999,
+      productsSubtotal: 99,
+    })
+    assert.ok(draft)
+    assert.equal('totalAmount' in draft, false)
+    assert.equal('productsSubtotal' in draft, false)
+    assert.ok(draft.lastQuote)
+    assert.equal(draft.lastQuote.currencyCode, 'EUR')
+    assert.equal(draft.lastQuote.deliveryAmount, 3.5)
+    assert.equal(draft.lastQuote.grandTotal, 45.5)
   })
 
   it('null/invalid stored draft → null', () => {
@@ -89,5 +115,56 @@ describe('draft isolation from order path (contract)', () => {
     assert.equal('stripeClientSecret' in draft, false)
     assert.equal('paymentIntentId' in draft, false)
     assert.equal('totalAmount' in draft, false)
+  })
+})
+
+describe('resolveBackstageCheckoutTotals', () => {
+  it('prefers Order over lastQuote', () => {
+    const view = resolveBackstageCheckoutTotals({
+      order: {
+        deliveryAmount: 5,
+        totalAmount: 100,
+        currency: 'EUR',
+      },
+      checkoutDraft: {
+        v: 1,
+        lastQuote: {
+          quotedAt: '2026-10-01T12:00:00.000Z',
+          currencyCode: 'HUF',
+          deliveryAmount: 1,
+          grandTotal: 2,
+        },
+      },
+    })
+    assert.equal(view.basis, 'order')
+    assert.equal(view.grandTotal, 100)
+    assert.equal(view.currencyCode, 'EUR')
+  })
+
+  it('uses last_quote_informational when no order', () => {
+    const view = resolveBackstageCheckoutTotals({
+      order: null,
+      checkoutDraft: {
+        v: 1,
+        lastQuote: {
+          quotedAt: '2026-10-01T12:00:00.000Z',
+          currencyCode: 'EUR',
+          deliveryAmount: 3.5,
+          grandTotal: 45.5,
+        },
+      },
+    })
+    assert.equal(view.basis, 'last_quote_informational')
+    assert.equal(view.deliveryAmount, 3.5)
+    assert.equal(view.grandTotal, 45.5)
+  })
+
+  it('none when no order and no lastQuote', () => {
+    const view = resolveBackstageCheckoutTotals({
+      order: null,
+      checkoutDraft: { v: 1, email: 'a@b.c' },
+    })
+    assert.equal(view.basis, 'none')
+    assert.equal(view.grandTotal, null)
   })
 })

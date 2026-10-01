@@ -60,6 +60,10 @@ export class PricingController {
       cnCode,
       buyerType: dto.buyerType,
       vatCountryCode: dto.vatCountryCode,
+      // Preview only: client viesValid can affect quote display, but
+      // isIntraEuB2bGoodsEligible still requires EU delivery ≠ SK, so a forged
+      // viesValid cannot unlock intra-EU 0% for SK/CH/GB/UA ship-to.
+      // Order create re-validates VIES server-side and ignores client viesValid.
       viesValid: dto.viesValid,
       fallbackTaxRatePercent: cartSettings.taxRatePercent,
       fallbackTaxIncluded: cartSettings.taxIncluded,

@@ -454,14 +454,19 @@ export class UsersService {
         deliveryStreet: order.deliveryStreet,
         deliveryHouseNumber: order.deliveryHouseNumber,
         items: order.items.map((item) => {
+          const price = Number(item.priceAtPurchase)
+          const commercialLine =
+            item.commercialLineAmount != null ? Number(item.commercialLineAmount) : null
           const lineTotal =
-            Math.round(Number(item.priceAtPurchase) * item.quantity * 100) / 100
+            commercialLine != null
+              ? commercialLine
+              : Math.round(price * item.quantity * 100) / 100
           return {
             id: item.id,
             productName: item.productName,
             variantLabel: item.variantLabel,
             quantity: item.quantity,
-            priceAtPurchase: Number(item.priceAtPurchase),
+            priceAtPurchase: price,
             lineTotal,
           }
         }),

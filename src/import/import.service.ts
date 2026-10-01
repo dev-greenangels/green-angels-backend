@@ -1389,6 +1389,10 @@ export class ImportService {
             orderId: order.id,
             quantity,
             priceAtPurchase: price,
+            // Legacy import: commercial = catalog basis (same as price). RC SK
+            // historical imports without strip evidence stay review-blocked on Flexi.
+            commercialUnitPrice: price,
+            commercialLineAmount: Math.round(price * quantity * 100) / 100,
             productName,
             productSlug: product?.slug ?? `legacy-${productLegacyId || 'unknown'}`,
             sku: variant?.sku ?? null,

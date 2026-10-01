@@ -36,6 +36,14 @@ describe('merge quantity semantics (source contract)', () => {
     )
   })
 
+  it('applyMerge applies resolveSourceContextAfterMerge (origin ownership)', () => {
+    assert.match(cartsSrc, /resolveSourceContextAfterMerge/)
+    assert.match(
+      cartsSrc,
+      /async applyMerge[\s\S]*resolveSourceContextAfterMerge[\s\S]*countrySiteCode:/,
+    )
+  })
+
   it('applyMerge deletes guest cart and clears guest cookie', () => {
     assert.match(cartsSrc, /async applyMerge[\s\S]*cart\.delete[\s\S]*clearGuestSessionCookie/)
   })
@@ -58,6 +66,14 @@ describe('backstage pagination (source contract)', () => {
   it('listBackstage exposes piiCleanupAt derived fields', () => {
     assert.match(cartsSrc, /piiCleanupAt/)
     assert.match(cartsSrc, /buildCheckoutDraftPiiMeta/)
+  })
+
+  it('listBackstage exposes origin source context + conversion + progress', () => {
+    assert.match(cartsSrc, /countrySiteCode: cart\.countrySiteCode/)
+    assert.match(cartsSrc, /sourceHost: cart\.sourceHost/)
+    assert.match(cartsSrc, /checkoutProgress/)
+    assert.match(cartsSrc, /convertedOrder/)
+    assert.match(cartsSrc, /deriveCartCheckoutProgress/)
   })
 
   it('filters applied in buildBackstageWhere before pagination', () => {
@@ -164,8 +180,9 @@ describe('cart lifecycle regression contracts', () => {
     assert.match(cartsSrc, /clearCartContentsForOwner/)
   })
 
-  it('post-order clear is server-side via CartsService', () => {
-    assert.match(ordersService, /clearCartContentsForOwner/)
+  it('post-order close is server-side via CartsService.closeCartForOrder', () => {
+    assert.match(ordersService, /closeCartForOrder/)
+    assert.match(ordersService, /cartId:\s*originatingCartId/)
   })
 
   it('login merge triggered from CartProvider (frontend)', () => {

@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 
 import {
   advanceExternalId,
+  bankPayExternalId,
   isBankPaymentMethod,
   isCardPaymentMethod,
   isCodPaymentMethod,
@@ -100,6 +101,10 @@ describe('external id builders', () => {
 
   it('stripePayExternalId: stable ext:GA:STRIPEPAY:{orderId}', () => {
     assert.equal(stripePayExternalId('order-123'), 'ext:GA:STRIPEPAY:order-123')
+  })
+
+  it('bankPayExternalId: stable ext:GA:BANKPAY:{orderId}', () => {
+    assert.equal(bankPayExternalId('order-123'), 'ext:GA:BANKPAY:order-123')
   })
 
   it('wholesaleAdresarExtId: stable ext:GA-WHO:{inquiryId}', () => {

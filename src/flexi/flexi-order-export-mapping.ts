@@ -3,6 +3,7 @@ import {
   resolvePackagingCommercialLines,
   type PackagingCommercialLine,
 } from '../pricing/packaging-commercial-lines'
+import { roundMoney } from '../pricing/pricing.helpers'
 
 export const PAYMENT_METHOD_TO_FLEXI_CODE: Record<string, string> = {
   'card-online': 'KARTA',
@@ -32,6 +33,24 @@ export function toFlexiRelationCode(abbreviation: string | null | undefined): st
   const kod = abbreviation?.trim()
   if (!kod) return undefined
   return `code:${kod}`
+}
+
+/** EU e-shop default: Slovak KS 0008 = Platby za tovar. Not banka.kod. */
+export const DEFAULT_SALES_CONSTANT_SYMBOL = '0008'
+
+/**
+ * Canonical sales constant symbol (KS) for e-shop documents.
+ * Empty/missing → DEFAULT_SALES_CONSTANT_SYMBOL.
+ */
+export function resolveSalesConstantSymbol(value?: string | null): string {
+  const trimmed = (value ?? '').trim()
+  if (!trimmed) return DEFAULT_SALES_CONSTANT_SYMBOL
+  return trimmed.replace(/^code:/i, '')
+}
+
+/** Flexi relation form: `code:0008`. Never invent banka.kod from this. */
+export function toFlexiKonSymRef(value?: string | null): string {
+  return `code:${resolveSalesConstantSymbol(value)}`
 }
 
 export function mapPaymentMethodToFlexiCode(paymentMethod: string): string | undefined {
@@ -69,6 +88,8 @@ export type FlexiOrderExportMappingInput = {
   deliveryMethod: string
   deliveryBranch?: string | null
   deliveryMethodCodes: Record<string, string>
+  /** KS / konSym (default 0008). */
+  salesConstantSymbol?: string | null
 }
 
 /** Order address fields used for Flexi document + Adresar sídlo. */
@@ -466,16 +487,142 @@ export type FlexiAncillaryExportLine = {
  * References Ceník by SKU code only — do NOT send `nazev`.
  * ABRA fills the line name from the Ceník item (Latin botanical name is SoT in ABRA).
  * Variant identity is the SKU/Ceník kod itself (each size has its own kod).
+ *
+ * `cenaMj` MUST be the payable commercial unit (OrderItem.commercialUnitPrice),
+ * never a live ProductPrice / ceník recalculation.
  */
 export function buildFlexiCatalogProductLine(item: {
   sku: string
   quantity: number
-  priceAtPurchase: number
+  /** Payable commercial unit → Flexi cenaMj. */
+  cenaMj: number
 }): { cenik: string; mnozMj: number; cenaMj: number } {
   return {
     cenik: `code:${item.sku.trim()}`,
     mnozMj: item.quantity,
-    cenaMj: item.priceAtPurchase,
+    cenaMj: item.cenaMj,
+  }
+}
+
+export type FlexiProductCenaMjSource = 'commercial' | 'priceAtPurchase_legacy'
+
+export type ResolveFlexiProductCenaMjResult =
+  | { ok: true; cenaMj: number; source: FlexiProductCenaMjSource }
+  | { ok: false; message: string }
+
+/**
+ * Resolves Flexi product cenaMj from OrderItem commercial snapshot.
+ *
+ * - Prefer commercialUnitPrice (immutable payable unit).
+ * - Legacy non-RC: fall back to priceAtPurchase (historically = payable gross).
+ * - Legacy RC without commercial snapshot: refuse — never export gross as net.
+ */
+export function resolveFlexiProductCenaMj(input: {
+  taxRegime?: string | null
+  priceAtPurchase: number
+  commercialUnitPrice?: number | null
+  commercialLineAmount?: number | null
+}): ResolveFlexiProductCenaMjResult {
+  const isReverseCharge = (input.taxRegime ?? '').trim() === 'reverse_charge'
+  const commercialUnit =
+    input.commercialUnitPrice != null && Number.isFinite(Number(input.commercialUnitPrice))
+      ? Number(input.commercialUnitPrice)
+      : null
+
+  if (commercialUnit != null) {
+    return { ok: true, cenaMj: commercialUnit, source: 'commercial' }
+  }
+
+  if (isReverseCharge) {
+    return {
+      ok: false,
+      message:
+        'Зворотне оподаткування: відсутній комерційний знімок OrderItem (commercialUnitPrice). ' +
+        'Повторний експорт у Flexi заблоковано — не можна підставити priceAtPurchase (брутто) як нетто.',
+    }
+  }
+
+  const legacy = Number(input.priceAtPurchase)
+  if (!Number.isFinite(legacy)) {
+    return { ok: false, message: 'Некоректна ціна позиції замовлення для експорту в Flexi.' }
+  }
+  return { ok: true, cenaMj: legacy, source: 'priceAtPurchase_legacy' }
+}
+
+/** Document + line typCenyDphK: RC uses bezDph (net cenaMj); else sDph (gross). */
+export function resolveFlexiTypCenyDphK(taxRegime?: string | null): string {
+  return (taxRegime ?? '').trim() === 'reverse_charge'
+    ? 'typCeny.bezDph'
+    : 'typCeny.sDph'
+}
+
+/**
+ * Pre-export parity: Σ (cenaMj × mnozMj) over Flexi lines must equal the Order
+ * commercial components Flexi represents (products + delivery + packaging + COD),
+ * not loyalty reductions that have no Flexi line.
+ */
+export function sumFlexiPayloadCommercialTotal(
+  lines: Array<{ cenaMj: number; mnozMj: number }>,
+): number {
+  return roundMoney(
+    lines.reduce((sum, line) => sum + Number(line.cenaMj) * Number(line.mnozMj), 0),
+  )
+}
+
+export function resolveOrderFlexiRepresentedTotal(input: {
+  productsSubtotal: number | null | undefined
+  deliveryAmount: number | null | undefined
+  packagingAmount: number | null | undefined
+  codFeeAmount: number | null | undefined
+}): number {
+  const products =
+    input.productsSubtotal != null && Number.isFinite(Number(input.productsSubtotal))
+      ? Math.max(0, Number(input.productsSubtotal))
+      : 0
+  const delivery =
+    input.deliveryAmount != null && Number.isFinite(Number(input.deliveryAmount))
+      ? Math.max(0, Number(input.deliveryAmount))
+      : 0
+  const packaging =
+    input.packagingAmount != null && Number.isFinite(Number(input.packagingAmount))
+      ? Math.max(0, Number(input.packagingAmount))
+      : 0
+  const cod =
+    input.codFeeAmount != null && Number.isFinite(Number(input.codFeeAmount))
+      ? Math.max(0, Number(input.codFeeAmount))
+      : 0
+  return roundMoney(products + delivery + packaging + cod)
+}
+
+export type FlexiCommercialParityResult =
+  | { ok: true; payloadTotal: number; expectedTotal: number }
+  | {
+      ok: false
+      message: string
+      payloadTotal: number
+      expectedTotal: number
+    }
+
+/** Soft tolerance for float noise; money is 2dp so 0.005 catches true mismatches. */
+export const FLEXI_COMMERCIAL_TOTAL_TOLERANCE = 0.005
+
+export function assertFlexiCommercialTotalParity(input: {
+  lines: Array<{ cenaMj: number; mnozMj: number }>
+  expectedTotal: number
+}): FlexiCommercialParityResult {
+  const payloadTotal = sumFlexiPayloadCommercialTotal(input.lines)
+  const expectedTotal = roundMoney(input.expectedTotal)
+  const delta = Math.abs(payloadTotal - expectedTotal)
+  if (delta <= FLEXI_COMMERCIAL_TOTAL_TOLERANCE) {
+    return { ok: true, payloadTotal, expectedTotal }
+  }
+  return {
+    ok: false,
+    payloadTotal,
+    expectedTotal,
+    message:
+      `Flexi commercial total ${payloadTotal.toFixed(2)} ≠ Order represented total ` +
+      `${expectedTotal.toFixed(2)} (Δ ${delta.toFixed(4)}). Експорт зупинено.`,
   }
 }
 
@@ -591,6 +738,7 @@ export function applyFlexiOrderHeaderMapping(
   input: FlexiOrderExportMappingInput,
 ): void {
   document.datObj = flexiIsoDate(input.createdAt)
+  document.konSym = toFlexiKonSymRef(input.salesConstantSymbol)
 
   const paymentCode = mapPaymentMethodToFlexiCode(input.paymentMethod)
   const paymentRef = toFlexiRelationCode(paymentCode)

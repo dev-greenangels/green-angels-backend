@@ -200,6 +200,14 @@ export class OrderPaymentLifecycleService {
           }`,
         )
       })
+      // Website already SUCCESS — BANKPAY soft-fails into erpBankPay* without reverting payment.
+      void this.flexi.registerBankMatchPayment(orderId).catch((err) => {
+        this.logger.warn(
+          `Flexi BANKPAY after bank paid failed for ${orderId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
     }
 
     return { handled: 'paid' }

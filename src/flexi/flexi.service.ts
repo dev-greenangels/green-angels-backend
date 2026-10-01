@@ -18,6 +18,7 @@ import {
 import { resolveErpSyncStatus } from '../orders/erp-sync.constants'
 import {
   advanceExternalId,
+  bankPayExternalId,
   isBankPaymentMethod,
   isCardPaymentMethod,
   isCodPaymentMethod,
@@ -27,10 +28,16 @@ import {
   wholesaleAdresarExtId,
 } from '../orders/order-dispatch-dates'
 import { formatEuVatId } from '../vies/vies.types'
+import {
+  buildViesPoznamBlock,
+  upsertViesPoznamBlock,
+  type FlexiViesPoznamStatus,
+} from './flexi-vies-poznam'
 import { FLEXI_ORDER_CONFLICT_USER_STATUS, FLEXI_ORDER_STORNO_USER_STATUS, FLEXI_CENIK_QUERY_BATCH, FLEXI_STOCK_FILTER_CHUNK, isFlexiMissingRecordError, isImplementedFlexiEvidence, normalizeFlexiEvidence } from './flexi.constants'
 import {
   applyFlexiBankAccountMapping,
   applyFlexiOrderHeaderMapping,
+  assertFlexiCommercialTotalParity,
   buildFlexiAncillaryExportLines,
   buildFlexiCatalogProductLine,
   mapPaymentMethodToFlexiCode,
@@ -40,8 +47,16 @@ import {
   resolveFlexiDocumentStatCode,
   resolveFlexiLineVatFields,
   resolveFlexiOrderAddressMapping,
+  resolveFlexiProductCenaMj,
+  resolveFlexiTypCenyDphK,
+  resolveOrderFlexiRepresentedTotal,
+  toFlexiKonSymRef,
   toFlexiRelationCode,
 } from './flexi-order-export-mapping'
+import {
+  buildIncomingClearingBankaDocument,
+  buildStripeClearingBankaDocument,
+} from './flexi-stripe-clearing-banka'
 import { parseSizeLabel } from './flexi-size-label'
 import {
   isLocalOnlyWebhookUrl,
@@ -1834,36 +1849,47 @@ export class FlexiService {
     const taxRate = order.taxRatePercent != null ? Number(order.taxRatePercent) : null
     const taxRegime = (order.taxRegime ?? '').trim()
     const isReverseCharge = taxRegime === 'reverse_charge'
+    const typCenyDphK = resolveFlexiTypCenyDphK(order.taxRegime)
     const lineVat = resolveFlexiLineVatFields({
       taxRegime: order.taxRegime,
       taxRatePercent: order.taxRatePercent,
     })
 
     const applyLineVat = (line: Record<string, unknown>) => {
-      // Abra main prices include VAT
-      line.typCenyDphK = 'typCeny.sDph'
+      line.typCenyDphK = typCenyDphK
       if (lineVat.szbDph != null) line.szbDph = lineVat.szbDph
       if (lineVat.typSzbDph) line.typSzbDph = lineVat.typSzbDph
     }
 
-    const lines = order.items
-      .filter((item) => item.sku?.trim())
-      .map((item) => {
-        const line: Record<string, unknown> = {
-          ...buildFlexiCatalogProductLine({
-            sku: item.sku!,
-            quantity: item.quantity,
-            priceAtPurchase: Number(item.priceAtPurchase),
-          }),
-          rezervovat: reserveLines,
-          rezervovatMj: reserveLines ? item.quantity : 0,
-        }
-        if (useStock) {
-          line.sklad = `code:${stockCode}`
-        }
-        applyLineVat(line)
-        return line
+    const lines: Record<string, unknown>[] = []
+    for (const item of order.items) {
+      if (!item.sku?.trim()) continue
+      const cena = resolveFlexiProductCenaMj({
+        taxRegime: order.taxRegime,
+        priceAtPurchase: Number(item.priceAtPurchase),
+        commercialUnitPrice:
+          item.commercialUnitPrice != null ? Number(item.commercialUnitPrice) : null,
+        commercialLineAmount:
+          item.commercialLineAmount != null ? Number(item.commercialLineAmount) : null,
       })
+      if (!cena.ok) {
+        return { ok: false, message: cena.message }
+      }
+      const line: Record<string, unknown> = {
+        ...buildFlexiCatalogProductLine({
+          sku: item.sku,
+          quantity: item.quantity,
+          cenaMj: cena.cenaMj,
+        }),
+        rezervovat: reserveLines,
+        rezervovatMj: reserveLines ? item.quantity : 0,
+      }
+      if (useStock) {
+        line.sklad = `code:${stockCode}`
+      }
+      applyLineVat(line)
+      lines.push(line)
+    }
 
     const deliveryAmount = order.deliveryAmount != null ? Number(order.deliveryAmount) : 0
     const packagingAmount = order.packagingAmount != null ? Number(order.packagingAmount) : 0
@@ -1894,6 +1920,38 @@ export class FlexiService {
 
     if (lines.length === 0) {
       return { ok: false, message: 'Немає позицій із SKU для експорту в Flexi.' }
+    }
+
+    const productItems = order.items.filter((item) => item.sku?.trim())
+    const allCommercial =
+      productItems.length > 0 &&
+      productItems.every((item) => item.commercialLineAmount != null)
+    const productsForParity = allCommercial
+      ? productItems.reduce(
+          (sum, item) => sum + Number(item.commercialLineAmount),
+          0,
+        )
+      : order.productsSubtotal != null
+        ? Number(order.productsSubtotal)
+        : null
+    const expectedFlexiTotal = resolveOrderFlexiRepresentedTotal({
+      productsSubtotal: productsForParity,
+      deliveryAmount:
+        order.deliveryAmount != null ? Number(order.deliveryAmount) : null,
+      packagingAmount:
+        order.packagingAmount != null ? Number(order.packagingAmount) : null,
+      codFeeAmount: order.codFeeAmount != null ? Number(order.codFeeAmount) : null,
+    })
+    const parity = assertFlexiCommercialTotalParity({
+      lines: lines.map((line) => ({
+        cenaMj: Number(line.cenaMj),
+        mnozMj: Number(line.mnozMj),
+      })),
+      expectedTotal: expectedFlexiTotal,
+    })
+    if (!parity.ok) {
+      this.logger.error(`exportOrder(${orderId}): ${parity.message}`)
+      return { ok: false, message: parity.message }
     }
 
     const isB2b = Boolean(order.companyIco?.trim() || order.companyVatId?.trim())
@@ -1979,24 +2037,32 @@ export class FlexiService {
 
     const fullBuyerVatId = formatEuVatId(order.vatCountryCode, order.companyVatId)
     const vies = order.viesCheck
+    // Non-VIES operational notes first; VIES goes into a marked [GA:VIES] block.
+    let poznam = notes.join('\n')
     if (vies) {
-      notes.push(
-        `VIES ${vies.valid === true ? 'valid' : vies.valid === false ? 'invalid' : 'unavailable'} @ ${vies.checkedAt.toISOString()}`,
-      )
-      if (fullBuyerVatId) notes.push(`Buyer VAT: ${fullBuyerVatId}`)
-      if (vies.requestIdentifier) notes.push(`VIES consultation: ${vies.requestIdentifier}`)
-      if (vies.registeredName) notes.push(`VIES name: ${vies.registeredName}`)
+      const viesStatus: FlexiViesPoznamStatus =
+        vies.valid === true ? 'VALID' : vies.valid === false ? 'INVALID' : 'ERROR'
+      const viesBody = buildViesPoznamBlock({
+        status: viesStatus,
+        buyerVatId: fullBuyerVatId,
+        checkedAtIso: vies.checkedAt.toISOString(),
+        requestIdentifier: vies.requestIdentifier,
+        registeredName: vies.registeredName,
+        taxRegime: order.taxRegime,
+        verifiedAfterOrderCreation: false,
+      })
+      poznam = upsertViesPoznamBlock(poznam, viesBody)
     }
 
     const document: Record<string, unknown> = {
       id: extId,
       typDokl: `code:${settings.orderDocTypeCode}`,
-      typCenyDphK: 'typCeny.sDph',
+      typCenyDphK,
       datVyst: order.createdAt.toISOString().slice(0, 10),
       cisDosle: orderNumberLabel,
       varSym: String(order.orderNumber),
       popis: `E-shop ${orderNumberLabel}`,
-      poznam: notes.join('\n'),
+      poznam,
       kontaktJmeno: hasDifferentReceiver ? receiverName : contactName,
       kontaktEmail: order.customerEmail ?? '',
       kontaktTel: hasDifferentReceiver ? order.receiverPhone : order.customerPhone,
@@ -2055,6 +2121,7 @@ export class FlexiService {
       deliveryMethod: order.deliveryMethod,
       deliveryBranch: order.deliveryBranch,
       deliveryMethodCodes: settings.deliveryMethodCodes,
+      salesConstantSymbol: settings.salesConstantSymbol,
     })
 
     applyFlexiBankAccountMapping(document, {
@@ -2674,6 +2741,84 @@ export class FlexiService {
   }
 
   /**
+   * Narrow Received Order `poznam` update after VIES retry — AUDIT NOTE ONLY.
+   * Never calls exportOrder; never mutates lines / VAT / payment docs.
+   * Soft-fails: caller must keep VIES audit result even when this returns ok:false.
+   */
+  async syncOrderViesPoznamNote(orderId: string): Promise<{
+    ok: boolean
+    skipped?: boolean
+    message: string
+  }> {
+    const configured = await this.isConfigured()
+    if (!configured) {
+      return { ok: false, skipped: true, message: 'ABRA Flexi не налаштовано.' }
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { viesCheck: true },
+    })
+    if (!order) {
+      return { ok: false, message: 'Замовлення не знайдено.' }
+    }
+    if (!order.viesCheck) {
+      return { ok: true, skipped: true, message: 'Немає OrderViesCheck — poznam не оновлюється.' }
+    }
+
+    const flexiId = order.externalErpId?.trim() || order.erpNativeId?.trim() || ''
+    if (!flexiId) {
+      return {
+        ok: true,
+        skipped: true,
+        message: 'Замовлення ще не експортовано в ABRA — VIES note sync пропущено.',
+      }
+    }
+
+    const viesStatus: FlexiViesPoznamStatus =
+      order.viesCheck.valid === true
+        ? 'VALID'
+        : order.viesCheck.valid === false
+          ? 'INVALID'
+          : 'ERROR'
+
+    const viesBody = buildViesPoznamBlock({
+      status: viesStatus,
+      buyerVatId: formatEuVatId(order.vatCountryCode, order.companyVatId),
+      checkedAtIso: order.viesCheck.checkedAt.toISOString(),
+      requestIdentifier: order.viesCheck.requestIdentifier,
+      registeredName: order.viesCheck.registeredName,
+      taxRegime: order.taxRegime,
+      verifiedAfterOrderCreation: true,
+    })
+
+    try {
+      const existingDoc = await this.client.fetchObjednavkaByExtId(
+        order.externalErpId?.trim() || `ext:GA:${order.id}`,
+      )
+      if (!existingDoc) {
+        return {
+          ok: false,
+          message: 'Документ ABRA не знайдено для оновлення poznam (GET-by-ext).',
+        }
+      }
+      const existingPoznam =
+        typeof existingDoc.poznam === 'string' ? existingDoc.poznam : ''
+      const poznam = upsertViesPoznamBlock(existingPoznam, viesBody)
+
+      await this.client.putObjednavkaPrijata({
+        id: flexiId,
+        poznam,
+      })
+      return { ok: true, message: 'VIES poznam оновлено в ABRA (вузький PUT).' }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`syncOrderViesPoznamNote(${orderId}): ${message}`)
+      return { ok: false, message }
+    }
+  }
+
+  /**
    * ERP-EU-CORE: soft-call after a successful (non-exception) SYNCED export.
    * Never throws — exportOrder must succeed regardless of advance/clearing outcome.
    */
@@ -2688,6 +2833,17 @@ export class FlexiService {
       }
       if (isBankPaymentMethod(order.paymentMethod)) {
         await this.createAdvanceInvoice(order.id)
+        if (order.paymentStatus !== 'success') {
+          await this.prisma.order
+            .update({
+              where: { id: order.id },
+              data: {
+                erpBankPaySyncStatus: 'WAITING',
+                erpBankPayLastError: null,
+              },
+            })
+            .catch(() => {})
+        }
         return
       }
       if (isCardPaymentMethod(order.paymentMethod) && order.paymentStatus === 'success') {
@@ -2789,6 +2945,7 @@ export class FlexiService {
       typDokl: `code:${settings.advanceDocTypeCode}`,
       procent: 100,
       varSym: String(order.orderNumber),
+      konSym: toFlexiKonSymRef(settings.salesConstantSymbol),
     }
     if (paymentRef) zaloha.formaUhradyCis = paymentRef
     if (bankCode) zaloha.bankovniUcet = toFlexiRelationCode(bankCode)
@@ -2851,7 +3008,8 @@ export class FlexiService {
    * ERP-EU-CORE: Stripe-only. Records the clearing payment as a `banka` document and pairs
    * it (sparovani) against the advance invoice. Skips silently for non-card / unpaid orders.
    * Soft-fails (log + erpStripePaySyncStatus=FAILED) when stripeClearingBankDocTypeCode is
-   * unconfigured or the advance is missing — never throws.
+   * unconfigured or the advance is missing — never throws. Isolated from Received Order /
+   * ZÁLOHA success.
    */
   async registerMatchPayment(orderId: string): Promise<{
     ok: boolean
@@ -2873,8 +3031,12 @@ export class FlexiService {
         orderNumber: true,
         paymentMethod: true,
         paymentStatus: true,
+        totalAmount: true,
+        currency: true,
+        paidAt: true,
         erpAdvanceExternalId: true,
         erpAdvanceNativeId: true,
+        erpAdvanceKod: true,
         erpStripePayExternalId: true,
         erpStripePayNativeId: true,
         erpStripePaySyncStatus: true,
@@ -2900,6 +3062,38 @@ export class FlexiService {
       }
     }
 
+    const stripeExtId = stripePayExternalId(order.id)
+
+    // GET-before-create — idempotent on webhook / ERP retry / page refresh.
+    try {
+      const existing = await this.client.fetchBankaByExtId(stripeExtId)
+      if (existing) {
+        const nativeId = existing.id != null ? String(existing.id).trim() || null : null
+        await this.prisma.order.update({
+          where: { id: order.id },
+          data: {
+            erpStripePayExternalId: stripeExtId,
+            erpStripePayNativeId: nativeId,
+            erpStripePaySyncStatus: 'SYNCED',
+            erpStripePayLastError: null,
+          },
+        })
+        return {
+          ok: true,
+          skipped: true,
+          externalId: stripeExtId,
+          nativeId: nativeId ?? undefined,
+          message: 'Stripe clearing вже існує в ABRA Flexi (GET-by-ext).',
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `registerMatchPayment(${orderId}) GET-before-PUT: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+
     const docTypeCode = settings.stripeClearingBankDocTypeCode.trim()
     if (!docTypeCode) {
       const message =
@@ -2914,37 +3108,87 @@ export class FlexiService {
       return { ok: false, message }
     }
 
-    const advanceRef = order.erpAdvanceNativeId?.trim() || order.erpAdvanceExternalId?.trim()
-    if (!advanceRef) {
-      const message = 'Немає зальогової фактури для sparovani — Stripe clearing пропущено.'
-      this.logger.warn(`registerMatchPayment(${orderId}): ${message}`)
+    let document: Record<string, unknown>
+    try {
+      document = buildStripeClearingBankaDocument({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        totalAmount: Number(order.totalAmount),
+        currency: order.currency,
+        paidAt: order.paidAt,
+        stripeClearingBankDocTypeCode: docTypeCode,
+        bankAccountCodeCard: settings.bankAccountCodeCard,
+        salesConstantSymbol: settings.salesConstantSymbol,
+        erpAdvanceKod: order.erpAdvanceKod,
+        erpAdvanceExternalId: order.erpAdvanceExternalId,
+        erpAdvanceNativeId: order.erpAdvanceNativeId,
+      })
+    } catch (buildError) {
+      const message =
+        buildError instanceof Error
+          ? buildError.message
+          : 'Немає зальогової фактури для sparovani — Stripe clearing пропущено.'
+      const userMessage = message.includes('advance')
+        ? 'Немає зальогової фактури для sparovani — Stripe clearing пропущено.'
+        : message
+      this.logger.warn(`registerMatchPayment(${orderId}): ${userMessage}`)
       await this.prisma.order
         .update({
           where: { id: order.id },
-          data: { erpStripePaySyncStatus: 'FAILED', erpStripePayLastError: message },
+          data: { erpStripePaySyncStatus: 'FAILED', erpStripePayLastError: userMessage },
         })
         .catch(() => {})
-      return { ok: false, message }
+      return { ok: false, message: userMessage }
     }
-
-    const stripeExtId = stripePayExternalId(order.id)
-    const bankCode = settings.bankAccountCodeCard.trim()
-    const document: Record<string, unknown> = {
-      id: stripeExtId,
-      typDokl: `code:${docTypeCode}`,
-      varSym: String(order.orderNumber),
-      // Most common Flexi pairing pattern: banka.sparovani[].uhrazovanaFak → paid invoice ref.
-      sparovani: [{ uhrazovanaFak: advanceRef }],
-    }
-    if (bankCode) document.bankovniUcet = toFlexiRelationCode(bankCode)
 
     try {
       const write = await this.client.putBanka(document)
+
+      // Confirm from Flexi before marking SYNCED — prefer GET, fall back to write result.
+      let nativeId: string | null = write.nativeId
+      try {
+        const confirmed = await this.client.fetchBankaByExtId(stripeExtId)
+        if (confirmed?.id != null) {
+          nativeId = String(confirmed.id).trim() || nativeId
+        } else if (!nativeId) {
+          const message =
+            'Stripe clearing PUT без підтвердженого banka id — не позначено SYNCED.'
+          this.logger.warn(`registerMatchPayment(${orderId}): ${message}`)
+          await this.prisma.order
+            .update({
+              where: { id: order.id },
+              data: {
+                erpStripePayExternalId: stripeExtId,
+                erpStripePaySyncStatus: 'FAILED',
+                erpStripePayLastError: message,
+              },
+            })
+            .catch(() => {})
+          return { ok: false, message }
+        }
+      } catch {
+        if (!nativeId) {
+          const message =
+            'Stripe clearing PUT без підтвердженого banka id — не позначено SYNCED.'
+          await this.prisma.order
+            .update({
+              where: { id: order.id },
+              data: {
+                erpStripePayExternalId: stripeExtId,
+                erpStripePaySyncStatus: 'FAILED',
+                erpStripePayLastError: message,
+              },
+            })
+            .catch(() => {})
+          return { ok: false, message }
+        }
+      }
+
       await this.prisma.order.update({
         where: { id: order.id },
         data: {
           erpStripePayExternalId: stripeExtId,
-          erpStripePayNativeId: write.nativeId,
+          erpStripePayNativeId: nativeId,
           erpStripePaySyncStatus: 'SYNCED',
           erpStripePayLastError: null,
         },
@@ -2952,7 +3196,7 @@ export class FlexiService {
       return {
         ok: true,
         externalId: stripeExtId,
-        nativeId: write.nativeId ?? undefined,
+        nativeId: nativeId ?? undefined,
         message: 'Stripe clearing (banka) зареєстровано в ABRA Flexi.',
       }
     } catch (error) {
@@ -2961,7 +3205,253 @@ export class FlexiService {
       await this.prisma.order
         .update({
           where: { id: order.id },
-          data: { erpStripePaySyncStatus: 'FAILED', erpStripePayLastError: message.slice(0, 2000) },
+          data: {
+            erpStripePayExternalId: stripeExtId,
+            erpStripePaySyncStatus: 'FAILED',
+            erpStripePayLastError: message.slice(0, 2000),
+          },
+        })
+        .catch(() => {})
+      return { ok: false, message }
+    }
+  }
+
+  /**
+   * ERP-EU-CORE: BANK-only. After operator mark-paid, records incoming banka on
+   * bankAccountCodeBank and pairs it to ZÁLOHA. Soft-fails into erpBankPay* —
+   * never throws; never reverts website payment SUCCESS.
+   */
+  async registerBankMatchPayment(orderId: string): Promise<{
+    ok: boolean
+    message: string
+    skipped?: boolean
+    externalId?: string
+    nativeId?: string
+    nativeKod?: string
+  }> {
+    const configured = await this.isConfigured()
+    if (!configured) {
+      return { ok: false, message: 'ABRA Flexi не налаштовано.' }
+    }
+
+    const settings = await this.settings.getSettings()
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        paymentMethod: true,
+        paymentStatus: true,
+        totalAmount: true,
+        currency: true,
+        paidAt: true,
+        erpAdvanceExternalId: true,
+        erpAdvanceNativeId: true,
+        erpAdvanceKod: true,
+        erpBankPayExternalId: true,
+        erpBankPayNativeId: true,
+        erpBankPayNativeKod: true,
+        erpBankPaySyncStatus: true,
+      },
+    })
+    if (!order) return { ok: false, message: 'Замовлення не знайдено.' }
+
+    if (!isBankPaymentMethod(order.paymentMethod)) {
+      return {
+        ok: true,
+        skipped: true,
+        message: 'Не банківський переказ — BANKPAY не потрібне.',
+      }
+    }
+
+    if (order.paymentStatus !== 'success') {
+      await this.prisma.order
+        .update({
+          where: { id: order.id },
+          data: {
+            erpBankPaySyncStatus: 'WAITING',
+            erpBankPayLastError: null,
+          },
+        })
+        .catch(() => {})
+      return {
+        ok: true,
+        skipped: true,
+        message: 'Банківський переказ ще не підтверджено — BANKPAY очікує Mark paid.',
+      }
+    }
+
+    if (order.erpBankPaySyncStatus === 'SYNCED' && order.erpBankPayExternalId?.trim()) {
+      return {
+        ok: true,
+        skipped: true,
+        externalId: order.erpBankPayExternalId,
+        nativeId: order.erpBankPayNativeId ?? undefined,
+        nativeKod: order.erpBankPayNativeKod ?? undefined,
+        message: 'BANKPAY вже синхронізовано.',
+      }
+    }
+
+    const bankExtId = bankPayExternalId(order.id)
+
+    try {
+      const existing = await this.client.fetchBankaByExtId(bankExtId)
+      if (existing) {
+        const nativeId = existing.id != null ? String(existing.id).trim() || null : null
+        const nativeKod = existing.kod != null ? String(existing.kod).trim() || null : null
+        await this.prisma.order.update({
+          where: { id: order.id },
+          data: {
+            erpBankPayExternalId: bankExtId,
+            erpBankPayNativeId: nativeId,
+            erpBankPayNativeKod: nativeKod,
+            erpBankPaySyncStatus: 'SYNCED',
+            erpBankPaySyncedAt: new Date(),
+            erpBankPayLastError: null,
+          },
+        })
+        return {
+          ok: true,
+          skipped: true,
+          externalId: bankExtId,
+          nativeId: nativeId ?? undefined,
+          nativeKod: nativeKod ?? undefined,
+          message: 'BANKPAY вже існує в ABRA Flexi (GET-by-ext).',
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `registerBankMatchPayment(${orderId}) GET-before-PUT: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+
+    const bankAccountCode = settings.bankAccountCodeBank.trim()
+    if (!bankAccountCode) {
+      const message = 'bankAccountCodeBank не налаштовано — BANKPAY пропущено.'
+      this.logger.warn(`registerBankMatchPayment(${orderId}): ${message}`)
+      await this.prisma.order
+        .update({
+          where: { id: order.id },
+          data: { erpBankPaySyncStatus: 'FAILED', erpBankPayLastError: message },
+        })
+        .catch(() => {})
+      return { ok: false, message }
+    }
+
+    // Same STANDARD typDokl as Stripe clearing; fall back so BANK is not blocked if Stripe field empty.
+    const docTypeCode = settings.stripeClearingBankDocTypeCode.trim() || 'STANDARD'
+
+    let document: Record<string, unknown>
+    try {
+      document = buildIncomingClearingBankaDocument({
+        source: 'BANK',
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        totalAmount: Number(order.totalAmount),
+        currency: order.currency,
+        paidAt: order.paidAt,
+        bankDocTypeCode: docTypeCode,
+        bankAccountCode,
+        salesConstantSymbol: settings.salesConstantSymbol,
+        erpAdvanceKod: order.erpAdvanceKod,
+        erpAdvanceExternalId: order.erpAdvanceExternalId,
+        erpAdvanceNativeId: order.erpAdvanceNativeId,
+      })
+    } catch (buildError) {
+      const message =
+        buildError instanceof Error
+          ? buildError.message
+          : 'Немає зальогової фактури для sparovani — BANKPAY пропущено.'
+      const userMessage = message.includes('advance')
+        ? 'Немає зальогової фактури для sparovani — BANKPAY пропущено.'
+        : message
+      this.logger.warn(`registerBankMatchPayment(${orderId}): ${userMessage}`)
+      await this.prisma.order
+        .update({
+          where: { id: order.id },
+          data: { erpBankPaySyncStatus: 'FAILED', erpBankPayLastError: userMessage },
+        })
+        .catch(() => {})
+      return { ok: false, message: userMessage }
+    }
+
+    try {
+      const write = await this.client.putBanka(document)
+
+      let nativeId: string | null = write.nativeId
+      let nativeKod: string | null = null
+      try {
+        const confirmed = await this.client.fetchBankaByExtId(bankExtId)
+        if (confirmed?.id != null) {
+          nativeId = String(confirmed.id).trim() || nativeId
+        }
+        if (confirmed?.kod != null) {
+          nativeKod = String(confirmed.kod).trim() || null
+        } else if (!nativeId) {
+          const message =
+            'BANKPAY PUT без підтвердженого banka id — не позначено SYNCED.'
+          this.logger.warn(`registerBankMatchPayment(${orderId}): ${message}`)
+          await this.prisma.order
+            .update({
+              where: { id: order.id },
+              data: {
+                erpBankPayExternalId: bankExtId,
+                erpBankPaySyncStatus: 'FAILED',
+                erpBankPayLastError: message,
+              },
+            })
+            .catch(() => {})
+          return { ok: false, message }
+        }
+      } catch {
+        if (!nativeId) {
+          const message =
+            'BANKPAY PUT без підтвердженого banka id — не позначено SYNCED.'
+          await this.prisma.order
+            .update({
+              where: { id: order.id },
+              data: {
+                erpBankPayExternalId: bankExtId,
+                erpBankPaySyncStatus: 'FAILED',
+                erpBankPayLastError: message,
+              },
+            })
+            .catch(() => {})
+          return { ok: false, message }
+        }
+      }
+
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          erpBankPayExternalId: bankExtId,
+          erpBankPayNativeId: nativeId,
+          erpBankPayNativeKod: nativeKod,
+          erpBankPaySyncStatus: 'SYNCED',
+          erpBankPaySyncedAt: new Date(),
+          erpBankPayLastError: null,
+        },
+      })
+      return {
+        ok: true,
+        externalId: bankExtId,
+        nativeId: nativeId ?? undefined,
+        nativeKod: nativeKod ?? undefined,
+        message: 'BANKPAY (banka) зареєстровано в ABRA Flexi.',
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`registerBankMatchPayment(${orderId}) failed: ${message}`)
+      await this.prisma.order
+        .update({
+          where: { id: order.id },
+          data: {
+            erpBankPayExternalId: bankExtId,
+            erpBankPaySyncStatus: 'FAILED',
+            erpBankPayLastError: message.slice(0, 2000),
+          },
         })
         .catch(() => {})
       return { ok: false, message }

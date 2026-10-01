@@ -13,6 +13,8 @@ import type {
   DeliveryWeightRule,
   PackagingStrategySettings,
   PacketaCodSettings,
+  PacketaCountryMethodsSettings,
+  PacketaCustomerCodPriceSettings,
   PacketaServiceCodCarrierSettings,
   PacketaServiceDefinition,
   PacketaServiceIdentitySettings,
@@ -458,6 +460,43 @@ function normalizePacketaServiceIdentity(raw: unknown): PacketaServiceIdentitySe
   }
 }
 
+function normalizeCustomerPriceSettings(
+  raw: Record<string, unknown> | null,
+  fallback: PacketaCustomerCodPriceSettings,
+): PacketaCustomerCodPriceSettings {
+  if (!raw) return { ...fallback, tiers: [...(fallback.tiers ?? [])] }
+  const modeRaw = raw.mode
+  const mode: PacketaCustomerCodPriceSettings['mode'] =
+    modeRaw === 'fixed' || modeRaw === 'tiers' || modeRaw === 'none' ? modeRaw : 'none'
+  return {
+    mode,
+    maxAmount:
+      raw.maxAmount != null && Number(raw.maxAmount) > 0 ? Number(raw.maxAmount) : null,
+    feeBase: normalizeCustomerFeeBase(raw.feeBase, fallback.feeBase),
+    feeAmountsAreNet: 'feeAmountsAreNet' in raw ? Boolean(raw.feeAmountsAreNet) : true,
+    fixedAmount: Math.max(0, Number(raw.fixedAmount) || 0),
+    tiers: normalizeCodAmountTiers(raw.tiers),
+  }
+}
+
+function normalizePacketaMethodsByCountry(
+  raw: unknown,
+): Record<string, PacketaCountryMethodsSettings> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const out: Record<string, PacketaCountryMethodsSettings> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const country = key.trim().toUpperCase()
+    if (!/^[A-Z]{2}$/.test(country)) continue
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const row = value as Record<string, unknown>
+    const entry: PacketaCountryMethodsSettings = {}
+    if ('packeta-box' in row) entry['packeta-box'] = row['packeta-box'] === true
+    if ('packeta-courier' in row) entry['packeta-courier'] = row['packeta-courier'] === true
+    if (Object.keys(entry).length) out[country] = entry
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
 /**
  * Normalize Packeta COD into A (carrier cost) / B (card-on-COD) / C (customer price).
  * Legacy flat { enabled, tiers, feeBase, … } → customerPrice only (never into carrierCost).
@@ -522,25 +561,7 @@ function normalizePacketaCod(raw: unknown): PacketaCodSettings {
 
   let customerPrice: PacketaCodSettings['customerPrice']
   if (customerRaw) {
-    const modeRaw = customerRaw.mode
-    const mode: PacketaCodSettings['customerPrice']['mode'] =
-      modeRaw === 'fixed' || modeRaw === 'tiers' || modeRaw === 'none'
-        ? modeRaw
-        : 'none'
-    customerPrice = {
-      mode,
-      maxAmount:
-        customerRaw.maxAmount != null && Number(customerRaw.maxAmount) > 0
-          ? Number(customerRaw.maxAmount)
-          : null,
-      feeBase: normalizeCustomerFeeBase(customerRaw.feeBase, base.customerPrice.feeBase),
-      feeAmountsAreNet:
-        'feeAmountsAreNet' in customerRaw
-          ? Boolean(customerRaw.feeAmountsAreNet)
-          : true,
-      fixedAmount: Math.max(0, Number(customerRaw.fixedAmount) || 0),
-      tiers: normalizeCodAmountTiers(customerRaw.tiers),
-    }
+    customerPrice = normalizeCustomerPriceSettings(customerRaw, base.customerPrice)
   } else if ('tiers' in o || 'enabled' in o || 'feeBase' in o) {
     // Legacy flat PacketaCodSettings → customerPrice only (never carrierCost)
     const legacyTiers = normalizeCodAmountTiers(o.tiers)
@@ -580,6 +601,16 @@ function normalizePacketaCod(raw: unknown): PacketaCodSettings {
             costRaw && 'amountsAreNet' in costRaw ? Boolean(costRaw.amountsAreNet) : true,
           tiers: normalizeCodAmountTiers(costRaw?.tiers),
         },
+      }
+      if (
+        row.customerPrice &&
+        typeof row.customerPrice === 'object' &&
+        !Array.isArray(row.customerPrice)
+      ) {
+        entry.customerPrice = normalizeCustomerPriceSettings(
+          row.customerPrice as Record<string, unknown>,
+          base.customerPrice,
+        )
       }
       byService[slug] = entry
     }
@@ -629,6 +660,12 @@ function normalizeCarrierConfigs(
     for (const [method, svc] of Object.entries(src.services ?? {})) {
       services[method] = { ...(services[method] ?? {}), ...svc }
     }
+    const methodsByCountry =
+      carrier === 'packeta'
+        ? normalizePacketaMethodsByCountry(
+            (src as { methodsByCountry?: unknown }).methodsByCountry,
+          )
+        : undefined
     return {
       tariffAmountsAreNet:
         typeof src.tariffAmountsAreNet === 'boolean'
@@ -636,6 +673,7 @@ function normalizeCarrierConfigs(
           : undefined,
       services,
       cod: carrier === 'packeta' ? normalizePacketaCod(src.cod ?? def.cod) : undefined,
+      ...(methodsByCountry ? { methodsByCountry } : {}),
       serviceIdentity:
         carrier === 'packeta'
           ? normalizePacketaServiceIdentity(src.serviceIdentity)

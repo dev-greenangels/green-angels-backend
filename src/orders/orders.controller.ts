@@ -202,6 +202,14 @@ export class OrdersController {
     return this.orders.syncErp(id)
   }
 
+  /** AUDIT ONLY — refreshes OrderViesCheck; never mutates tax/payment/Flexi. */
+  @Post(':id/vies-retry')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  retryVies(@Param('id') id: string) {
+    return this.orders.retryViesCheck(id)
+  }
+
   @Delete(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MANAGER)

@@ -188,8 +188,13 @@ export function buildOrderDocumentPdfInput(input: {
     order.taxRegime === 'reverse_charge' ? 0 : taxRate > 0 ? taxRate : 0
 
   const docLines = order.items.map((item) => {
-    const unitPrice = Number(item.priceAtPurchase)
-    const lineTotal = Math.round(unitPrice * item.quantity * 100) / 100
+    const commercialUnit =
+      item.commercialUnitPrice != null ? Number(item.commercialUnitPrice) : null
+    const commercialLine =
+      item.commercialLineAmount != null ? Number(item.commercialLineAmount) : null
+    const unitPrice = commercialUnit ?? Number(item.priceAtPurchase)
+    const lineTotal =
+      commercialLine ?? Math.round(unitPrice * item.quantity * 100) / 100
     return {
       description: formatOrderItemPdfDescription(item),
       quantity: item.quantity,

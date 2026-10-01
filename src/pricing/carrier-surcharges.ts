@@ -80,11 +80,14 @@ export function computeInsuranceNet(
 }
 
 /**
- * Non-depot is contractual reference only while automaticCalculation is false.
- * Never adds to checkout quote (type locks automaticCalculation to false).
+ * Non-depot posting amount (hand-in outside Packeta depot).
+ * When configured amount > 0, folds into customer deliveryAmount (single Delivery line).
+ * Charged once per rated parcel (each Packeta package).
  */
-export function computeNonDepotNet(_config: CarrierSurchargeConfig | null): number {
-  return 0
+export function computeNonDepotNet(config: CarrierSurchargeConfig | null): number {
+  if (!config?.nonDepot) return 0
+  const amount = Math.max(0, Number(config.nonDepot.amount) || 0)
+  return amount > 0 ? roundMoney(amount) : 0
 }
 
 export function surchargeModeOrNone(value: unknown): CarrierSurchargeMode {

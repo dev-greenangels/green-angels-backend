@@ -100,6 +100,7 @@ export class FlexiSettingsService {
       bankAccountCodeBank:
         (base.bankAccountCodeBank ?? 'BANKOVNÍ ÚČET').trim() || 'BANKOVNÍ ÚČET',
       stripeClearingBankDocTypeCode: (base.stripeClearingBankDocTypeCode ?? '').trim(),
+      salesConstantSymbol: (base.salesConstantSymbol ?? '0008').trim() || '0008',
       wholesaleAdresarLabelCode:
         (base.wholesaleAdresarLabelCode ?? 'WHOLESALE').trim() || 'WHOLESALE',
       receivedInvoiceDocTypeCode:
@@ -190,6 +191,7 @@ export class FlexiSettingsService {
       bankAccountCodeCard: settings.bankAccountCodeCard,
       bankAccountCodeBank: settings.bankAccountCodeBank,
       stripeClearingBankDocTypeCode: settings.stripeClearingBankDocTypeCode,
+      salesConstantSymbol: settings.salesConstantSymbol,
       wholesaleAdresarLabelCode: settings.wholesaleAdresarLabelCode,
       receivedInvoiceDocTypeCode: settings.receivedInvoiceDocTypeCode,
       shippingCenikKod: settings.shippingCenikKod,

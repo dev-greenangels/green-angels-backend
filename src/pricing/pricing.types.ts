@@ -83,7 +83,9 @@ export type CheckoutTotalsBreakdown = {
   stripVatRatePercent?: number | null
   taxAppliesToFees?: boolean
   allowedDeliveryMethods: string[]
-  deliveryUnavailableReason?: 'missing_weight' | 'no_tariff' | null
+  /** Packeta country/method supportsCod; non-Packeta → true. */
+  dobierkaAllowed?: boolean
+  deliveryUnavailableReason?: 'missing_weight' | 'no_tariff' | 'insurance_limit' | 'cod_not_supported' | null
 }
 
 export type PricingQuoteResult = {

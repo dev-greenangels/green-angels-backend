@@ -33,6 +33,7 @@ function createService(input: {
 
   const client = {
     fetchFakturaVydanaByExtId: record('fetchFakturaVydanaByExtId'),
+    fetchBankaByExtId: record('fetchBankaByExtId'),
     putObjednavkaTvorbaZalohy: record('putObjednavkaTvorbaZalohy'),
     putBanka: record('putBanka'),
   }
@@ -169,6 +170,7 @@ describe('FlexiService.createAdvanceInvoice — zaloha payload', () => {
     assert.equal(zaloha.id, 'ext:GA:ADVANCE:order-3')
     assert.equal(zaloha.procent, 100)
     assert.equal(zaloha.varSym, '100')
+    assert.equal(zaloha.konSym, 'code:0008')
     assert.equal(zaloha.formaUhradyCis, 'code:PREVOD')
     assert.equal(zaloha.bankovniUcet, 'code:BANKOVNÍ ÚČET')
     assert.equal(zaloha.datSplat, '2026-10-10')
@@ -200,6 +202,8 @@ describe('FlexiService.createAdvanceInvoice — zaloha payload', () => {
     ]
     assert.equal(zaloha.formaUhradyCis, 'code:KARTA')
     assert.equal(zaloha.bankovniUcet, 'code:STRIPE')
+    assert.equal(zaloha.konSym, 'code:0008')
+    assert.equal(zaloha.varSym, '101')
     assert.equal('datSplat' in zaloha, false)
   })
 
@@ -241,8 +245,12 @@ describe('FlexiService.registerMatchPayment — guards', () => {
       orderNumber: 1,
       paymentMethod: 'bank-transfer',
       paymentStatus: null,
+      totalAmount: 10,
+      currency: 'EUR',
+      paidAt: null,
       erpAdvanceExternalId: 'ext:GA:ADVANCE:order-6',
       erpAdvanceNativeId: null,
+      erpAdvanceKod: null,
       erpStripePayExternalId: null,
       erpStripePayNativeId: null,
       erpStripePaySyncStatus: null,
@@ -260,8 +268,12 @@ describe('FlexiService.registerMatchPayment — guards', () => {
       orderNumber: 2,
       paymentMethod: 'card-online',
       paymentStatus: 'success',
+      totalAmount: 10,
+      currency: 'EUR',
+      paidAt: new Date('2026-09-28T12:00:00.000Z'),
       erpAdvanceExternalId: 'ext:GA:ADVANCE:order-7',
       erpAdvanceNativeId: '888',
+      erpAdvanceKod: 'ZA26-0007',
       erpStripePayExternalId: null,
       erpStripePayNativeId: null,
       erpStripePaySyncStatus: null,
@@ -276,30 +288,279 @@ describe('FlexiService.registerMatchPayment — guards', () => {
     assert.equal(orderUpdateCalls[0]!.data.erpStripePaySyncStatus, 'FAILED')
   })
 
-  it('creates the banka document with sparovani pointing at the advance when card+paid', async () => {
+  it('creates complete banka with sparovani + zbytek when card+paid', async () => {
+    const paidAt = new Date('2026-09-28T14:22:00.000Z')
     const order: OrderRow = {
       id: 'order-8',
       orderNumber: 3,
       paymentMethod: 'card-online',
       paymentStatus: 'success',
+      totalAmount: 55.5,
+      currency: 'EUR',
+      paidAt,
       erpAdvanceExternalId: 'ext:GA:ADVANCE:order-8',
       erpAdvanceNativeId: '777',
+      erpAdvanceKod: 'ZA26-0008',
+      erpStripePayExternalId: null,
+      erpStripePayNativeId: null,
+      erpStripePaySyncStatus: null,
+    }
+    let fetchCount = 0
+    const { service, orderUpdateCalls, clientCalls } = createService({
+      order,
+      settingsOverrides: {
+        stripeClearingBankDocTypeCode: 'STANDARD',
+        bankAccountCodeCard: 'STRIPE',
+      },
+      client: {
+        fetchBankaByExtId: async () => {
+          fetchCount += 1
+          if (fetchCount === 1) return null // GET-before-create
+          return { id: '1010', kod: 'STRIPE+0010/26' }
+        },
+        putBanka: async () => ({ nativeId: '1010', ref: null, raw: {} }),
+      },
+    })
+
+    const result = await service.registerMatchPayment('order-8')
+    assert.equal(result.ok, true)
+    const [document] = clientCalls.putBanka![0] as [Record<string, unknown>]
+    assert.equal(document.id, 'ext:GA:STRIPEPAY:order-8')
+    assert.equal(document.typDokl, 'code:STANDARD')
+    assert.equal(document.banka, 'code:STRIPE')
+    assert.equal(Object.prototype.hasOwnProperty.call(document, 'bankovniUcet'), false)
+    assert.equal(Object.prototype.hasOwnProperty.call(document, 'kod'), false)
+    assert.equal(document.typPohybuK, 'typPohybu.prijem')
+    assert.equal(document.bezPolozek, true)
+    assert.equal(document.sumOsv, 55.5)
+    assert.equal(document.mena, 'code:EUR')
+    assert.equal(document.datVyst, '2026-09-28')
+    assert.equal(document.varSym, '3')
+    assert.equal(document.konSym, 'code:0008')
+    assert.deepEqual(document.sparovani, {
+      uhrazovanaFak: {
+        '@type': 'faktura-vydana',
+        '@content': 'code:ZA26-0008',
+      },
+      zbytek: 'ne',
+    })
+    assert.equal(orderUpdateCalls[0]!.data.erpStripePaySyncStatus, 'SYNCED')
+    assert.equal(orderUpdateCalls[0]!.data.erpStripePayNativeId, '1010')
+    assert.equal(orderUpdateCalls[0]!.data.erpStripePayExternalId, 'ext:GA:STRIPEPAY:order-8')
+  })
+
+  it('GET-before-create: existing banka → idempotent skip, no second PUT', async () => {
+    const order: OrderRow = {
+      id: 'order-9',
+      orderNumber: 9,
+      paymentMethod: 'card-online',
+      paymentStatus: 'success',
+      totalAmount: 10,
+      currency: 'EUR',
+      paidAt: new Date('2026-09-28T12:00:00.000Z'),
+      erpAdvanceKod: 'ZA26-0009',
+      erpAdvanceExternalId: 'ext:GA:ADVANCE:order-9',
+      erpAdvanceNativeId: '1',
+      erpStripePayExternalId: null,
+      erpStripePayNativeId: null,
+      erpStripePaySyncStatus: 'FAILED',
+    }
+    const { service, orderUpdateCalls, clientCalls } = createService({
+      order,
+      settingsOverrides: { stripeClearingBankDocTypeCode: 'STANDARD' },
+      client: {
+        fetchBankaByExtId: async () => ({ id: '2020', kod: 'STRIPE+0001/26' }),
+      },
+    })
+    const result = await service.registerMatchPayment('order-9')
+    assert.equal(result.ok, true)
+    assert.equal(result.skipped, true)
+    assert.equal(clientCalls.putBanka, undefined)
+    assert.equal(orderUpdateCalls[0]!.data.erpStripePaySyncStatus, 'SYNCED')
+    assert.equal(orderUpdateCalls[0]!.data.erpStripePayNativeId, '2020')
+  })
+
+  it('failed bank create persists FAILED/error without SYNCED', async () => {
+    const order: OrderRow = {
+      id: 'order-10',
+      orderNumber: 10,
+      paymentMethod: 'card-online',
+      paymentStatus: 'success',
+      totalAmount: 10,
+      currency: 'EUR',
+      paidAt: new Date('2026-09-28T12:00:00.000Z'),
+      erpAdvanceKod: 'ZA26-0010',
+      erpAdvanceExternalId: 'ext:GA:ADVANCE:order-10',
+      erpAdvanceNativeId: '1',
       erpStripePayExternalId: null,
       erpStripePayNativeId: null,
       erpStripePaySyncStatus: null,
     }
     const { service, orderUpdateCalls, clientCalls } = createService({
       order,
-      settingsOverrides: { stripeClearingBankDocTypeCode: 'STRIPECLEAR' },
-      client: { putBanka: async () => ({ nativeId: '1010', ref: null, raw: {} }) },
+      settingsOverrides: { stripeClearingBankDocTypeCode: 'STANDARD', bankAccountCodeCard: 'STRIPE' },
+      client: {
+        fetchBankaByExtId: async () => null,
+        putBanka: async () => {
+          throw new Error("Element 'zbytek' musí být uveden. [STRIPE+0009/26]")
+        },
+      },
     })
-    const result = await service.registerMatchPayment('order-8')
+    const result = await service.registerMatchPayment('order-10')
+    assert.equal(result.ok, false)
+    assert.equal(clientCalls.putBanka?.length, 1)
+    assert.equal(orderUpdateCalls[0]!.data.erpStripePaySyncStatus, 'FAILED')
+    assert.match(String(orderUpdateCalls[0]!.data.erpStripePayLastError), /zbytek/)
+    assert.notEqual(orderUpdateCalls[0]!.data.erpStripePaySyncStatus, 'SYNCED')
+  })
+})
+
+describe('FlexiService.registerBankMatchPayment', () => {
+  it('skips unpaid bank orders and marks WAITING', async () => {
+    const order: OrderRow = {
+      id: 'bank-1',
+      orderNumber: 50,
+      paymentMethod: 'bank-transfer',
+      paymentStatus: null,
+      totalAmount: 20,
+      currency: 'EUR',
+      paidAt: null,
+      erpAdvanceKod: 'ZA26-0050',
+      erpAdvanceExternalId: 'ext:GA:ADVANCE:bank-1',
+      erpAdvanceNativeId: '1',
+      erpBankPaySyncStatus: null,
+    }
+    const { service, orderUpdateCalls, clientCalls } = createService({ order })
+    const result = await service.registerBankMatchPayment('bank-1')
+    assert.equal(result.ok, true)
+    assert.equal(result.skipped, true)
+    assert.equal(clientCalls.putBanka, undefined)
+    assert.equal(orderUpdateCalls[0]!.data.erpBankPaySyncStatus, 'WAITING')
+  })
+
+  it('skips card orders', async () => {
+    const order: OrderRow = {
+      id: 'bank-card',
+      orderNumber: 51,
+      paymentMethod: 'card-online',
+      paymentStatus: 'success',
+      totalAmount: 20,
+      currency: 'EUR',
+      paidAt: new Date(),
+    }
+    const { service, clientCalls } = createService({ order })
+    const result = await service.registerBankMatchPayment('bank-card')
+    assert.equal(result.ok, true)
+    assert.equal(result.skipped, true)
+    assert.equal(clientCalls.putBanka, undefined)
+  })
+
+  it('creates BANKPAY banka with BANKOVNÍ ÚČET and persists SYNCED', async () => {
+    const paidAt = new Date('2026-10-01T09:00:00.000Z')
+    const order: OrderRow = {
+      id: 'bank-2',
+      orderNumber: 52,
+      paymentMethod: 'bank-transfer',
+      paymentStatus: 'success',
+      totalAmount: 77.25,
+      currency: 'EUR',
+      paidAt,
+      erpAdvanceKod: 'ZA26-0052',
+      erpAdvanceExternalId: 'ext:GA:ADVANCE:bank-2',
+      erpAdvanceNativeId: '900',
+      erpBankPayExternalId: null,
+      erpBankPayNativeId: null,
+      erpBankPaySyncStatus: 'WAITING',
+    }
+    let fetchCount = 0
+    const { service, orderUpdateCalls, clientCalls } = createService({
+      order,
+      settingsOverrides: {
+        stripeClearingBankDocTypeCode: 'STANDARD',
+        bankAccountCodeBank: 'BANKOVNÍ ÚČET',
+      },
+      client: {
+        fetchBankaByExtId: async () => {
+          fetchCount += 1
+          if (fetchCount === 1) return null
+          return { id: '3030', kod: 'BANKA+0012/26' }
+        },
+        putBanka: async () => ({ nativeId: '3030', ref: null, raw: {} }),
+      },
+    })
+    const result = await service.registerBankMatchPayment('bank-2')
     assert.equal(result.ok, true)
     const [document] = clientCalls.putBanka![0] as [Record<string, unknown>]
-    assert.equal(document.id, 'ext:GA:STRIPEPAY:order-8')
-    assert.equal(document.typDokl, 'code:STRIPECLEAR')
-    assert.deepEqual(document.sparovani, [{ uhrazovanaFak: '777' }])
-    assert.equal(orderUpdateCalls[0]!.data.erpStripePaySyncStatus, 'SYNCED')
-    assert.equal(orderUpdateCalls[0]!.data.erpStripePayNativeId, '1010')
+    assert.equal(document.id, 'ext:GA:BANKPAY:bank-2')
+    assert.equal(document.banka, 'code:BANKOVNÍ ÚČET')
+    assert.equal(Object.prototype.hasOwnProperty.call(document, 'bankovniUcet'), false)
+    assert.equal(Object.prototype.hasOwnProperty.call(document, 'kod'), false)
+    assert.equal(document.typPohybuK, 'typPohybu.prijem')
+    assert.equal(document.sumOsv, 77.25)
+    assert.equal(document.datVyst, '2026-10-01')
+    assert.equal(document.varSym, '52')
+    assert.equal(document.konSym, 'code:0008')
+    assert.equal((document.sparovani as { zbytek: string }).zbytek, 'ne')
+    assert.equal(orderUpdateCalls[0]!.data.erpBankPaySyncStatus, 'SYNCED')
+    assert.equal(orderUpdateCalls[0]!.data.erpBankPayNativeId, '3030')
+    assert.equal(orderUpdateCalls[0]!.data.erpBankPayNativeKod, 'BANKA+0012/26')
+  })
+
+  it('GET-before-create: existing BANKPAY → no second PUT', async () => {
+    const order: OrderRow = {
+      id: 'bank-3',
+      orderNumber: 53,
+      paymentMethod: 'bank-transfer',
+      paymentStatus: 'success',
+      totalAmount: 10,
+      currency: 'EUR',
+      paidAt: new Date('2026-10-01T09:00:00.000Z'),
+      erpAdvanceKod: 'ZA26-0053',
+      erpBankPaySyncStatus: 'FAILED',
+    }
+    const { service, orderUpdateCalls, clientCalls } = createService({
+      order,
+      settingsOverrides: { bankAccountCodeBank: 'BANKOVNÍ ÚČET' },
+      client: {
+        fetchBankaByExtId: async () => ({ id: '4040', kod: 'BANKA+0001/26' }),
+      },
+    })
+    const result = await service.registerBankMatchPayment('bank-3')
+    assert.equal(result.ok, true)
+    assert.equal(result.skipped, true)
+    assert.equal(clientCalls.putBanka, undefined)
+    assert.equal(orderUpdateCalls[0]!.data.erpBankPaySyncStatus, 'SYNCED')
+  })
+
+  it('failed BANKPAY persists FAILED without touching paymentStatus', async () => {
+    const order: OrderRow = {
+      id: 'bank-4',
+      orderNumber: 54,
+      paymentMethod: 'bank-transfer',
+      paymentStatus: 'success',
+      totalAmount: 10,
+      currency: 'EUR',
+      paidAt: new Date('2026-10-01T09:00:00.000Z'),
+      erpAdvanceKod: 'ZA26-0054',
+      erpBankPaySyncStatus: null,
+    }
+    const { service, orderUpdateCalls } = createService({
+      order,
+      settingsOverrides: {
+        stripeClearingBankDocTypeCode: 'STANDARD',
+        bankAccountCodeBank: 'BANKOVNÍ ÚČET',
+      },
+      client: {
+        fetchBankaByExtId: async () => null,
+        putBanka: async () => {
+          throw new Error('Flexi temporary 503')
+        },
+      },
+    })
+    const result = await service.registerBankMatchPayment('bank-4')
+    assert.equal(result.ok, false)
+    assert.equal(orderUpdateCalls[0]!.data.erpBankPaySyncStatus, 'FAILED')
+    assert.match(String(orderUpdateCalls[0]!.data.erpBankPayLastError), /503/)
+    assert.equal(order.paymentStatus, 'success')
   })
 })

@@ -23,6 +23,8 @@ import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard'
 import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { GUEST_CART_COOKIE_NAME } from './cart.constants'
+import { CART_SOURCE_HEADERS } from './cart-source-headers'
+import type { CartSourceContextInput } from './cart-source-context'
 import { CartsService, type BackstageCartStateFilter } from './carts.service'
 import { MergeCartDto, SyncCartDto } from './dto/sync-cart.dto'
 import { UpdateCheckoutDraftDto } from './dto/update-checkout-draft.dto'
@@ -45,6 +47,7 @@ class BackstageCartsQueryDto {
     'checkout_started',
     'cart_abandoned',
     'checkout_abandoned',
+    'converted',
   ])
   state?: BackstageCartStateFilter
 
@@ -74,6 +77,21 @@ class BackstageCartsQueryDto {
   pageSize?: number
 }
 
+function readCartSourceFromRequest(req: Request): CartSourceContextInput {
+  const headers = req.headers
+  const get = (name: string) => {
+    const raw = headers[name]
+    if (Array.isArray(raw)) return raw[0]
+    return typeof raw === 'string' ? raw : undefined
+  }
+  return {
+    countrySiteCode: get(CART_SOURCE_HEADERS.countrySite),
+    sourceHost: get(CART_SOURCE_HEADERS.sourceHost),
+    locale: get(CART_SOURCE_HEADERS.locale),
+    currencyCode: get(CART_SOURCE_HEADERS.currency),
+  }
+}
+
 @Controller('carts')
 export class CartsController {
   constructor(private readonly carts: CartsService) {}
@@ -98,7 +116,7 @@ export class CartsController {
     @Query('locale') locale?: string,
   ) {
     const owner = this.carts.resolveOwner(req, res)
-    return this.carts.syncCart(owner, dto, locale)
+    return this.carts.syncCart(owner, dto, locale, readCartSourceFromRequest(req))
   }
 
   @Get('me/checkout-draft')
@@ -119,7 +137,7 @@ export class CartsController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const owner = this.carts.resolveOwner(req, res)
-    return this.carts.upsertCheckoutDraft(owner, dto)
+    return this.carts.upsertCheckoutDraft(owner, dto, readCartSourceFromRequest(req))
   }
 
   @Post('me/checkout-start')
@@ -129,7 +147,7 @@ export class CartsController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const owner = this.carts.resolveOwner(req, res)
-    return this.carts.startCheckout(owner)
+    return this.carts.startCheckout(owner, readCartSourceFromRequest(req))
   }
 
   @Get('merge-preview')
@@ -151,7 +169,14 @@ export class CartsController {
     @Query('locale') locale?: string,
   ) {
     const guestSessionId = req.cookies?.[GUEST_CART_COOKIE_NAME]?.trim() || undefined
-    return this.carts.applyMerge(req.user.userId, guestSessionId, dto.strategy, locale, res)
+    return this.carts.applyMerge(
+      req.user.userId,
+      guestSessionId,
+      dto.strategy,
+      locale,
+      res,
+      readCartSourceFromRequest(req),
+    )
   }
 
   @Get()

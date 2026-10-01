@@ -5,6 +5,11 @@ import {
   type CountrySiteCode,
   type MarketSettings,
 } from '../settings/market.types'
+import {
+  isEuMemberStateIso,
+  normalizeEuMemberStateIso,
+  normalizeEuViesVatCountry,
+} from '../common/eu-member-states'
 
 export type TaxRegime = 'seller' | 'destination' | 'reverse_charge'
 
@@ -19,7 +24,7 @@ export type ResolveTaxInput = {
   /** Product CN / Intrastat for reduced-rate match */
   cnCode?: string | null
   buyerType?: BuyerType | null
-  /** ISO VAT country prefix, e.g. SK, HU, AT, DE */
+  /** ISO / VIES VAT country prefix, e.g. SK, HU, AT, DE, EL */
   vatCountryCode?: string | null
   viesValid?: boolean | null
   fallbackTaxRatePercent: number
@@ -83,6 +88,34 @@ function normalizeDeliveryCc(
   return market.region === 'sk' ? 'sk' : null
 }
 
+/**
+ * Intra-EU B2B goods 0% eligibility (SK dispatch).
+ * Requires foreign EU VAT identity + VIES success + EU ship-to other than SK.
+ * Does NOT require VAT country === delivery country.
+ * Does NOT use billingCountryCode.
+ */
+export function isIntraEuB2bGoodsEligible(input: {
+  buyerType?: BuyerType | null
+  viesValid?: boolean | null
+  vatCountryCode?: string | null
+  /** Normalized or raw delivery ISO (el→gr accepted). */
+  deliveryCountryCode?: string | null
+}): boolean {
+  if (input.buyerType !== 'company') return false
+  if (input.viesValid !== true) return false
+
+  const vatCc = normalizeEuViesVatCountry(input.vatCountryCode)
+  if (!vatCc || vatCc === 'SK') return false
+
+  const shipIso = normalizeEuMemberStateIso(input.deliveryCountryCode)
+  if (!shipIso || shipIso === 'sk') return false
+
+  // shipIso already proved EU membership; keep explicit for readability/tests.
+  if (!isEuMemberStateIso(shipIso)) return false
+
+  return true
+}
+
 export function resolveCheckoutTax(input: ResolveTaxInput): ResolvedTax {
   const {
     market,
@@ -107,10 +140,18 @@ export function resolveCheckoutTax(input: ResolveTaxInput): ResolvedTax {
     }
   }
 
-  const vatCc = (vatCountryCode ?? '').trim().toUpperCase()
+  const shipTo = normalizeDeliveryCc(market, countryCode, deliveryCountryCode)
+  const vatCc =
+    normalizeEuViesVatCountry(vatCountryCode) ??
+    (vatCountryCode ?? '').trim().toUpperCase()
   const isCompany = buyerType === 'company'
-  const reverseCharge =
-    isCompany && viesValid === true && vatCc.length === 2 && vatCc !== 'SK'
+
+  const reverseCharge = isIntraEuB2bGoodsEligible({
+    buyerType: isCompany ? 'company' : buyerType,
+    viesValid,
+    vatCountryCode,
+    deliveryCountryCode: shipTo,
+  })
 
   const embeddedSkRate = resolveCatalogTaxRatePercent(
     market.deliveryCountryCatalog,
@@ -120,16 +161,16 @@ export function resolveCheckoutTax(input: ResolveTaxInput): ResolvedTax {
   )
 
   if (reverseCharge) {
+    const taxCc =
+      (normalizeEuViesVatCountry(vatCountryCode) ?? vatCc).toLowerCase() || null
     return {
       taxRatePercent: 0,
       taxIncluded,
       taxRegime: 'reverse_charge',
-      taxCountryCode: vatCc.toLowerCase(),
+      taxCountryCode: taxCc,
       stripVatRatePercent: embeddedSkRate,
     }
   }
-
-  const shipTo = normalizeDeliveryCc(market, countryCode, deliveryCountryCode)
 
   if (market.applyDestinationVatB2c && shipTo) {
     const rate = resolveCatalogTaxRatePercent(

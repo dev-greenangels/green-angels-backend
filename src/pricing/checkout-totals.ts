@@ -30,12 +30,18 @@ import {
   resolveCarrierSurchargeConfig,
 } from './carrier-surcharges'
 import {
+  filterPacketaMethodsByCountry,
+  isPacketaMethodEnabledForCountry,
   resolveCarrierTariffAmountsAreNet,
   resolvePacketaCustomerCodFee,
   resolvePacketaServiceCodRules,
 } from './carrier-config'
 import { customerFeeSnapshotFromNet } from './fee-vat'
 import { resolvePackagingCommercialLines } from './packaging-commercial-lines'
+import {
+  resolveProductCommercialLines,
+  sumProductCommercialLineAmounts,
+} from './product-commercial-lines'
 import {
   filterPacketaBoxByPickupWeight,
   resolveEuMaxParcelWeightKg,
@@ -79,6 +85,11 @@ export type CheckoutTotalsBreakdown = {
   stripVatRatePercent?: number | null
   taxAppliesToFees: boolean
   allowedDeliveryMethods: string[]
+  /**
+   * Whether dobierka is allowed for the current delivery method + country
+   * (Packeta byService.supportsCod). Non-Packeta → true.
+   */
+  dobierkaAllowed: boolean
   deliveryUnavailableReason?: DeliveryUnavailableReason | null
 }
 
@@ -177,9 +188,16 @@ function resolveCodFeeAmount(
     grandTotalBeforeCod: number
     paymentMethod?: string
     deliveryMethod?: string
+    countryCode?: string | null
   },
 ): { amount: number; amountsAreNet: boolean; overMax: boolean } {
-  const { productsSubtotal, grandTotalBeforeCod, paymentMethod, deliveryMethod } = input
+  const {
+    productsSubtotal,
+    grandTotalBeforeCod,
+    paymentMethod,
+    deliveryMethod,
+    countryCode,
+  } = input
   if (paymentMethod !== DOBIERKA_PAYMENT_METHOD) {
     return { amount: 0, amountsAreNet: settings.codFeeAmountsAreNet, overMax: false }
   }
@@ -190,6 +208,7 @@ function resolveCodFeeAmount(
     deliveryMethod,
     productsSubtotal,
     grandTotalBeforeCod,
+    countryCode,
   })
   if (packeta) {
     return {
@@ -354,6 +373,19 @@ function resolveDelivery(input: {
   }
 
   if (settings.deliveryMode === 'carrier_rates' && isEuCarrierMethod(deliveryMethod)) {
+    if (
+      deliveryMethod?.startsWith('packeta') &&
+      !isPacketaMethodEnabledForCountry(settings, deliveryMethod, countryCode)
+    ) {
+      return {
+        amountNet: 0,
+        customerAmount: 0,
+        mode: 'carrier_rates',
+        includedInTotal: false,
+        unavailable: 'no_tariff',
+        treatAsNet: resolveCarrierTariffAmountsAreNet(settings, deliveryMethod),
+      }
+    }
     const rated = rateEuCarrierDeliveryNet({
       settings,
       method: deliveryMethod!,
@@ -618,6 +650,7 @@ export function computeCheckoutTotals(input: {
     grandTotalBeforeCod,
     paymentMethod,
     deliveryMethod,
+    countryCode: shippingCountry,
   })
   const codConfigured = codResolved.amount
   const codCustomer = codResolved.amountsAreNet
@@ -667,7 +700,25 @@ export function computeCheckoutTotals(input: {
   if (isReverseCharge && taxIncluded) {
     const stripRate = taxOverride?.stripVatRatePercent ?? 0
     if (stripRate > 0) {
-      productsForTotal = grossToNet(productsSubtotal, stripRate)
+      // Canonical: Σ per-line commercial amounts (same helper as OrderItem snapshot / Flexi).
+      // Basket grossToNet only when productLines omitted (legacy callers).
+      if (productLines && productLines.length > 0) {
+        productsForTotal = sumProductCommercialLineAmounts(
+          resolveProductCommercialLines(
+            productLines.map((line) => ({
+              catalogBasisUnit: line.unitGross,
+              quantity: line.quantity,
+            })),
+            {
+              taxRegime: 'reverse_charge',
+              taxIncluded: true,
+              stripVatRatePercent: stripRate,
+            },
+          ),
+        )
+      } else {
+        productsForTotal = grossToNet(productsSubtotal, stripRate)
+      }
       if (!delivery.treatAsNet && !settings.packagingAmountsAreNet) {
         deliveryForTotal =
           deliveryInTotal > 0 ? grossToNet(deliveryInTotal, stripRate) : 0
@@ -744,6 +795,7 @@ export function computeCheckoutTotals(input: {
     cartSizeEnvelope,
     settings.cartSize,
   )
+  const byCountry = filterPacketaMethodsByCountry(bySize, settings, shippingCountry)
   const packetaBoxSurcharge = resolveCarrierSurchargeConfig(
     settings.carrierSurcharges,
     'packeta-box',
@@ -754,10 +806,20 @@ export function computeCheckoutTotals(input: {
     standardParcelMaxWeightKg: settings.standardParcelMaxWeightKg,
   })
   const allowedDeliveryMethods = filterPacketaBoxByPickupWeight(
-    bySize,
+    byCountry,
     cartWeightKg ?? 0,
     packetaBoxPickupMaxKg,
   )
+
+  let dobierkaAllowed = true
+  if (deliveryMethod?.startsWith('packeta')) {
+    const serviceCod = resolvePacketaServiceCodRules(settings, {
+      deliveryMethod,
+      countryCode: shippingCountry,
+      customerFacing: true,
+    })
+    dobierkaAllowed = serviceCod.supportsCod
+  }
 
   return {
     productsSubtotal: roundMoney(
@@ -792,6 +854,7 @@ export function computeCheckoutTotals(input: {
         : null,
     taxAppliesToFees: Boolean(settings.taxAppliesToFees),
     allowedDeliveryMethods,
+    dobierkaAllowed,
     deliveryUnavailableReason: delivery.unavailable,
   }
 }

@@ -16,6 +16,7 @@ import {
 } from 'class-validator'
 
 import { CreateOrderItemDto } from './create-order-item.dto'
+import { ISO_3166_1_ALPHA2_CODES } from '../../common/iso-3166-1-alpha2'
 
 class SplitCheckoutDto {
   @Type(() => Number)
@@ -267,7 +268,14 @@ export class CreateOrderDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(8)
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') return value
+    const normalized = value.trim().toLowerCase()
+    return normalized === '' ? undefined : normalized
+  })
+  @IsIn([...ISO_3166_1_ALPHA2_CODES], {
+    message: 'billingCountryCode must be a valid ISO 3166-1 alpha-2 code',
+  })
   billingCountryCode?: string
 
   /** SK B2C invoice person (independent of customer*). Not used for B2B company. */

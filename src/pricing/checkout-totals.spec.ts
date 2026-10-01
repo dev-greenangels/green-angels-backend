@@ -413,6 +413,75 @@ describe('computeCheckoutTotals EU carrier', () => {
     assert.equal(checkout.deliveryUnavailableReason, 'no_tariff')
     assert.equal(checkout.canPlaceOrder, false)
   })
+
+  it('AT default hides packeta-box from allowed methods', () => {
+    const checkout = computeCheckoutTotals({
+      productsSubtotal: 10,
+      subtotalBeforeDiscount: 10,
+      settings: baseSettings({
+        carrierRateTables: {
+          'packeta-box': [{ maxWeightKg: 15, amount: 9.99 }],
+          'packeta-courier:AT': [{ maxWeightKg: 15, amount: 5 }],
+        },
+        carrierSurcharges: surcharges,
+      }),
+      deliveryMethod: 'packeta-courier',
+      cartWeightKg: 1,
+      deliveryCountryCode: 'at',
+      taxOverride: { taxRatePercent: 0, taxIncluded: true, taxRegime: 'reverse_charge' },
+    })
+    assert.equal(checkout.allowedDeliveryMethods.includes('packeta-box'), false)
+    assert.ok(checkout.allowedDeliveryMethods.includes('packeta-courier'))
+    assert.equal(checkout.dobierkaAllowed, true)
+  })
+
+  it('methodsByCountry can enable packeta-box for AT', () => {
+    const checkout = computeCheckoutTotals({
+      productsSubtotal: 10,
+      subtotalBeforeDiscount: 10,
+      settings: baseSettings({
+        carrierRateTables: {
+          'packeta-box:AT': [{ maxWeightKg: 15, amount: 4 }],
+          'packeta-courier:AT': [{ maxWeightKg: 15, amount: 5 }],
+        },
+        carrierSurcharges: surcharges,
+        carrierConfigs: {
+          ...DEFAULT_CART_CHECKOUT_SETTINGS.carrierConfigs,
+          packeta: {
+            ...DEFAULT_CART_CHECKOUT_SETTINGS.carrierConfigs.packeta,
+            methodsByCountry: {
+              AT: { 'packeta-box': true, 'packeta-courier': true },
+            },
+          },
+        },
+      }),
+      deliveryMethod: 'packeta-box',
+      cartWeightKg: 1,
+      deliveryCountryCode: 'at',
+      taxOverride: { taxRatePercent: 0, taxIncluded: true, taxRegime: 'reverse_charge' },
+    })
+    assert.ok(checkout.allowedDeliveryMethods.includes('packeta-box'))
+    assert.equal(checkout.deliveryAmount, 4)
+  })
+
+  it('quoting disabled packeta-box for AT → no_tariff', () => {
+    const checkout = computeCheckoutTotals({
+      productsSubtotal: 10,
+      subtotalBeforeDiscount: 10,
+      settings: baseSettings({
+        carrierRateTables: {
+          'packeta-box': [{ maxWeightKg: 15, amount: 9.99 }],
+        },
+        carrierSurcharges: surcharges,
+      }),
+      deliveryMethod: 'packeta-box',
+      cartWeightKg: 1,
+      deliveryCountryCode: 'at',
+      taxOverride: { taxRatePercent: 0, taxIncluded: true, taxRegime: 'reverse_charge' },
+    })
+    assert.equal(checkout.deliveryUnavailableReason, 'no_tariff')
+    assert.equal(checkout.canPlaceOrder, false)
+  })
 })
 
 describe('COD fee (dobierka)', () => {
@@ -525,6 +594,20 @@ describe('price parity — Packeta countries + packaging + COD + VAT', () => {
         codFeeAmount: 1,
         codFeeMode: 'fixed',
         codFeeAmountsAreNet: true,
+        // Parity suite prices packeta-box for AT/DE — enable explicitly (defaults hide AT/DE box).
+        carrierConfigs: {
+          ...DEFAULT_CART_CHECKOUT_SETTINGS.carrierConfigs,
+          packeta: {
+            ...DEFAULT_CART_CHECKOUT_SETTINGS.carrierConfigs.packeta,
+            methodsByCountry: {
+              SK: { 'packeta-box': true, 'packeta-courier': true },
+              CZ: { 'packeta-box': true, 'packeta-courier': true },
+              AT: { 'packeta-box': true, 'packeta-courier': true },
+              HU: { 'packeta-box': true, 'packeta-courier': true },
+              DE: { 'packeta-box': true, 'packeta-courier': true },
+            },
+          },
+        },
       }),
       deliveryMethod: 'packeta-box',
       paymentMethod: 'dobierka',
@@ -1292,7 +1375,7 @@ describe('taxIncluded per-commercial-line VAT (ABRA-aligned)', () => {
     assert.equal(checkout.grandTotal, 32.9)
   })
 
-  it('I. B2B reverse charge → taxAmount 0', () => {
+  it('I. B2B reverse charge → taxAmount 0 and productsSubtotal from per-line commercial', () => {
     const checkout = computeCheckoutTotals({
       productsSubtotal: 27.9,
       subtotalBeforeDiscount: 27.9,
@@ -1310,6 +1393,31 @@ describe('taxIncluded per-commercial-line VAT (ABRA-aligned)', () => {
         stripVatRatePercent: 23,
       },
     })
+    assert.equal(checkout.taxAmount, 0)
+    // 13.95×2 = 27.90 gross → per-line net 22.68
+    assert.equal(checkout.productsSubtotal, 22.68)
+  })
+
+  it('RC example 12.30 → productsSubtotal 10.00 via productLines', () => {
+    const checkout = computeCheckoutTotals({
+      productsSubtotal: 12.3,
+      subtotalBeforeDiscount: 12.3,
+      productLines: [{ unitGross: 12.3, quantity: 1 }],
+      settings: skGrossSettings({
+        deliveryAmount: 0,
+        packagingAmount: 0,
+      }),
+      deliveryMethod: 'pickup',
+      taxOverride: {
+        taxRatePercent: 0,
+        taxIncluded: true,
+        taxRegime: 'reverse_charge',
+        taxCountryCode: 'de',
+        stripVatRatePercent: 23,
+      },
+    })
+    assert.equal(checkout.productsSubtotal, 10)
+    assert.equal(checkout.grandTotal, 10)
     assert.equal(checkout.taxAmount, 0)
   })
 

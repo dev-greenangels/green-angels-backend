@@ -22,7 +22,7 @@ describe('post-order profile fill contracts', () => {
   it('runs after durable create / idempotent replay, not inside order TX', () => {
     assert.match(
       src,
-      /clearOriginatingCartAfterSuccessfulOrder\(cartOwner, dto, 'create'\)[\s\S]{0,200}maybeFillUserProfileNamesFromOrder/,
+      /clearOriginatingCartAfterSuccessfulOrder\(cartOwner, dto, 'create', order\.id\)[\s\S]{0,200}maybeFillUserProfileNamesFromOrder/,
     )
   })
 })

@@ -52,19 +52,46 @@ describe('Packeta fuel / toll / insurance / nonDepot', () => {
     assert.equal(computeFuelNet(2.3, included), 0)
   })
 
-  it('nonDepot never auto-adds while automaticCalculation is false', () => {
-    assert.equal(computeNonDepotNet(separate), 0)
+  it('nonDepot amount folds into delivery when amount > 0', () => {
+    assert.equal(computeNonDepotNet(separate), 0.4)
+    assert.equal(computeNonDepotNet({ ...separate, nonDepot: { amount: 0, automaticCalculation: false } }), 0)
     const normalized = normalizeCartCheckoutSettings({
       carrierSurcharges: {
         'packeta-box:SK': { ...separate, nonDepot: { amount: 0.4, automaticCalculation: true } },
       },
     })
-    // Normalize forces automaticCalculation false
+    // Normalize still forces automaticCalculation false (no auto-inference from Packeta).
     assert.equal(
       normalized.carrierSurcharges['packeta-box:SK']?.nonDepot?.automaticCalculation,
       false,
     )
-    assert.equal(computeNonDepotNet(normalized.carrierSurcharges['packeta-box:SK']!), 0)
+    assert.equal(computeNonDepotNet(normalized.carrierSurcharges['packeta-box:SK']!), 0.4)
+  })
+
+  it('checkout deliveryAmount includes nonDepot once per parcel', () => {
+    const checkout = computeCheckoutTotals({
+      productsSubtotal: 10,
+      subtotalBeforeDiscount: 10,
+      settings: baseSettings({
+        carrierRateTables: { 'packeta-box:SK': [{ maxWeightKg: 15, amount: 2 }] },
+        carrierSurcharges: {
+          'packeta-box:SK': {
+            fuelPercent: 0,
+            fuelMode: 'none',
+            tollPerStartedKgNet: 0,
+            tollMode: 'none',
+            maxParcelWeightKg: 15,
+            insurance: { enabled: false, maxDeclaredValue: null, tiers: [] },
+            nonDepot: { amount: 0.4, automaticCalculation: false },
+          },
+        },
+      }),
+      deliveryMethod: 'packeta-box',
+      cartWeightKg: 1,
+      deliveryCountryCode: 'SK',
+      taxOverride: { taxRatePercent: 0, taxIncluded: true, taxRegime: 'reverse_charge' },
+    })
+    assert.equal(checkout.deliveryAmount, 2.4)
   })
 
   it('insurance free / paid / boundary / over max', () => {
@@ -128,6 +155,7 @@ describe('Packeta fuel / toll / insurance / nonDepot', () => {
           ...separate,
           fuelMode: 'none',
           tollMode: 'none',
+          nonDepot: { amount: 0, automaticCalculation: false },
           insurance: {
             enabled: true,
             maxDeclaredValue: 700,

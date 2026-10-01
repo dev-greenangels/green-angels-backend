@@ -5,11 +5,13 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
   Min,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator'
 
 function emptyToUndefined({ value }: { value: unknown }) {
@@ -20,8 +22,42 @@ function emptyToUndefined({ value }: { value: unknown }) {
 
 /**
  * Validated checkout-draft body. No cartId — ownership is cookie/JWT only.
- * Mirrors CheckoutDraftV1 recoverable fields (no consents / totals / secrets).
+ * Mirrors CheckoutDraftV1 recoverable fields (no consents / secrets).
+ * lastQuote is Backoffice informational only — never pricing authority.
  */
+class CheckoutDraftLastQuoteDto {
+  @IsString()
+  @MaxLength(40)
+  quotedAt!: string
+
+  @IsString()
+  @MaxLength(8)
+  currencyCode!: string
+
+  @Type(() => Number)
+  @IsNumber()
+  deliveryAmount!: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  packagingAmount?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  taxAmount?: number
+
+  @Type(() => Number)
+  @IsNumber()
+  grandTotal!: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  productsSubtotal?: number
+}
+
 export class UpdateCheckoutDraftDto {
   /** Version discriminator from CheckoutDraftV1; optional (server normalizes to v:1). */
   @IsOptional()
@@ -312,4 +348,10 @@ export class UpdateCheckoutDraftDto {
   @IsString({ each: true })
   @MaxLength(64, { each: true })
   promoCodes?: string[]
+
+  /** Informational BO snapshot only — never storefront pricing authority. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CheckoutDraftLastQuoteDto)
+  lastQuote?: CheckoutDraftLastQuoteDto
 }

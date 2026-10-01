@@ -63,6 +63,10 @@ export function stripePayExternalId(orderId: string): string {
   return `ext:GA:STRIPEPAY:${orderId}`
 }
 
+export function bankPayExternalId(orderId: string): string {
+  return `ext:GA:BANKPAY:${orderId}`
+}
+
 export function wholesaleAdresarExtId(inquiryId: string): string {
   return `ext:GA-WHO:${inquiryId}`
 }

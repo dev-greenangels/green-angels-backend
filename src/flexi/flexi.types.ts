@@ -85,6 +85,12 @@ export type FlexiSettings = {
   bankAccountCodeBank: string
   /** banka typDokl for Stripe clearing payment (optional until ops confirms) */
   stripeClearingBankDocTypeCode: string
+  /**
+   * Slovak/EU e-shop constant symbol (KS / konSym), e.g. 0008 = Platby za tovar.
+   * Applied to Received Order, ZÁLOHA, Stripe banka (and reusable for final invoice later).
+   * Not the ABRA document internal number (kod).
+   */
+  salesConstantSymbol: string
   /** Adresar stitek kod for wholesale partners (additive) */
   wholesaleAdresarLabelCode: string
   /** Received invoice type for faktura-prijata.typDokl (typ-faktury-prijate.kod), e.g. FAKTURA */
@@ -182,6 +188,7 @@ export const DEFAULT_FLEXI_SETTINGS: FlexiSettings = {
   bankAccountCodeCard: 'STRIPE',
   bankAccountCodeBank: 'BANKOVNÍ ÚČET',
   stripeClearingBankDocTypeCode: '',
+  salesConstantSymbol: '0008',
   wholesaleAdresarLabelCode: 'WHOLESALE',
   receivedInvoiceDocTypeCode: 'FAKTURA',
   shippingCenikKod: 'SHIPPING',
@@ -229,6 +236,7 @@ export type FlexiPublicSettings = {
   bankAccountCodeCard: string
   bankAccountCodeBank: string
   stripeClearingBankDocTypeCode: string
+  salesConstantSymbol: string
   wholesaleAdresarLabelCode: string
   receivedInvoiceDocTypeCode: string
   shippingCenikKod: string

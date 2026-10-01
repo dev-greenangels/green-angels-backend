@@ -13,7 +13,9 @@ import { validatePhoneForPolicy } from '../auth/market-phone.util'
 import { computeCheckoutTotals } from '../pricing/checkout-totals'
 import { normalizePromoCodesInput } from '../pricing/pricing.promo'
 import { PricingService } from '../pricing/pricing.service'
+import { resolveProductCommercialLine } from '../pricing/product-commercial-lines'
 import { convertEurToHuf, resolveCheckoutTax, assertDeliveryCountryAllowed, pickCartCnCode } from '../pricing/tax-regime'
+import { isIso31661Alpha2 } from '../common/iso-3166-1-alpha2'
 import { roundMoney } from '../pricing/pricing.helpers'
 import { packetaCheckoutOrderSnapshot } from '../packeta/packeta-fulfilment'
 import { PacketaService } from '../packeta/packeta.service'
@@ -29,6 +31,14 @@ import { VariantLabelService } from '../products/variant-label.service'
 import { ProductsService } from '../products/products.service'
 import { VARIANT_LABEL_ATTRIBUTE_SELECT } from '../products/variant-label.util'
 import { ViesService } from '../vies/vies.service'
+import {
+  isPersistableViesAudit,
+  normalizeEuVatNumberPart,
+  normalizeViesCountryCode,
+  resolveViesStatus,
+  type ViesStatus,
+  type ViesValidationResult,
+} from '../vies/vies.types'
 import { CreateOrderDto } from './dto/create-order.dto'
 import { isPersonNameUsableForMarket } from './market-person-name-policy'
 import { PatchOrderDto } from './dto/patch-order.dto'
@@ -48,7 +58,6 @@ import { normalizeNpListData } from '../nova-poshta/nova-poshta.client'
 import { buildOrderDocumentPdf } from '../mail/order-document-pdf'
 import { QueueService } from '../queue/queue.service'
 import { buildOrderDocumentPdfInput } from './order-pdf.builder'
-import type { ViesValidationResult } from '../vies/vies.types'
 import { FlexiQueueService } from '../flexi/flexi.queue.service'
 import { FlexiService } from '../flexi/flexi.service'
 import { FlexiSettingsService } from '../flexi/flexi.settings.service'
@@ -115,6 +124,9 @@ export type BackstageOrderItem = {
   id: string
   quantity: number
   priceAtPurchase: number
+  /** Payable commercial unit when snapshot present; else same as priceAtPurchase. */
+  commercialUnitPrice: number | null
+  commercialLineAmount: number | null
   lineTotal: number
   productVariantId: string
   productName: string
@@ -196,6 +208,25 @@ export type BackstageOrderDetail = BackstageOrderListItem & {
   erpLastErrorMessage: string | null
   erpLastSyncAt: string | null
   erpSyncedAt: string | null
+  /** ZÁLOHA sub-document (CARD/BANK). */
+  erpAdvanceExternalId: string | null
+  erpAdvanceNativeId: string | null
+  erpAdvanceKod: string | null
+  erpAdvanceSyncStatus: string | null
+  erpAdvanceSyncedAt: string | null
+  erpAdvanceLastError: string | null
+  /** Stripe clearing banka sub-document (CARD only). */
+  erpStripePayExternalId: string | null
+  erpStripePayNativeId: string | null
+  erpStripePaySyncStatus: string | null
+  erpStripePayLastError: string | null
+  /** Bank-transfer clearing banka (BANK only, after mark-paid). */
+  erpBankPayExternalId: string | null
+  erpBankPayNativeId: string | null
+  erpBankPayNativeKod: string | null
+  erpBankPaySyncStatus: string | null
+  erpBankPaySyncedAt: string | null
+  erpBankPayLastError: string | null
   buyerType: string | null
   taxRegime: string | null
   taxRatePercent: number | null
@@ -219,6 +250,16 @@ export type BackstageOrderDetail = BackstageOrderListItem & {
     registeredAddress: string | null
     source: string
   } | null
+  /** Canonical VIES state derived from viesCheck (+ VAT presence). */
+  viesStatus: ViesStatus
+  /**
+   * Present only on Retry VIES responses: audit always persisted; Flexi note sync is soft.
+   */
+  flexiNoteSync?: {
+    ok: boolean
+    skipped?: boolean
+    message: string
+  }
   items: BackstageOrderItem[]
   /** Backstage: confirmation PDF archived in private storage (no R2 key exposed). */
   confirmationPdfPresent: boolean
@@ -274,6 +315,8 @@ export type PublicOrderConfirmationItem = {
   id: string
   quantity: number
   priceAtPurchase: number
+  commercialUnitPrice: number | null
+  commercialLineAmount: number | null
   lineTotal: number
   productName: string
   latinName: string | null
@@ -343,6 +386,8 @@ export type PublicOrderConfirmation = {
   billingLastName: string | null
   deliveryPostalCode: string | null
   deliveryCountryCode: string | null
+  /** Canonical VIES state for customer messaging. */
+  viesStatus: ViesStatus
   items: PublicOrderConfirmationItem[]
 }
 
@@ -444,6 +489,10 @@ export class OrdersService {
     billingLastName: string | null
     deliveryPostalCode: string | null
     deliveryCountryCode: string | null
+    viesCheck?: {
+      valid: boolean | null
+      source?: string | null
+    } | null
   }) {
     return {
       buyerType: order.buyerType,
@@ -466,6 +515,10 @@ export class OrdersService {
       billingLastName: order.billingLastName,
       deliveryPostalCode: order.deliveryPostalCode,
       deliveryCountryCode: order.deliveryCountryCode,
+      viesStatus: resolveViesStatus({
+        companyVatId: order.companyVatId,
+        viesCheck: order.viesCheck ?? null,
+      }),
     }
   }
 
@@ -966,6 +1019,22 @@ export class OrdersService {
       erpLastErrorMessage: order.erpLastErrorMessage ?? null,
       erpLastSyncAt: order.erpLastSyncAt?.toISOString() ?? null,
       erpSyncedAt: order.erpSyncedAt?.toISOString() ?? null,
+      erpAdvanceExternalId: order.erpAdvanceExternalId ?? null,
+      erpAdvanceNativeId: order.erpAdvanceNativeId ?? null,
+      erpAdvanceKod: order.erpAdvanceKod ?? null,
+      erpAdvanceSyncStatus: order.erpAdvanceSyncStatus ?? null,
+      erpAdvanceSyncedAt: order.erpAdvanceSyncedAt?.toISOString() ?? null,
+      erpAdvanceLastError: order.erpAdvanceLastError ?? null,
+      erpStripePayExternalId: order.erpStripePayExternalId ?? null,
+      erpStripePayNativeId: order.erpStripePayNativeId ?? null,
+      erpStripePaySyncStatus: order.erpStripePaySyncStatus ?? null,
+      erpStripePayLastError: order.erpStripePayLastError ?? null,
+      erpBankPayExternalId: order.erpBankPayExternalId ?? null,
+      erpBankPayNativeId: order.erpBankPayNativeId ?? null,
+      erpBankPayNativeKod: order.erpBankPayNativeKod ?? null,
+      erpBankPaySyncStatus: order.erpBankPaySyncStatus ?? null,
+      erpBankPaySyncedAt: order.erpBankPaySyncedAt?.toISOString() ?? null,
+      erpBankPayLastError: order.erpBankPayLastError ?? null,
       buyerType: order.buyerType,
       taxRegime: order.taxRegime,
       taxRatePercent: order.taxRatePercent,
@@ -979,13 +1048,27 @@ export class OrdersService {
       companyCity: order.companyCity,
       companyPostalCode: order.companyPostalCode,
       viesCheck: this.mapViesCheck(order.viesCheck),
+      viesStatus: resolveViesStatus({
+        companyVatId: order.companyVatId,
+        viesCheck: order.viesCheck,
+      }),
       items: order.items.map((item) => {
         const price = Number(item.priceAtPurchase)
+        const commercialUnit =
+          item.commercialUnitPrice != null ? Number(item.commercialUnitPrice) : null
+        const commercialLine =
+          item.commercialLineAmount != null ? Number(item.commercialLineAmount) : null
+        const lineTotal =
+          commercialLine != null
+            ? commercialLine
+            : Math.round(price * item.quantity * 100) / 100
         return {
           id: item.id,
           quantity: item.quantity,
           priceAtPurchase: price,
-          lineTotal: Math.round(price * item.quantity * 100) / 100,
+          commercialUnitPrice: commercialUnit,
+          commercialLineAmount: commercialLine,
+          lineTotal,
           productVariantId: item.productVariantId ?? '',
           productName: item.productName,
           latinName: item.latinName ?? null,
@@ -1035,6 +1118,7 @@ export class OrdersService {
         items: {
           orderBy: { id: 'asc' },
         },
+        viesCheck: true,
       },
     })
 
@@ -1152,12 +1236,22 @@ export class OrdersService {
       comment: order.comment,
       ...this.mapPublicOrderFields(order),
       items: order.items.map((item) => {
-        const lineTotal = Math.round(Number(item.priceAtPurchase) * item.quantity * 100) / 100
+        const price = Number(item.priceAtPurchase)
+        const commercialUnit =
+          item.commercialUnitPrice != null ? Number(item.commercialUnitPrice) : null
+        const commercialLine =
+          item.commercialLineAmount != null ? Number(item.commercialLineAmount) : null
+        const lineTotal =
+          commercialLine != null
+            ? commercialLine
+            : Math.round(price * item.quantity * 100) / 100
         const localized = item.productVariantId ? localizedNames?.get(item.productVariantId) : null
         return {
           id: item.id,
           quantity: item.quantity,
-          priceAtPurchase: Number(item.priceAtPurchase),
+          priceAtPurchase: price,
+          commercialUnitPrice: commercialUnit,
+          commercialLineAmount: commercialLine,
           lineTotal,
           productName: localized?.productName ?? item.productName,
           latinName: item.latinName ?? null,
@@ -1359,7 +1453,8 @@ export class OrdersService {
 
   /**
    * Manual bank-transfer payment confirmation (no statement matching this phase).
-   * Applies paymentStatus=success, paidAt, shipByDate, AWAITING_PAYMENT→PROCESSING.
+   * Applies paymentStatus=success, paidAt, shipByDate, AWAITING_PAYMENT→PROCESSING,
+   * then soft-creates ABRA BANKPAY (isolated from website payment success).
    */
   async markBankTransferPaid(id: string): Promise<BackstageOrderDetail> {
     const order = await this.prisma.order.findUnique({
@@ -1369,6 +1464,7 @@ export class OrdersService {
         paymentMethod: true,
         paymentStatus: true,
         status: true,
+        erpBankPaySyncStatus: true,
       },
     })
     if (!order) {
@@ -1382,14 +1478,16 @@ export class OrdersService {
     if (order.status === 'CANCELLED') {
       throw new BadRequestException('Скасоване замовлення не можна позначити оплаченим.')
     }
-    if (order.paymentStatus === 'success') {
-      return this.findOne(id)
-    }
 
-    await this.paymentLifecycle.applyPaymentSuccess(id, {
-      provider: 'manual-bank',
-      paymentId: `manual-bank:${id}`,
-    })
+    if (order.paymentStatus !== 'success') {
+      await this.paymentLifecycle.applyPaymentSuccess(id, {
+        provider: 'manual-bank',
+        paymentId: `manual-bank:${id}`,
+      })
+    } else if ((order.erpBankPaySyncStatus ?? '').trim() !== 'SYNCED') {
+      // Already paid on website — idempotent ERP retry for BANKPAY only.
+      await this.flexi.registerBankMatchPayment(id)
+    }
 
     return this.findOne(id)
   }
@@ -1581,6 +1679,129 @@ export class OrdersService {
   }
 
   /**
+   * Backstage Retry VIES — AUDIT ONLY.
+   * Updates OrderViesCheck evidence; NEVER mutates taxRegime / taxAmount / totals /
+   * payment / Flexi documents. Historical financial snapshot stays immutable.
+   */
+  async retryViesCheck(id: string): Promise<BackstageOrderDetail> {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: { viesCheck: true },
+    })
+    if (!order) {
+      throw new NotFoundException('Замовлення не знайдено.')
+    }
+
+    const vatCountryCode =
+      normalizeViesCountryCode(order.vatCountryCode) ||
+      normalizeViesCountryCode(order.viesCheck?.vatCountryCode)
+    const vatNumber =
+      normalizeEuVatNumberPart(vatCountryCode, order.companyVatId) ||
+      normalizeEuVatNumberPart(vatCountryCode, order.viesCheck?.vatNumber)
+
+    if (!vatCountryCode || vatCountryCode.length !== 2 || !vatNumber) {
+      throw new BadRequestException(
+        'Неможливо повторити VIES: у замовленні немає IČ DPH / коду країни.',
+      )
+    }
+
+    const [cartBank, store] = await Promise.all([
+      this.settings.getCartCheckoutSettings(),
+      this.settings.getStoreContactSettings(),
+    ])
+    const bankForRequester =
+      cartBank.bankDetailsSource === 'store' ? store.companyDetails : cartBank.bankDetails
+
+    const audit = await this.vies.validateVatForAudit(
+      vatCountryCode,
+      vatNumber,
+      bankForRequester.icDph,
+    )
+
+    if (!isPersistableViesAudit(audit)) {
+      throw new BadRequestException(audit.message || 'Невірний формат IČ DPH.')
+    }
+
+    const previousSnapshot = order.viesCheck
+      ? {
+          valid: order.viesCheck.valid,
+          checkedAt: order.viesCheck.checkedAt.toISOString(),
+          viesRequestDate: order.viesCheck.viesRequestDate,
+          requestIdentifier: order.viesCheck.requestIdentifier,
+          registeredName: order.viesCheck.registeredName,
+          registeredAddress: order.viesCheck.registeredAddress,
+          source: order.viesCheck.source,
+          rawResponse: order.viesCheck.rawResponse,
+        }
+      : null
+
+    const rawResponse: Prisma.InputJsonValue = {
+      retryAt: new Date().toISOString(),
+      previousAttempt: previousSnapshot,
+      latest: audit.rawResponse
+        ? (JSON.parse(JSON.stringify(audit.rawResponse)) as Prisma.InputJsonValue)
+        : {
+            valid: audit.valid,
+            countryCode: audit.countryCode,
+            vatNumber: audit.vatNumber,
+            source: audit.source,
+            message: audit.message,
+          },
+    }
+
+    const checkData = {
+      vatCountryCode: audit.countryCode,
+      vatNumber: audit.vatNumber,
+      valid: audit.valid,
+      checkedAt: new Date(),
+      viesRequestDate: audit.checkedAt ?? null,
+      requestIdentifier: audit.requestIdentifier ?? null,
+      registeredName: audit.name ?? null,
+      registeredAddress: audit.address ?? null,
+      requesterCountryCode: audit.requesterCountryCode ?? null,
+      requesterVatNumber: audit.requesterVatNumber ?? null,
+      source: audit.source ?? 'vies_rest_audit',
+      rawResponse,
+    }
+
+    if (order.viesCheck) {
+      await this.prisma.orderViesCheck.update({
+        where: { orderId: order.id },
+        data: checkData,
+      })
+    } else {
+      await this.prisma.orderViesCheck.create({
+        data: {
+          orderId: order.id,
+          ...checkData,
+        },
+      })
+    }
+
+    // Soft Flexi note sync — never rolls back VIES audit; never full exportOrder.
+    let flexiNoteSync: BackstageOrderDetail['flexiNoteSync']
+    try {
+      const sync = await this.flexi.syncOrderViesPoznamNote(order.id)
+      flexiNoteSync = {
+        ok: sync.ok,
+        skipped: sync.skipped,
+        message: sync.message,
+      }
+    } catch (error) {
+      flexiNoteSync = {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      }
+      this.logger.warn(
+        `retryViesCheck(${id}): Flexi poznam sync threw — VIES audit kept: ${flexiNoteSync.message}`,
+      )
+    }
+
+    const detail = await this.findOne(id)
+    return { ...detail, flexiNoteSync }
+  }
+
+  /**
    * Manual ABRA re-export for backstage. Reuses FlexiService.exportOrder
    * (stable ext:GA:{order.id} + GET-before-PUT). Synchronous for manager UX;
    * transport/auth failures enqueue durable retry without a blind second PUT.
@@ -1591,10 +1812,15 @@ export class OrdersService {
       select: {
         id: true,
         status: true,
+        paymentMethod: true,
+        paymentStatus: true,
         erpSyncStatus: true,
         externalErpId: true,
         erpNativeId: true,
         erpNativeKod: true,
+        erpAdvanceSyncStatus: true,
+        erpStripePaySyncStatus: true,
+        erpBankPaySyncStatus: true,
       },
     })
     if (!order) throw new NotFoundException('Замовлення не знайдено.')
@@ -1612,15 +1838,37 @@ export class OrdersService {
       )
     }
 
+    if (!(await this.flexi.isConfigured())) {
+      throw new BadRequestException('ABRA Flexi не налаштовано.')
+    }
+
     const hasNativeDoc = Boolean(
       order.erpNativeId?.trim() || order.erpNativeKod?.trim(),
     )
-    if (erpStatus === 'SYNCED' && (order.externalErpId?.trim() || hasNativeDoc)) {
+    const receivedSynced =
+      erpStatus === 'SYNCED' && Boolean(order.externalErpId?.trim() || hasNativeDoc)
+
+    const needAdvance =
+      (isBankPaymentMethod(order.paymentMethod) || isCardPaymentMethod(order.paymentMethod)) &&
+      (order.erpAdvanceSyncStatus ?? '').trim() === 'FAILED'
+    const needStripePay =
+      isCardPaymentMethod(order.paymentMethod) &&
+      (order.erpStripePaySyncStatus ?? '').trim() === 'FAILED'
+    const needBankPay =
+      isBankPaymentMethod(order.paymentMethod) &&
+      order.paymentStatus === 'success' &&
+      (order.erpBankPaySyncStatus ?? '').trim() !== 'SYNCED'
+
+    // Received Order already SYNCED — only retry payment sub-documents.
+    if (receivedSynced && (needAdvance || needStripePay || needBankPay)) {
+      if (needAdvance) await this.flexi.createAdvanceInvoice(id)
+      if (needStripePay) await this.flexi.registerMatchPayment(id)
+      if (needBankPay) await this.flexi.registerBankMatchPayment(id)
       return this.findOne(id)
     }
 
-    if (!(await this.flexi.isConfigured())) {
-      throw new BadRequestException('ABRA Flexi не налаштовано.')
+    if (receivedSynced) {
+      return this.findOne(id)
     }
 
     const now = new Date()
@@ -1644,6 +1892,13 @@ export class OrdersService {
     }
 
     if (result.ok) {
+      // After (re)export, bank paid orders may still need BANKPAY if mark-paid ran earlier.
+      if (
+        isBankPaymentMethod(order.paymentMethod) &&
+        order.paymentStatus === 'success'
+      ) {
+        await this.flexi.registerBankMatchPayment(id)
+      }
       return this.findOne(id)
     }
 
@@ -1847,6 +2102,9 @@ export class OrdersService {
     if (!dto.billingCountryCode?.trim()) {
       throw new BadRequestException('Вкажіть країну фактураційної адреси.')
     }
+    if (!isIso31661Alpha2(dto.billingCountryCode)) {
+      throw new BadRequestException('Невірний код країни фактураційної адреси.')
+    }
 
     // B2C: house number required (same completeness as courier address).
     // B2B: companyStreet is a single line — house number optional.
@@ -1940,7 +2198,12 @@ export class OrdersService {
     const cached = await this.orderIdempotency.getMatchingResult(key, fingerprint)
     if (cached) {
       // Replay: only clear if cart still matches this order's items (no newer lines).
-      await this.clearOriginatingCartAfterSuccessfulOrder(cartOwner, dto, 'idempotent_replay')
+      await this.clearOriginatingCartAfterSuccessfulOrder(
+        cartOwner,
+        dto,
+        'idempotent_replay',
+        cached.id,
+      )
       await this.maybeFillUserProfileNamesFromOrder({
         userId: sessionUserId ?? null,
         customerFirstName: dto.customerFirstName,
@@ -1953,7 +2216,12 @@ export class OrdersService {
     if (!acquired) {
       const waited = await this.orderIdempotency.waitForMatchingResult(key, fingerprint)
       if (waited) {
-        await this.clearOriginatingCartAfterSuccessfulOrder(cartOwner, dto, 'idempotent_replay')
+        await this.clearOriginatingCartAfterSuccessfulOrder(
+          cartOwner,
+          dto,
+          'idempotent_replay',
+          waited.id,
+        )
         await this.maybeFillUserProfileNamesFromOrder({
           userId: sessionUserId ?? null,
           customerFirstName: dto.customerFirstName,
@@ -1979,7 +2247,12 @@ export class OrdersService {
         fingerprint,
       )
       if (cachedAfterLock) {
-        await this.clearOriginatingCartAfterSuccessfulOrder(cartOwner, dto, 'idempotent_replay')
+        await this.clearOriginatingCartAfterSuccessfulOrder(
+          cartOwner,
+          dto,
+          'idempotent_replay',
+          cachedAfterLock.id,
+        )
         await this.maybeFillUserProfileNamesFromOrder({
           userId: sessionUserId ?? null,
           customerFirstName: dto.customerFirstName,
@@ -2006,34 +2279,41 @@ export class OrdersService {
   }
 
   /**
-   * Best-effort cart empty after Order is durable. Never rolls back the Order.
-   * Fresh create: clear owned cart unconditionally.
-   * Idempotent replay: clear only when cart lines are covered by this DTO's items
-   * (avoids wiping items the customer added after the original purchase).
+   * Best-effort close+clear of the originating Cart after Order is durable.
+   * Never rolls back the Order.
+   * Authority: Order.cartId only — never resolve Cart by owner after create.
    */
   private async clearOriginatingCartAfterSuccessfulOrder(
-    cartOwner: CartOwner | null | undefined,
-    dto: CreateOrderDto,
+    _cartOwner: CartOwner | null | undefined,
+    _dto: CreateOrderDto,
     mode: 'create' | 'idempotent_replay',
+    orderId?: string,
   ): Promise<void> {
-    if (!cartOwner) return
+    if (!orderId) return
     try {
-      if (mode === 'create') {
-        await this.carts.clearCartContentsForOwner(cartOwner)
+      const order = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        select: { id: true, cartId: true },
+      })
+      if (!order) return
+
+      const cartId = order.cartId
+      if (!cartId) {
+        this.logger.log(
+          `Skipped post-order cart close (${mode}): order ${orderId} has no cartId.`,
+        )
         return
       }
-      const result = await this.carts.clearCartContentsForOwnerIfCoveredByOrderItems(
-        cartOwner,
-        dto.items,
-      )
-      if (!result.cleared && result.skippedReason === 'cart_has_newer_items') {
-        this.logger.log(
-          `Skipped post-order cart clear on idempotent replay (${cartOwner.kind}): cart has newer items.`,
+
+      const result = await this.carts.closeCartForOrder(cartId, orderId)
+      if (!result.closed) {
+        this.logger.warn(
+          `Post-order cart close skipped (${mode}, cart=${cartId}): ${result.reason ?? 'unknown'}`,
         )
       }
     } catch (err) {
       this.logger.warn(
-        `Post-order cart clear failed (${mode}, ${cartOwner.kind}): ${
+        `Post-order cart close failed (${mode}, order=${orderId}): ${
           err instanceof Error ? err.message : String(err)
         }`,
       )
@@ -2164,10 +2444,20 @@ export class OrdersService {
       }
     }
 
-    const lineItems = quote.lines.map((line) => ({
+    const lineItems: Array<{
+      productVariantId: string
+      quantity: number
+      priceAtPurchase: number
+      commercialUnitPrice: number
+      commercialLineAmount: number
+      stockToDecrement: number
+    }> = quote.lines.map((line) => ({
       productVariantId: line.productVariantId,
       quantity: line.quantity,
       priceAtPurchase: line.unitPrice,
+      // Filled after tax resolution (RC strip). Placeholder = catalog until then.
+      commercialUnitPrice: line.unitPrice,
+      commercialLineAmount: roundMoney(line.unitPrice * line.quantity),
       stockToDecrement: line.stockToDecrement,
     }))
 
@@ -2176,6 +2466,8 @@ export class OrdersService {
         productVariantId: gift.productVariantId,
         quantity: gift.quantity,
         priceAtPurchase: 0,
+        commercialUnitPrice: 0,
+        commercialLineAmount: 0,
         stockToDecrement: 0,
       })
     }
@@ -2186,20 +2478,30 @@ export class OrdersService {
     let viesValid: boolean | null = null
     let viesAudit: ViesValidationResult | null = null
     const buyerType = dto.buyerType === 'company' ? 'company' : 'individual'
-    const vatCountryCode = dto.vatCountryCode?.trim().toUpperCase() || null
-    if (buyerType === 'company' && dto.companyVatId?.trim() && vatCountryCode) {
+    const vatCcRaw = normalizeViesCountryCode(dto.vatCountryCode)
+    const vatCountryCode = vatCcRaw.length === 2 ? vatCcRaw : null
+    const normalizedCompanyVatId = dto.companyVatId?.trim()
+      ? normalizeEuVatNumberPart(vatCountryCode, dto.companyVatId)
+      : null
+    if (buyerType === 'company' && normalizedCompanyVatId && vatCountryCode) {
       const [cartBank, store] = await Promise.all([
         Promise.resolve(cartSettings),
         this.settings.getStoreContactSettings(),
       ])
       const bankForRequester =
         cartBank.bankDetailsSource === 'store' ? store.companyDetails : cartBank.bankDetails
-      viesAudit = await this.vies.validateVatForAudit(
+      const auditResult = await this.vies.validateVatForAudit(
         vatCountryCode,
-        dto.companyVatId,
+        normalizedCompanyVatId,
         bankForRequester.icDph,
       )
-      viesValid = viesAudit.valid
+      // Local format rejects are not VIES attempts — do not persist as OrderViesCheck.
+      if (isPersistableViesAudit(auditResult)) {
+        viesAudit = auditResult
+        viesValid = auditResult.valid
+      } else {
+        viesValid = null
+      }
     }
 
     const cnByVariant = await this.pricing.getCnCodesForVariantIds(
@@ -2219,6 +2521,18 @@ export class OrdersService {
       fallbackTaxRatePercent: cartSettings.taxRatePercent,
       fallbackTaxIncluded: cartSettings.taxIncluded,
     })
+
+    for (const item of lineItems) {
+      const commercial = resolveProductCommercialLine({
+        catalogBasisUnit: item.priceAtPurchase,
+        quantity: item.quantity,
+        taxRegime: tax.taxRegime,
+        taxIncluded: tax.taxIncluded,
+        stripVatRatePercent: tax.stripVatRatePercent,
+      })
+      item.commercialUnitPrice = commercial.commercialUnit
+      item.commercialLineAmount = commercial.lineAmount
+    }
 
     if (
       !assertDeliveryCountryAllowed(
@@ -2305,6 +2619,8 @@ export class OrdersService {
       )
       for (const item of lineItems) {
         item.priceAtPurchase = convertEurToHuf(item.priceAtPurchase, rate)
+        item.commercialUnitPrice = convertEurToHuf(item.commercialUnitPrice, rate)
+        item.commercialLineAmount = convertEurToHuf(item.commercialLineAmount, rate)
       }
     } else if (profile?.currency === 'EUR') {
       currency = 'EUR'
@@ -2410,7 +2726,7 @@ export class OrdersService {
     const companyLegalName = dto.companyLegalName?.trim() || null
     const companyIco = dto.companyIco?.trim() || null
     const companyDic = dto.companyDic?.trim() || null
-    const companyVatId = dto.companyVatId?.trim() || null
+    const companyVatId = normalizedCompanyVatId || null
     const companyStreet = dto.companyStreet?.trim() || null
     const companyCity = dto.companyCity?.trim() || null
     const companyPostalCode = dto.companyPostalCode?.trim() || null
@@ -2448,7 +2764,7 @@ export class OrdersService {
           lines: lineItems.map((item) => ({
             productVariantId: item.productVariantId,
             quantity: item.quantity,
-            lineTotal: Math.round(item.priceAtPurchase * item.quantity * 100) / 100,
+            lineTotal: item.commercialLineAmount,
           })),
         })
       : null
@@ -2491,6 +2807,10 @@ export class OrdersService {
       isExternalInventory && shouldExportNow && !erpOfflineAccepted
 
     const restockNotifyIds = new Set<string>()
+    // Capture OPEN cart id before Order create so idempotent replay never closes a later cart.
+    const originatingCartId = cartOwner
+      ? ((await this.carts.findOpenCartByOwner(cartOwner))?.id ?? null)
+      : null
     const order = await this.prisma.$transaction(async (tx) => {
       const created = await tx.order.create({
         data: {
@@ -2575,6 +2895,7 @@ export class OrdersService {
           billingLastName: dto.billingLastName?.trim() || null,
           preferredShipDate,
           userId,
+          cartId: originatingCartId,
           viesCheck: viesAudit
             ? {
                 create: {
@@ -2615,6 +2936,8 @@ export class OrdersService {
                 quantity: item.quantity,
                 stockDecremented: item.stockToDecrement,
                 priceAtPurchase: item.priceAtPurchase,
+                commercialUnitPrice: item.commercialUnitPrice,
+                commercialLineAmount: item.commercialLineAmount,
                 productName: snapshot.productName,
                 latinName: snapshot.latinName,
                 productSlug: snapshot.productSlug,
@@ -2882,7 +3205,7 @@ export class OrdersService {
     // Order is durable for the customer from here (ERP reject paths above either
     // keep the order or delete+throw). Clear cart outside the order transaction;
     // failure must not roll back the Order. Stripe/emails still use Order only.
-    await this.clearOriginatingCartAfterSuccessfulOrder(cartOwner, dto, 'create')
+    await this.clearOriginatingCartAfterSuccessfulOrder(cartOwner, dto, 'create', order.id)
     await this.maybeFillUserProfileNamesFromOrder({
       userId,
       customerFirstName: dto.customerFirstName,
@@ -2904,7 +3227,7 @@ export class OrdersService {
           latinName: snapshot.latinName,
           variantLabel: snapshot.variantLabel,
           quantity: item.quantity,
-          lineTotal: Math.round(item.priceAtPurchase * item.quantity * 100) / 100,
+          lineTotal: item.commercialLineAmount,
         }
       }),
     }

@@ -117,6 +117,17 @@ export type PacketaServiceCodCarrierSettings = {
   supportsCod: boolean
   maxAmount: number | null
   carrierCost: PacketaCodCarrierCostSettings
+  /**
+   * When set, overrides global Packeta `cod.customerPrice` for this method:CC.
+   * Omit = inherit the carrier-level customer price.
+   */
+  customerPrice?: PacketaCustomerCodPriceSettings
+}
+
+/** Which Packeta checkout methods are offered for a destination country (ISO CC). */
+export type PacketaCountryMethodsSettings = {
+  'packeta-box'?: boolean
+  'packeta-courier'?: boolean
 }
 
 export type CarrierConfig = {
@@ -124,6 +135,12 @@ export type CarrierConfig = {
   /** Physical limits keyed by customer delivery method slug (packeta-box, …). */
   services?: Partial<Record<string, CarrierServicePhysicalLimits>>
   cod?: PacketaCodSettings
+  /**
+   * Packeta-only: per destination country method visibility at checkout.
+   * Keys: ISO 2-letter uppercase (SK, AT, …). Missing country → built-in defaults
+   * (box: SK/CZ/HU; courier: SK/CZ/AT/DE/HU).
+   */
+  methodsByCountry?: Record<string, PacketaCountryMethodsSettings>
   /**
    * Packeta-only: internal service identity catalog + maps.
    * Separate from physical `services` and from Packeta numeric carrier IDs.
@@ -366,8 +383,9 @@ export type CarrierInsuranceSettings = {
 }
 
 /**
- * Contractual non-depot surcharge reference.
- * automaticCalculation is always false until a deterministic Packeta condition exists.
+ * Non-depot posting surcharge (Packeta: hand-in outside depot).
+ * Amount is added into customer deliveryAmount (one storefront “Delivery” line).
+ * `automaticCalculation` stays false — amount is taken as configured, not inferred.
  */
 export type CarrierNonDepotSettings = {
   amount: number
@@ -392,8 +410,9 @@ export type CarrierSurchargeConfig = {
    * Fee is NET and follows carrier tariff NET/GROSS conversion.
    */
   insurance?: CarrierInsuranceSettings
-  /**
-   * Optional non-depot reference. Never auto-added while automaticCalculation is false.
+/**
+   * Optional non-depot posting amount. When amount > 0, added into deliveryAmount
+   * (folded into the single Delivery line on the storefront).
    */
   nonDepot?: CarrierNonDepotSettings
 }

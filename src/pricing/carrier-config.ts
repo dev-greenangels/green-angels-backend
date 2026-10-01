@@ -10,13 +10,66 @@ import type {
   DeliverySizeLimit,
   PacketaCodAmountTier,
   PacketaCodSettings,
+  PacketaCountryMethodsSettings,
   PacketaCustomerCodFeeBase,
+  PacketaCustomerCodPriceSettings,
 } from '../settings/cart-checkout.types'
 import { carrierRateLookupKeys, customerShippingRateLookupKeys } from './carrier-rate-lookup'
 import { DEFAULT_DELIVERY_SIZE_LIMITS } from '../settings/cart-checkout.types'
 import { roundMoney } from './pricing.helpers'
 
 export type CarrierId = 'packeta' | 'gls' | 'novaPoshta'
+
+/** Default Packeta method availability when methodsByCountry has no entry for CC. */
+export const DEFAULT_PACKETA_BOX_COUNTRIES = ['SK', 'CZ', 'HU'] as const
+export const DEFAULT_PACKETA_COURIER_COUNTRIES = ['SK', 'CZ', 'AT', 'DE', 'HU'] as const
+
+export function defaultPacketaMethodEnabledForCountry(
+  method: 'packeta-box' | 'packeta-courier',
+  countryCode: string,
+): boolean {
+  const cc = countryCode.trim().toUpperCase()
+  if (method === 'packeta-box') {
+    return (DEFAULT_PACKETA_BOX_COUNTRIES as readonly string[]).includes(cc)
+  }
+  return (DEFAULT_PACKETA_COURIER_COUNTRIES as readonly string[]).includes(cc)
+}
+
+/**
+ * Whether a Packeta checkout method is offered for the destination country.
+ * Explicit methodsByCountry[CC][method] wins; otherwise built-in defaults.
+ * Non-Packeta methods always true.
+ */
+export function isPacketaMethodEnabledForCountry(
+  settings: Pick<CartCheckoutSettings, 'carrierConfigs'>,
+  method: string,
+  countryCode?: string | null,
+): boolean {
+  if (!method.startsWith('packeta-')) return true
+  if (method !== 'packeta-box' && method !== 'packeta-courier') return true
+  const cc = (countryCode ?? '').trim().toUpperCase()
+  if (!cc || !/^[A-Z]{2}$/.test(cc)) {
+    // No destination yet — keep globally enabled methods visible.
+    return true
+  }
+  const configured = settings.carrierConfigs?.packeta?.methodsByCountry?.[cc] as
+    | PacketaCountryMethodsSettings
+    | undefined
+  if (configured && method in configured) {
+    return configured[method] === true
+  }
+  return defaultPacketaMethodEnabledForCountry(method, cc)
+}
+
+export function filterPacketaMethodsByCountry<T extends string>(
+  methods: T[],
+  settings: Pick<CartCheckoutSettings, 'carrierConfigs'>,
+  countryCode?: string | null,
+): T[] {
+  return methods.filter((method) =>
+    isPacketaMethodEnabledForCountry(settings, method, countryCode),
+  )
+}
 
 export function carrierIdFromDeliveryMethod(method: string | undefined): CarrierId | null {
   if (!method) return null
@@ -100,6 +153,7 @@ function resolveCustomerFeeBaseAmount(
 
 /**
  * C — Customer COD fee for Packeta + dobierka.
+ * Country/method byService.customerPrice overrides global customerPrice when present.
  * Returns null when Packeta customerPrice is not configured → caller uses legacy cart.codFee*.
  */
 export function resolvePacketaCustomerCodFee(
@@ -109,13 +163,26 @@ export function resolvePacketaCustomerCodFee(
     deliveryMethod?: string
     productsSubtotal: number
     grandTotalBeforeCod: number
+    countryCode?: string | null
   },
 ): { fee: number; feeAmountsAreNet: boolean; overMax: boolean } | null {
   if (input.paymentMethod !== 'dobierka') return null
   if (!input.deliveryMethod?.startsWith('packeta')) return null
 
   const cod = settings.carrierConfigs?.packeta?.cod as PacketaCodSettings | undefined
-  const customer = cod?.customerPrice
+  if (!cod) return null
+
+  let customer: PacketaCustomerCodPriceSettings | undefined = cod.customerPrice
+  const method = input.deliveryMethod.trim()
+  const by = cod.byService ?? {}
+  for (const key of customerShippingRateLookupKeys(method, input.countryCode)) {
+    const entry = by[key]
+    if (entry?.customerPrice) {
+      customer = entry.customerPrice
+      break
+    }
+  }
+
   if (!customer || customer.mode === 'none') return null
 
   const base = resolveCustomerFeeBaseAmount(customer.feeBase, {
@@ -156,6 +223,7 @@ export function resolvePacketaCodFee(
     productsSubtotal: number
     codCollectedAmount?: number
     grandTotalBeforeCod?: number
+    countryCode?: string | null
   },
 ): { fee: number; usedPacketaTiers: boolean; feeAmountsAreNet: boolean } | null {
   const preCod =
@@ -167,6 +235,7 @@ export function resolvePacketaCodFee(
     deliveryMethod: input.deliveryMethod,
     productsSubtotal: input.productsSubtotal,
     grandTotalBeforeCod: preCod,
+    countryCode: input.countryCode,
   })
   if (!resolved) return null
   if (resolved.overMax) {
