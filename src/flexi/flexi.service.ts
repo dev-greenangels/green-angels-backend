@@ -78,6 +78,7 @@ import {
   adresarRefFromRow,
   adresarRowMatchesTaxCandidates,
   buildTaxIdCandidates,
+  buildWholesaleAdresarKontakt,
   mergeStitkyCodesAdditive,
   normalizeAdresarEmail,
   parseStitkyCodes,
@@ -3539,6 +3540,13 @@ export class FlexiService {
         if (inquiry.companyVatId) adresar.vatId = inquiry.companyVatId
         if (inquiry.city?.trim()) adresar.mesto = inquiry.city.trim()
         if (labelCode) adresar.stitky = stitkyCodesToWriteValue([labelCode])
+
+        const kontakt = buildWholesaleAdresarKontakt({
+          fullName: inquiry.fullName,
+          email: inquiry.email,
+          phone: inquiry.phone,
+        })
+        if (kontakt) adresar.kontakty = [kontakt]
 
         await this.client.putAdresar(adresar)
         row = await this.client.findAdresarByExtId(createExtId!)

@@ -6,10 +6,15 @@ import {
   adresarRowMatchesTaxCandidates,
   buildAdresarTaxOrFilter,
   buildTaxIdCandidates,
+  buildWholesaleAdresarKontakt,
+  mergeStitkyCodesAdditive,
   normalizeAdresarEmail,
+  parseStitkyCodes,
+  splitPersonName,
   stableCustomerEmailExtId,
   stableCustomerTaxExtId,
   stableSupplierExtId,
+  stitkyCodesToWriteValue,
   taxIdMatchKeys,
 } from './flexi-adresar-lookup'
 
@@ -89,5 +94,62 @@ describe('stable ids', () => {
 
   it('prefers kod for adresar ref', () => {
     assert.equal(adresarRefFromRow({ kod: 'VITRO', id: 1 }), 'code:VITRO')
+  })
+})
+
+describe('stitky (Flexi labels)', () => {
+  it('writes bare codes without code: prefix', () => {
+    assert.equal(stitkyCodesToWriteValue(['WHOLESALE']), 'WHOLESALE')
+    assert.equal(stitkyCodesToWriteValue(['WHOLESALE', 'VIP']), 'WHOLESALE,VIP')
+  })
+
+  it('strips accidental code: prefix on write', () => {
+    assert.equal(stitkyCodesToWriteValue(['code:WHOLESALE']), 'WHOLESALE')
+  })
+
+  it('parses code: and bare forms from Flexi responses', () => {
+    assert.deepEqual(parseStitkyCodes('WHOLESALE,VIP'), ['WHOLESALE', 'VIP'])
+    assert.deepEqual(parseStitkyCodes('code:WHOLESALE'), ['WHOLESALE'])
+  })
+
+  it('merges labels additively without duplicates', () => {
+    assert.deepEqual(mergeStitkyCodesAdditive(['VIP'], 'WHOLESALE'), ['VIP', 'WHOLESALE'])
+    assert.deepEqual(mergeStitkyCodesAdditive(['WHOLESALE'], 'wholesale'), ['WHOLESALE'])
+  })
+})
+
+describe('splitPersonName / buildWholesaleAdresarKontakt', () => {
+  it('splits first token as jmeno and rest as prijmeni', () => {
+    assert.deepEqual(splitPersonName('Іван Петренко'), { jmeno: 'Іван', prijmeni: 'Петренко' })
+    assert.deepEqual(splitPersonName('Anna Marie Nováková'), {
+      jmeno: 'Anna',
+      prijmeni: 'Marie Nováková',
+    })
+  })
+
+  it('keeps a single token in jmeno', () => {
+    assert.deepEqual(splitPersonName('Madonna'), { jmeno: 'Madonna', prijmeni: '' })
+  })
+
+  it('builds nested kontakt with primary flag and phone/email', () => {
+    assert.deepEqual(
+      buildWholesaleAdresarKontakt({
+        fullName: 'Іван Петренко',
+        email: 'ivan@example.com',
+        phone: '+380501112233',
+      }),
+      {
+        jmeno: 'Іван',
+        prijmeni: 'Петренко',
+        primarni: 'true',
+        email: 'ivan@example.com',
+        mobil: '+380501112233',
+        tel: '+380501112233',
+      },
+    )
+  })
+
+  it('returns null when fullName is blank', () => {
+    assert.equal(buildWholesaleAdresarKontakt({ fullName: '   ' }), null)
   })
 })

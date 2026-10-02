@@ -171,6 +171,40 @@ export function adresarRefFromRow(row: Record<string, unknown>): string {
   return ''
 }
 
+/** Split a form full name into Flexi kontakt `jmeno` / `prijmeni`. */
+export function splitPersonName(fullName: string): { jmeno: string; prijmeni: string } {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return { jmeno: '', prijmeni: '' }
+  if (parts.length === 1) return { jmeno: parts[0]!, prijmeni: '' }
+  return { jmeno: parts[0]!, prijmeni: parts.slice(1).join(' ') }
+}
+
+/**
+ * Nested Adresar `kontakty` row for a wholesale inquiry (create path only).
+ * Relation name must be `kontakty` — see /adresar/relations.
+ */
+export function buildWholesaleAdresarKontakt(input: {
+  fullName: string
+  email?: string | null
+  phone?: string | null
+}): Record<string, unknown> | null {
+  const { jmeno, prijmeni } = splitPersonName(input.fullName)
+  if (!jmeno && !prijmeni) return null
+  const kontakt: Record<string, unknown> = {
+    jmeno,
+    prijmeni,
+    primarni: 'true',
+  }
+  const email = input.email?.trim()
+  if (email) kontakt.email = email
+  const phone = input.phone?.trim()
+  if (phone) {
+    kontakt.mobil = phone
+    kontakt.tel = phone
+  }
+  return kontakt
+}
+
 /**
  * Flexi štítky (labels) multi-relation: bare code (no `code:` prefix) for comparisons.
  * Accepts array of strings / relation objects, or a comma-joined string — whichever
@@ -220,11 +254,17 @@ export function mergeStitkyCodesAdditive(existing: string[], addCode: string): s
   return has ? [...existing] : [...existing, code]
 }
 
-/** Flexi multi-select write shape: comma-joined `code:` refs. */
+/**
+ * Flexi štítky write shape: comma-joined bare codes (no `code:` prefix).
+ * Unlike typDokl/cenik relations, Flexi looks up štítky by literal kod —
+ * sending `code:WHOLESALE` fails with importXmlNeexistujeStitek.
+ * @see https://demo.flexibee.eu/devdoc/stitky
+ */
 export function stitkyCodesToWriteValue(codes: string[]): string {
   return codes
     .map((c) => c.trim())
     .filter(Boolean)
-    .map((c) => (c.startsWith('code:') ? c : `code:${c}`))
+    .map((c) => (c.startsWith('code:') ? c.slice(5).trim() : c))
+    .filter(Boolean)
     .join(',')
 }
