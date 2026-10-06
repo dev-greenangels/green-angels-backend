@@ -104,10 +104,12 @@ export class AccountController {
     @Req() req: Request & { user: SessionJwtPayload },
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('locale') locale?: string,
   ) {
     return this.account.listOrdersPage(req.user.userId, {
       page: page != null && page !== '' ? Number(page) : undefined,
       pageSize: pageSize != null && pageSize !== '' ? Number(pageSize) : undefined,
+      locale,
     })
   }
 
@@ -115,8 +117,9 @@ export class AccountController {
   getOrder(
     @Req() req: Request & { user: SessionJwtPayload },
     @Param('id') id: string,
+    @Query('locale') locale?: string,
   ) {
-    return this.account.getOrderDetail(req.user.userId, id)
+    return this.account.getOrderDetail(req.user.userId, id, locale)
   }
 
   @Get('reviews')
@@ -124,10 +127,12 @@ export class AccountController {
     @Req() req: Request & { user: SessionJwtPayload },
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('locale') locale?: string,
   ) {
     return this.account.listReviewsPage(req.user.userId, {
       page: page != null && page !== '' ? Number(page) : undefined,
       pageSize: pageSize != null && pageSize !== '' ? Number(pageSize) : undefined,
+      locale,
     })
   }
 
@@ -136,10 +141,12 @@ export class AccountController {
     @Req() req: Request & { user: SessionJwtPayload },
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('locale') locale?: string,
   ) {
     return this.account.listStockNotificationsPage(req.user.userId, {
       page: page != null && page !== '' ? Number(page) : undefined,
       pageSize: pageSize != null && pageSize !== '' ? Number(pageSize) : undefined,
+      locale,
     })
   }
 

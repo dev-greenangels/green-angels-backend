@@ -5,36 +5,67 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
-import { AuthProvider, Prisma, ReviewStatus } from '@prisma/client'
+import { AuthProvider, Prisma, ReviewStatus, ReviewVerificationType } from '@prisma/client'
 
 import { isAccountWithdrawalActionVisible } from '../contract-withdrawals/contract-withdrawal-eligibility'
 import { normalizeStoredPhoneE164 } from '../auth/auth.utils'
 import { validatePhoneForPolicy } from '../auth/market-phone.util'
 import { OtpService } from '../auth/otp.service'
+import {
+  CustomerErrorCode,
+  customerBadRequest,
+  customerNotFound,
+} from '../common/customer-error'
+import { pickLocalizedName } from '../i18n/pick-localized-name'
 import { PrismaService } from '../prisma/prisma.service'
 import { RedisService } from '../redis/redis.service'
+import {
+  CHECKOUT_DELIVERY_METHODS,
+  type CheckoutDeliveryMethodSlug,
+} from '../settings/checkout-methods.constants'
 import { isOtpChannelEnabled } from '../settings/market.types'
 import { SettingsService } from '../settings/settings.service'
 import { UsersService } from '../users/users.service'
 import type { OrderStatus } from '../orders/order-status.constants'
 import { DeleteAccountDto } from './dto/delete-account.dto'
-import { UpdateAccountProfileDto } from './dto/update-account-profile.dto'
+import {
+  BillingDefaultsDto,
+  DeliveryDefaultsDto,
+  UpdateAccountProfileDto,
+} from './dto/update-account-profile.dto'
 
 const DEFAULT_LOCALE = 'uk'
+const SUPPORTED_ACCOUNT_LOCALES = new Set(['uk', 'en', 'sk', 'cs', 'hu', 'de'])
 /** REL-007: account list endpoints — never unbounded. */
 export const ACCOUNT_LIST_DEFAULT_PAGE_SIZE = 20
 export const ACCOUNT_LIST_MAX_PAGE_SIZE = 100
 const ANONYMIZED_REVIEW_AUTHOR_NAME = 'Видалений користувач'
 const PENDING_CONTACT_PREFIX = 'pending:contact:'
 const PENDING_CONTACT_TTL_SEC = 600
-const CONTACT_ALREADY_ASSOCIATED = 'CONTACT_ALREADY_ASSOCIATED'
 
 export type AccountDeliveryDefaults = {
   city?: string
   branch?: string
   street?: string
   houseNumber?: string
+  postalCode?: string
+  countryCode?: string
   method?: string
+}
+
+export type AccountBillingDefaults = {
+  buyerType?: 'individual' | 'company'
+  firstName?: string
+  lastName?: string
+  countryCode?: string
+  street?: string
+  city?: string
+  postalCode?: string
+  companyLegalName?: string
+  companyIco?: string
+  companyDic?: string
+  companyVatId?: string
+  vatCountryCode?: string
 }
 
 export type AccountProfile = {
@@ -47,6 +78,7 @@ export type AccountProfile = {
   emailVerified: boolean
   phoneVerified: boolean
   deliveryDefaults: AccountDeliveryDefaults | null
+  billingDefaults: AccountBillingDefaults | null
 }
 
 export type AccountOrderListItem = {
@@ -110,6 +142,8 @@ export type AccountReviewItem = {
   rating: number
   text: string
   status: ReviewStatus
+  verificationType: ReviewVerificationType
+  purchasedVariantLabels: string[]
   productName: string | null
   productSlug: string | null
   productCategorySlug: string | null
@@ -121,6 +155,8 @@ export type AccountStockNotificationItem = {
   id: string
   productId: string
   productName: string
+  latinName: string | null
+  imageUrl: string | null
   productSlug: string
   email: string | null
   phone: string | null
@@ -131,6 +167,7 @@ export type AccountStockNotificationItem = {
 export type AccountListQuery = {
   page?: number
   pageSize?: number
+  locale?: string
 }
 
 export type AccountListPage<T> = {
@@ -177,6 +214,29 @@ export class AccountService {
     return `ZY-${String(orderNumber).padStart(8, '0')}`
   }
 
+  private normalizeLocale(locale?: string | null): string {
+    const value = locale?.trim().toLowerCase()
+    if (value && SUPPORTED_ACCOUNT_LOCALES.has(value)) return value
+    return DEFAULT_LOCALE
+  }
+
+  /** Prefer request locale; on SK deploys never silently fall back to Ukrainian. */
+  private async resolveAccountLocale(locale?: string | null): Promise<string> {
+    const explicit = locale?.trim().toLowerCase()
+    if (explicit && SUPPORTED_ACCOUNT_LOCALES.has(explicit)) return explicit
+    try {
+      const market = await this.settings.getMarketSettings()
+      if (market.region === 'sk') {
+        const siteDefault = market.countrySites.find((site) => site.enabled)?.defaultLocale
+        if (siteDefault && SUPPORTED_ACCOUNT_LOCALES.has(siteDefault)) return siteDefault
+        return 'sk'
+      }
+    } catch {
+      // keep DEFAULT_LOCALE
+    }
+    return DEFAULT_LOCALE
+  }
+
   private parseDeliveryDefaults(value: Prisma.JsonValue | null): AccountDeliveryDefaults | null {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null
     const record = value as Record<string, unknown>
@@ -185,8 +245,105 @@ export class AccountService {
     if (typeof record.branch === 'string') result.branch = record.branch
     if (typeof record.street === 'string') result.street = record.street
     if (typeof record.houseNumber === 'string') result.houseNumber = record.houseNumber
+    if (typeof record.postalCode === 'string') result.postalCode = record.postalCode
+    if (typeof record.countryCode === 'string') result.countryCode = record.countryCode
     if (typeof record.method === 'string') result.method = record.method
     return Object.keys(result).length ? result : null
+  }
+
+  private parseBillingDefaults(value: Prisma.JsonValue | null): AccountBillingDefaults | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const record = value as Record<string, unknown>
+    const result: AccountBillingDefaults = {}
+    if (record.buyerType === 'individual' || record.buyerType === 'company') {
+      result.buyerType = record.buyerType
+    }
+    for (const key of [
+      'firstName',
+      'lastName',
+      'countryCode',
+      'street',
+      'city',
+      'postalCode',
+      'companyLegalName',
+      'companyIco',
+      'companyDic',
+      'companyVatId',
+      'vatCountryCode',
+    ] as const) {
+      if (typeof record[key] === 'string') result[key] = record[key] as string
+    }
+    return Object.keys(result).length ? result : null
+  }
+
+  private normalizeDeliveryDefaults(
+    dto: DeliveryDefaultsDto | undefined,
+  ): AccountDeliveryDefaults | null {
+    if (!dto) return null
+    const result: AccountDeliveryDefaults = {}
+    if (dto.method?.trim()) result.method = dto.method.trim()
+    if (dto.city?.trim()) result.city = dto.city.trim()
+    if (dto.branch?.trim()) result.branch = dto.branch.trim()
+    if (dto.street?.trim()) result.street = dto.street.trim()
+    if (dto.houseNumber?.trim()) result.houseNumber = dto.houseNumber.trim()
+    if (dto.postalCode?.trim()) result.postalCode = dto.postalCode.trim()
+    if (dto.countryCode?.trim()) result.countryCode = dto.countryCode.trim().toLowerCase()
+    return Object.keys(result).length ? result : null
+  }
+
+  private normalizeBillingDefaults(
+    dto: BillingDefaultsDto | undefined,
+  ): AccountBillingDefaults | null {
+    if (!dto) return null
+    const buyerType = dto.buyerType === 'company' ? 'company' : 'individual'
+    const result: AccountBillingDefaults = { buyerType }
+    if (dto.firstName?.trim()) result.firstName = dto.firstName.trim()
+    if (dto.lastName?.trim()) result.lastName = dto.lastName.trim()
+    if (dto.countryCode?.trim()) result.countryCode = dto.countryCode.trim().toLowerCase()
+    if (dto.street?.trim()) result.street = dto.street.trim()
+    if (dto.city?.trim()) result.city = dto.city.trim()
+    if (dto.postalCode?.trim()) result.postalCode = dto.postalCode.trim()
+    if (buyerType === 'company') {
+      if (dto.companyLegalName?.trim()) result.companyLegalName = dto.companyLegalName.trim()
+      if (dto.companyIco?.trim()) result.companyIco = dto.companyIco.trim()
+      if (dto.companyDic?.trim()) result.companyDic = dto.companyDic.trim()
+      if (dto.companyVatId?.trim()) result.companyVatId = dto.companyVatId.trim()
+      if (dto.vatCountryCode?.trim()) {
+        result.vatCountryCode = dto.vatCountryCode.trim().toUpperCase()
+      }
+    }
+    return result
+  }
+
+  private async assertDeliveryMethodEnabled(method: string | undefined) {
+    if (!method?.trim()) return
+    const slug = method.trim() as CheckoutDeliveryMethodSlug
+    if (!(CHECKOUT_DELIVERY_METHODS as readonly string[]).includes(slug)) {
+      throw customerBadRequest(
+        CustomerErrorCode.ACCOUNT_DELIVERY_METHOD_DISABLED,
+        'Спосіб доставки недоступний.',
+      )
+    }
+    const cart = await this.settings.getCartCheckoutSettings()
+    const enabled = cart.enabledDeliveryMethods ?? []
+    if (!enabled.includes(slug)) {
+      throw customerBadRequest(
+        CustomerErrorCode.ACCOUNT_DELIVERY_METHOD_DISABLED,
+        'Спосіб доставки вимкнено в налаштуваннях магазину.',
+      )
+    }
+  }
+
+  private statusLabelForLocale(
+    row: { nameUk: string; nameEn: string | null; nameSk: string | null } | null | undefined,
+    locale: string,
+    fallback: string,
+  ): string {
+    if (!row) return fallback
+    if (locale === 'sk' && row.nameSk?.trim()) return row.nameSk.trim()
+    if (locale === 'en' && row.nameEn?.trim()) return row.nameEn.trim()
+    if (locale !== 'uk' && row.nameEn?.trim()) return row.nameEn.trim()
+    return row.nameUk?.trim() || fallback
   }
 
   private toProfile(user: {
@@ -199,6 +356,8 @@ export class AccountService {
     emailVerified: boolean
     phoneVerified: boolean
     deliveryDefaults: Prisma.JsonValue | null
+    /** Optional until prisma generate picks up User.billingDefaults. */
+    billingDefaults?: Prisma.JsonValue | null
   }): AccountProfile {
     return {
       id: user.id,
@@ -210,21 +369,27 @@ export class AccountService {
       emailVerified: user.emailVerified,
       phoneVerified: user.phoneVerified,
       deliveryDefaults: this.parseDeliveryDefaults(user.deliveryDefaults),
+      billingDefaults: this.parseBillingDefaults(user.billingDefaults ?? null),
     }
   }
 
   async getProfile(userId: string): Promise<AccountProfile> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } })
-    if (!user) throw new NotFoundException('Користувача не знайдено.')
+    if (!user) {
+      throw customerNotFound(CustomerErrorCode.ACCOUNT_NOT_FOUND, 'Користувача не знайдено.')
+    }
     return this.toProfile(user)
   }
 
   async updateProfile(userId: string, dto: UpdateAccountProfileDto): Promise<AccountProfile> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } })
-    if (!user) throw new NotFoundException('Користувача не знайдено.')
+    if (!user) {
+      throw customerNotFound(CustomerErrorCode.ACCOUNT_NOT_FOUND, 'Користувача не знайдено.')
+    }
 
     if (dto.email !== undefined || dto.phone !== undefined) {
-      throw new BadRequestException(
+      throw customerBadRequest(
+        CustomerErrorCode.CONTACT_CHANGE_VIA_OTP_ONLY,
         'Email і телефон змінюються лише через підтвердження контакту.',
       )
     }
@@ -236,7 +401,16 @@ export class AccountService {
     if (dto.patronymic !== undefined) data.patronymic = dto.patronymic.trim() || null
 
     if (dto.deliveryDefaults !== undefined) {
-      data.deliveryDefaults = dto.deliveryDefaults as Prisma.InputJsonValue
+      const normalized = this.normalizeDeliveryDefaults(dto.deliveryDefaults)
+      await this.assertDeliveryMethodEnabled(normalized?.method)
+      data.deliveryDefaults =
+        normalized === null ? Prisma.DbNull : (normalized as Prisma.InputJsonValue)
+    }
+
+    if (dto.billingDefaults !== undefined) {
+      const normalized = this.normalizeBillingDefaults(dto.billingDefaults)
+      data.billingDefaults =
+        normalized === null ? Prisma.DbNull : (normalized as Prisma.InputJsonValue)
     }
 
     if (Object.keys(data).length === 0) {
@@ -257,7 +431,7 @@ export class AccountService {
 
   private contactAlreadyAssociatedException() {
     return new ConflictException({
-      code: CONTACT_ALREADY_ASSOCIATED,
+      code: CustomerErrorCode.CONTACT_ALREADY_ASSOCIATED,
       message:
         'Цей контакт уже повʼязаний з іншим обліковим записом. Його не можна додати до цього облікового запису автоматично.',
     })
@@ -533,9 +707,9 @@ export class AccountService {
     })
 
     const statusRows = await this.prisma.orderStatusDefinition.findMany({
-      select: { code: true, nameUk: true },
+      select: { code: true, nameUk: true, nameEn: true, nameSk: true },
     })
-    const labels = new Map(statusRows.map((row) => [row.code, row.nameUk]))
+    const labels = new Map(statusRows.map((row) => [row.code, row]))
 
     return orders.map((order) => {
       const status = order.status.trim().toUpperCase() || 'PENDING'
@@ -543,7 +717,7 @@ export class AccountService {
         id: order.id,
         orderNumber: this.formatOrderNumber(order.orderNumber),
         status,
-        statusLabel: labels.get(status) ?? status,
+        statusLabel: this.statusLabelForLocale(labels.get(status), DEFAULT_LOCALE, status),
         totalAmount: Number(order.totalAmount),
         currency: order.currency,
         itemCount: order._count.items,
@@ -561,6 +735,7 @@ export class AccountService {
     query?: AccountListQuery,
   ): Promise<AccountListPage<AccountOrderListItem>> {
     const { page, pageSize, skip } = this.resolvePagination(query)
+    const locale = this.normalizeLocale(query?.locale)
     const [total, orders, statusRows] = await Promise.all([
       this.prisma.order.count({ where: { userId } }),
       this.prisma.order.findMany({
@@ -571,18 +746,18 @@ export class AccountService {
         include: { _count: { select: { items: true } } },
       }),
       this.prisma.orderStatusDefinition.findMany({
-        select: { code: true, nameUk: true },
+        select: { code: true, nameUk: true, nameEn: true, nameSk: true },
       }),
     ])
 
-    const labels = new Map(statusRows.map((row) => [row.code, row.nameUk]))
+    const labels = new Map(statusRows.map((row) => [row.code, row]))
     const items = orders.map((order) => {
       const status = order.status.trim().toUpperCase() || 'PENDING'
       return {
         id: order.id,
         orderNumber: this.formatOrderNumber(order.orderNumber),
         status,
-        statusLabel: labels.get(status) ?? status,
+        statusLabel: this.statusLabelForLocale(labels.get(status), locale, status),
         totalAmount: Number(order.totalAmount),
         currency: order.currency,
         itemCount: order._count.items,
@@ -607,9 +782,16 @@ export class AccountService {
    * CAB-003: customer order detail. Ownership enforced in the query (userId),
    * not only via “user is logged in”. Missing/foreign → uniform 404.
    */
-  async getOrderDetail(userId: string, orderId: string): Promise<AccountOrderDetail> {
+  async getOrderDetail(
+    userId: string,
+    orderId: string,
+    localeRaw?: string,
+  ): Promise<AccountOrderDetail> {
     const id = orderId?.trim()
-    if (!id) throw new NotFoundException('Замовлення не знайдено.')
+    if (!id) {
+      throw customerNotFound(CustomerErrorCode.ORDER_NOT_FOUND, 'Замовлення не знайдено.')
+    }
+    const locale = this.normalizeLocale(localeRaw)
 
     const order = await this.prisma.order.findFirst({
       where: { id, userId },
@@ -618,13 +800,13 @@ export class AccountService {
       },
     })
     if (!order) {
-      throw new NotFoundException('Замовлення не знайдено.')
+      throw customerNotFound(CustomerErrorCode.ORDER_NOT_FOUND, 'Замовлення не знайдено.')
     }
 
     const status = order.status.trim().toUpperCase() || 'PENDING'
     const statusRow = await this.prisma.orderStatusDefinition.findUnique({
       where: { code: status },
-      select: { nameUk: true },
+      select: { nameUk: true, nameEn: true, nameSk: true },
     })
     const withdrawalSettings = await this.settings.getWithdrawalSettings()
     const withdrawalActionVisible = isAccountWithdrawalActionVisible(
@@ -663,7 +845,7 @@ export class AccountService {
       id: order.id,
       orderNumber: this.formatOrderNumber(order.orderNumber),
       status,
-      statusLabel: statusRow?.nameUk ?? status,
+      statusLabel: this.statusLabelForLocale(statusRow, locale, status),
       totalAmount: Number(order.totalAmount),
       currency: order.currency,
       itemCount: items.reduce((sum, item) => sum + item.quantity, 0),
@@ -725,6 +907,8 @@ export class AccountService {
       rating: review.rating,
       text: review.text,
       status: review.status,
+      verificationType: review.verificationType,
+      purchasedVariantLabels: review.purchasedVariantLabels,
       productName: review.product?.translations[0]?.name ?? null,
       productSlug: review.product?.slug ?? null,
       productCategorySlug: review.product?.category?.slug ?? null,
@@ -745,6 +929,7 @@ export class AccountService {
     query?: AccountListQuery,
   ): Promise<AccountListPage<AccountReviewItem>> {
     const { page, pageSize, skip } = this.resolvePagination(query)
+    const locale = await this.resolveAccountLocale(query?.locale)
     const [total, reviews] = await Promise.all([
       this.prisma.review.count({ where: { userId } }),
       this.prisma.review.findMany({
@@ -756,11 +941,10 @@ export class AccountService {
           product: {
             select: {
               slug: true,
+              latinName: true,
               category: { select: { slug: true } },
               translations: {
-                where: { locale: DEFAULT_LOCALE },
-                take: 1,
-                select: { name: true },
+                select: { locale: true, name: true },
               },
             },
           },
@@ -773,7 +957,16 @@ export class AccountService {
       rating: review.rating,
       text: review.text,
       status: review.status,
-      productName: review.product?.translations[0]?.name ?? null,
+      verificationType: review.verificationType,
+      purchasedVariantLabels: review.purchasedVariantLabels,
+      productName: review.product
+        ? pickLocalizedName(
+            review.product.translations,
+            locale,
+            review.product.slug,
+            { latinName: review.product.latinName },
+          )
+        : null,
       productSlug: review.product?.slug ?? null,
       productCategorySlug: review.product?.category?.slug ?? null,
       storeReply:
@@ -815,10 +1008,13 @@ export class AccountService {
       where: { id: userId },
       select: { email: true, phone: true },
     })
-    if (!user) throw new NotFoundException('Користувача не знайдено.')
+    if (!user) {
+      throw customerNotFound(CustomerErrorCode.ACCOUNT_NOT_FOUND, 'Користувача не знайдено.')
+    }
 
     const contactFilters = this.buildContactFilters(user)
     const { page, pageSize, skip } = this.resolvePagination(query)
+    const locale = await this.resolveAccountLocale(query?.locale)
     if (!contactFilters.length) {
       return { items: [], total: 0, page, pageSize, totalPages: 0 }
     }
@@ -835,10 +1031,14 @@ export class AccountService {
           product: {
             select: {
               slug: true,
+              latinName: true,
               translations: {
-                where: { locale: DEFAULT_LOCALE },
+                select: { locale: true, name: true },
+              },
+              images: {
+                orderBy: [{ isMain: 'desc' }, { sortOrder: 'asc' }],
                 take: 1,
-                select: { name: true },
+                select: { url: true },
               },
             },
           },
@@ -849,7 +1049,11 @@ export class AccountService {
     const items = rows.map((row) => ({
       id: row.id,
       productId: row.productId,
-      productName: row.product.translations[0]?.name ?? 'Рослина',
+      productName: pickLocalizedName(row.product.translations, locale, row.product.slug, {
+        latinName: row.product.latinName,
+      }),
+      latinName: row.product.latinName?.trim() || null,
+      imageUrl: row.product.images[0]?.url?.trim() || null,
       productSlug: row.product.slug,
       email: row.email,
       phone: row.phone,

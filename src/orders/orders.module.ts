@@ -19,6 +19,7 @@ import { VariantLabelModule } from '../products/variant-label.module'
 import { MailModule } from '../mail/mail.module'
 import { MonopayModule } from '../monopay/monopay.module'
 import { QueueModule } from '../queue/queue.module'
+import { ReviewsModule } from '../reviews/reviews.module'
 import { ViesModule } from '../vies/vies.module'
 import { LegalModule } from '../legal/legal.module'
 import { OrderCommunicationService } from './order-communication.service'
@@ -41,6 +42,7 @@ import { OrdersService } from './orders.service'
     forwardRef(() => PaymentsModule),
     forwardRef(() => MonopayModule),
     forwardRef(() => QueueModule),
+    forwardRef(() => ReviewsModule),
     CommerceModule,
     ProductsModule,
     OrderStatusesModule,

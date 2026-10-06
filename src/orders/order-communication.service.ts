@@ -51,6 +51,9 @@ export type CommunicationListItem = {
   status: CommunicationStatus
   toEmail: string | null
   subjectSnapshot: string | null
+  bodySnapshot: string | null
+  locale: string | null
+  createdByUserId: string | null
   hasAttachment: boolean
   errorMessage: string | null
   providerMessageId: string | null
@@ -914,6 +917,9 @@ export class OrderCommunicationService {
       status: true,
       toEmail: true,
       subjectSnapshot: true,
+      bodySnapshot: true,
+      locale: true,
+      createdByUserId: true,
       orderDocumentId: true,
       errorMessage: true,
       providerMessageId: true,
@@ -931,6 +937,9 @@ export class OrderCommunicationService {
     status: CommunicationStatus
     toEmail: string | null
     subjectSnapshot: string | null
+    bodySnapshot: string | null
+    locale: string | null
+    createdByUserId: string | null
     orderDocumentId: string | null
     errorMessage: string | null
     providerMessageId: string | null
@@ -949,6 +958,9 @@ export class OrderCommunicationService {
       status: row.status,
       toEmail: row.toEmail,
       subjectSnapshot: row.subjectSnapshot,
+      bodySnapshot: row.bodySnapshot,
+      locale: row.locale,
+      createdByUserId: row.createdByUserId,
       hasAttachment: Boolean(row.orderDocumentId),
       errorMessage:
         row.status === CommunicationStatus.FAILED ||

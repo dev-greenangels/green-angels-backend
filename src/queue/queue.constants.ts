@@ -6,6 +6,7 @@ export const APP_JOB_NAMES = {
   SANITIZE_CHECKOUT_DRAFT_PII: 'sanitize-checkout-draft-pii',
   SEND_ORDER_EMAIL: 'send-order-email',
   SEND_STOCK_AVAILABLE: 'send-stock-available',
+  CUSTOMER_REVIEW_REQUEST: 'customer-review-request',
 } as const
 
 export const EXPIRE_UNPAID_CARD_ORDERS_JOB_ID = 'expire-unpaid-card-orders-repeatable'
@@ -37,3 +38,11 @@ export type AppJobPayload =
       productId?: string
       notificationIds?: string[]
     }
+  | {
+      type: 'customer-review-request'
+      orderId: string
+    }
+
+export function customerReviewRequestJobId(orderId: string): string {
+  return `customer-review-request:${orderId}`
+}

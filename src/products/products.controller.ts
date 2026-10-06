@@ -1,9 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common'
 import { Role } from '@prisma/client'
+import type { Request } from 'express'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
+import { OptionalBackstageJwtAuthGuard } from '../auth/optional-backstage-jwt-auth.guard'
+import type { SessionJwtPayload } from '../auth/auth.constants'
 
 import { BulkProductsDto } from './dto/bulk-products.dto'
 import { PatchTranslationsDto } from '../characteristics/dto/patch-translations.dto'
@@ -12,6 +15,11 @@ import { CreateProductDto } from './dto/create-product.dto'
 import { PatchProductImagesDto } from './dto/patch-product-images.dto'
 import { PatchProductPublishedDto } from './dto/patch-product-published.dto'
 import { UpdateProductDto } from './dto/update-product.dto'
+import {
+  isBackstageStaffRequest,
+  resolveProductDetailEditMode,
+  resolveProductListPublishedParam,
+} from './public-product-access'
 import { ProductsService } from './products.service'
 
 @Controller('products')
@@ -19,7 +27,9 @@ export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
   @Get()
+  @UseGuards(OptionalBackstageJwtAuthGuard)
   findAll(
+    @Req() req: Request & { user?: SessionJwtPayload },
     @Query('locale') locale?: string,
     @Query('search') search?: string,
     @Query('categoryId') categoryId?: string,
@@ -44,12 +54,13 @@ export class ProductsController {
     @Query('discountQuantityMode') discountQuantityMode?: string,
     @Query('merchant') merchant?: string,
   ) {
+    const isBackstage = isBackstageStaffRequest(req.user)
     return this.products.findAll({
       locale,
       search,
       categoryId,
       categorySlug,
-      published,
+      published: resolveProductListPublishedParam(published, isBackstage),
       stock,
       excludeId,
       ids,
@@ -119,12 +130,17 @@ export class ProductsController {
   }
 
   @Get(':id')
+  @UseGuards(OptionalBackstageJwtAuthGuard)
   findOne(
+    @Req() req: Request & { user?: SessionJwtPayload },
     @Param('id') id: string,
     @Query('locale') locale?: string,
     @Query('edit') edit?: string,
   ) {
-    return this.products.findOne(id, locale, edit === '1' || edit === 'true')
+    const isBackstage = isBackstageStaffRequest(req.user)
+    return this.products.findOne(id, locale, resolveProductDetailEditMode(edit, isBackstage), {
+      publishedOnly: !isBackstage,
+    })
   }
 
   @Post()

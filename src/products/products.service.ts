@@ -2393,7 +2393,12 @@ export class ProductsService {
     return sortCatalogNameLetters([...new Set(letters)], loc)
   }
 
-  async findOne(id: string, locale?: string, strictLocale = false): Promise<BackstageProductDetail> {
+  async findOne(
+    id: string,
+    locale?: string,
+    strictLocale = false,
+    options?: { publishedOnly?: boolean },
+  ): Promise<BackstageProductDetail> {
     const loc = this.defaultLocale(locale)
     const currency = await this.commerce.getDefaultCurrencyCode()
     const product = await this.prisma.product.findUnique({
@@ -2402,6 +2407,9 @@ export class ProductsService {
     })
 
     if (!product) throw new NotFoundException('Товар не знайдено')
+    if (options?.publishedOnly && !product.isPublished) {
+      throw new NotFoundException('Товар не знайдено')
+    }
 
     return this.toDetail(product, loc, strictLocale)
   }

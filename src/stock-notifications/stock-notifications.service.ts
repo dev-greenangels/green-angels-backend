@@ -225,11 +225,10 @@ export class StockNotificationsService {
           product: {
             select: {
               slug: true,
+              latinName: true,
               category: { select: { slug: true } },
               translations: {
-                where: { locale: 'uk' },
-                take: 1,
-                select: { name: true },
+                select: { locale: true, name: true },
               },
             },
           },
@@ -237,10 +236,18 @@ export class StockNotificationsService {
       }),
     ])
 
+    const market = await this.settings.getMarketSettings().catch(() => null)
+    const listLocale =
+      market?.region === 'sk'
+        ? market.countrySites.find((site) => site.enabled)?.defaultLocale || 'sk'
+        : 'uk'
+
     const items: StockNotificationListItem[] = rows.map((row) => ({
       id: row.id,
       productId: row.productId,
-      productName: row.product.translations[0]?.name ?? row.product.slug,
+      productName: pickLocalizedName(row.product.translations, listLocale, row.product.slug, {
+        latinName: row.product.latinName,
+      }),
       productSlug: row.product.slug,
       categorySlug: row.product.category.slug,
       name: row.name,

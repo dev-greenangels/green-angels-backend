@@ -5,9 +5,11 @@ import { Job } from 'bullmq'
 import { CartPiiRetentionService } from '../carts/cart-pii-retention.service'
 import { OrderCommunicationService } from '../orders/order-communication.service'
 import { OrderPaymentLifecycleService } from '../orders/order-payment-lifecycle.service'
+import { ReviewRequestService } from '../reviews/review-request.service'
 import { StockNotificationsService } from '../stock-notifications/stock-notifications.service'
 import { ONLINE_CARD_PAYMENT_METHOD } from '../payments/payments.constants'
 import { PrismaService } from '../prisma/prisma.service'
+import { bullMqAttemptNumber } from '../orders/order-communication.constants'
 import {
   APP_JOB_NAMES,
   APP_QUEUE,
@@ -27,6 +29,8 @@ export class QueueProcessor extends WorkerHost {
     private readonly paymentLifecycle: OrderPaymentLifecycleService,
     @Inject(forwardRef(() => StockNotificationsService))
     private readonly stockNotifications: StockNotificationsService,
+    @Inject(forwardRef(() => ReviewRequestService))
+    private readonly reviewRequests: ReviewRequestService,
   ) {
     super()
   }
@@ -81,6 +85,23 @@ export class QueueProcessor extends WorkerHost {
       })
       this.logger.log(
         `send-stock-available: sent=${result.sent} skipped=${result.skipped}`,
+      )
+      return result
+    }
+
+    if (
+      job.name === APP_JOB_NAMES.CUSTOMER_REVIEW_REQUEST ||
+      job.data.type === 'customer-review-request'
+    ) {
+      if (job.data.type !== 'customer-review-request') {
+        return { skipped: true }
+      }
+      const attempt = bullMqAttemptNumber(job.attemptsMade)
+      const result = await this.reviewRequests.processAutomaticSend(job.data.orderId, {
+        attempt,
+      })
+      this.logger.log(
+        `customer-review-request jobId=${job.id} orderId=${job.data.orderId} attempt=${attempt} outcome=${result.outcome}`,
       )
       return result
     }

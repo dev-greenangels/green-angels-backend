@@ -15,6 +15,7 @@ import { RolesGuard } from './guards/roles.guard'
 import { JwtAuthGuard } from './jwt-auth.guard'
 import { BackstageJwtAuthGuard } from './backstage-jwt-auth.guard'
 import { OptionalJwtAuthGuard } from './optional-jwt-auth.guard'
+import { OptionalBackstageJwtAuthGuard } from './optional-backstage-jwt-auth.guard'
 import { JwtStrategy } from './jwt.strategy'
 import { BackstageJwtStrategy } from './backstage-jwt.strategy'
 
@@ -47,6 +48,7 @@ import { BackstageJwtStrategy } from './backstage-jwt.strategy'
     JwtAuthGuard,
     BackstageJwtAuthGuard,
     OptionalJwtAuthGuard,
+    OptionalBackstageJwtAuthGuard,
     RolesGuard,
   ],
   exports: [
@@ -56,6 +58,7 @@ import { BackstageJwtStrategy } from './backstage-jwt.strategy'
     JwtAuthGuard,
     BackstageJwtAuthGuard,
     OptionalJwtAuthGuard,
+    OptionalBackstageJwtAuthGuard,
     RolesGuard,
   ],
 })

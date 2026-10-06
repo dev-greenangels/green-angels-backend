@@ -5,6 +5,7 @@ import { CartsModule } from '../carts/carts.module'
 import { MailModule } from '../mail/mail.module'
 import { OrdersModule } from '../orders/orders.module'
 import { PrismaModule } from '../prisma/prisma.module'
+import { ReviewsModule } from '../reviews/reviews.module'
 import { StockNotificationsModule } from '../stock-notifications/stock-notifications.module'
 import { APP_QUEUE } from './queue.constants'
 import { QueueController } from './queue.controller'
@@ -20,6 +21,7 @@ import { QueueService } from './queue.service'
     MailModule,
     CartsModule,
     forwardRef(() => OrdersModule),
+    forwardRef(() => ReviewsModule),
     forwardRef(() => StockNotificationsModule),
   ],
   controllers: [QueueController],

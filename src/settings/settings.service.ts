@@ -70,6 +70,14 @@ import {
   DEFAULT_WITHDRAWAL_SETTINGS,
   type WithdrawalSettings,
 } from './withdrawal.types'
+import {
+  normalizeReviewsSettings,
+  normalizeReviewsSettingsStrict,
+} from './reviews.normalize'
+import {
+  DEFAULT_REVIEWS_SETTINGS,
+  type ReviewsSettings,
+} from './reviews.types'
 
 export type PublicSiteSettings = {
   store: StoreContactSettings
@@ -101,6 +109,7 @@ export type BackstageSiteSettings = Omit<PublicSiteSettings, 'wholesale'> & {
   prestaImport: PrestaImportSettings
   mediaWatermark: MediaWatermarkSettings
   withdrawalFull: WithdrawalSettings
+  reviewsFull: ReviewsSettings
 }
 @Injectable()
 export class SettingsService implements OnModuleInit {
@@ -367,8 +376,19 @@ export class SettingsService implements OnModuleInit {
     return this.writeSetting(SETTINGS_KEYS.WITHDRAWAL, next)
   }
 
+  async getReviewsSettings(): Promise<ReviewsSettings> {
+    const raw = await this.readSetting(SETTINGS_KEYS.REVIEWS, DEFAULT_REVIEWS_SETTINGS)
+    return normalizeReviewsSettings(raw)
+  }
+
+  async updateReviewsSettings(patch: Partial<ReviewsSettings>): Promise<ReviewsSettings> {
+    const current = await this.getReviewsSettings()
+    const next = normalizeReviewsSettingsStrict({ ...current, ...patch })
+    return this.writeSetting(SETTINGS_KEYS.REVIEWS, next)
+  }
+
   async getBackstageSettings(): Promise<BackstageSiteSettings> {
-    const [publicSettings, cart, prestaImport, mediaWatermark, wholesale, withdrawalFull] =
+    const [publicSettings, cart, prestaImport, mediaWatermark, wholesale, withdrawalFull, reviewsFull] =
       await Promise.all([
         this.getPublicSettings(),
         this.getCartCheckoutSettings(),
@@ -376,6 +396,7 @@ export class SettingsService implements OnModuleInit {
         this.getMediaWatermarkSettings(),
         this.getWholesalePageSettings(),
         this.getWithdrawalSettings(),
+        this.getReviewsSettings(),
       ])
     return {
       ...publicSettings,
@@ -384,6 +405,7 @@ export class SettingsService implements OnModuleInit {
       prestaImport,
       mediaWatermark,
       withdrawalFull,
+      reviewsFull,
     }
   }
 

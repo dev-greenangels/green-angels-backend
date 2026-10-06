@@ -57,6 +57,7 @@ import { NovaPoshtaSettingsService } from '../nova-poshta/nova-poshta.settings.s
 import { normalizeNpListData } from '../nova-poshta/nova-poshta.client'
 import { buildOrderDocumentPdf } from '../mail/order-document-pdf'
 import { QueueService } from '../queue/queue.service'
+import { ReviewRequestService } from '../reviews/review-request.service'
 import { buildOrderDocumentPdfInput } from './order-pdf.builder'
 import { FlexiQueueService } from '../flexi/flexi.queue.service'
 import { FlexiService } from '../flexi/flexi.service'
@@ -273,6 +274,9 @@ export type BackstageOrderDetail = BackstageOrderListItem & {
     status: string
     toEmail: string | null
     subjectSnapshot: string | null
+    bodySnapshot: string | null
+    locale: string | null
+    createdByUserId: string | null
     hasAttachment: boolean
     errorMessage: string | null
     providerMessageId: string | null
@@ -422,6 +426,8 @@ export class OrdersService {
     private readonly carts: CartsService,
     @Inject(forwardRef(() => QueueService))
     private readonly queue: QueueService,
+    @Inject(forwardRef(() => ReviewRequestService))
+    private readonly reviewRequests: ReviewRequestService,
   ) {}
 
   private statusLabelCache: Map<string, string> | null = null
@@ -940,6 +946,9 @@ export class OrdersService {
           status: true,
           toEmail: true,
           subjectSnapshot: true,
+          bodySnapshot: true,
+          locale: true,
+          createdByUserId: true,
           orderDocumentId: true,
           errorMessage: true,
           providerMessageId: true,
@@ -1090,6 +1099,9 @@ export class OrdersService {
         status: row.status,
         toEmail: row.toEmail,
         subjectSnapshot: row.subjectSnapshot,
+        bodySnapshot: row.bodySnapshot,
+        locale: row.locale,
+        createdByUserId: row.createdByUserId,
         hasAttachment: Boolean(row.orderDocumentId),
         errorMessage:
           row.status === 'FAILED' || row.status === 'SKIPPED'
@@ -1448,6 +1460,16 @@ export class OrdersService {
       })
     }
 
+    if (existing.status !== 'SHIPPED' && updated.status === 'SHIPPED') {
+      void this.reviewRequests.scheduleAutomaticAfterShipped(updated.id).catch((err) => {
+        this.logger.warn(
+          `scheduleAutomaticAfterShipped failed orderId=${updated.id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
+    }
+
     return this.findOne(updated.id)
   }
 
@@ -1669,10 +1691,23 @@ export class OrdersService {
       }
     }
 
+    const becomingShipped =
+      order.status !== 'SHIPPED' && data.status === 'SHIPPED'
+
     await this.prisma.order.update({ where: { id }, data })
 
     if (typeof data.status === 'string' && POINTS_CREDIT_STATUSES.has(data.status)) {
       await this.referrals.creditReferrerPoints(id)
+    }
+
+    if (becomingShipped) {
+      void this.reviewRequests.scheduleAutomaticAfterShipped(id).catch((err) => {
+        this.logger.warn(
+          `scheduleAutomaticAfterShipped failed orderId=${id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
     }
 
     return this.findOne(id)

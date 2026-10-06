@@ -55,6 +55,7 @@ function createService(input: {
     {} as never,
     {} as never,
     {} as never,
+    { scheduleAutomaticAfterShipped: async () => undefined } as never,
   )
 
   return { service, orderUpdateCalls, clientCalls }

@@ -40,6 +40,8 @@ model User {
   phoneVerified      Boolean   @default(false)
   emailVerified      Boolean   @default(false)
   deliveryDefaults   Json?
+  /// Saved invoice/billing defaults for checkout prefill (individual | company).
+  billingDefaults    Json?
   passwordHash       String?
   role               Role      @default(USER)
   /// PrestaShop id_customer (import)
@@ -70,6 +72,9 @@ model User {
   contractWithdrawalsProcessed   ContractWithdrawal[]  @relation("ContractWithdrawalProcessedBy")
   communications                 Communication[]
   communicationsCreated          Communication[]       @relation("CommunicationCreatedBy")
+  reviewRequestsCreated          ReviewRequest[]       @relation("ReviewRequestCreatedBy")
+  reviewRequestsRevoked          ReviewRequest[]       @relation("ReviewRequestRevokedBy")
+  reviewRequestEventsCreated     ReviewRequestEvent[]  @relation("ReviewRequestEventCreatedBy")
 
   @@unique([legacySource, legacyId])
   @@index([legacyId])
@@ -992,6 +997,8 @@ model Order {
   viesCheck                     OrderViesCheck?
   documents                     OrderDocument[]
   communications                Communication[]
+  reviews                       Review[]
+  reviewRequest                 ReviewRequest?
   /// Originating shopping-attempt Cart (Option A). SetNull if Cart deleted; Order remains.
   cartId                        String?              @unique
   originCart                    Cart?                @relation("OrderOriginCart", fields: [cartId], references: [id], onDelete: SetNull)
@@ -1054,6 +1061,7 @@ enum CommunicationType {
   CUSTOMER_PAYMENT_REMINDER
   CUSTOMER_CANCELLED_UNPAID
   CUSTOMER_LATE_PAY_REFUND
+  CUSTOMER_REVIEW_REQUEST
   MANAGER_ORDER_READY
   MANAGER_ORDER_CANCELLED_UNPAID
   MANAGER_LATE_PAY_REFUND
@@ -1440,34 +1448,103 @@ enum ReviewStatus {
   REJECTED
 }
 
+enum ReviewVerificationType {
+  NONE
+  VERIFIED_CUSTOMER
+  VERIFIED_PURCHASE
+}
+
 model Review {
-  id                   String       @id @default(uuid())
-  userId               String?
-  user                 User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
-  productId            String?
-  product              Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
-  authorName           String
-  email                String?
-  phone                String?
-  text                 String       @db.Text
-  image                String?
-  images               String[]     @default([])
-  rating               Int          @default(5)
-  storeReplyText       String?      @db.Text
-  storeReplyAuthorName String?
-  storeReplyAt         DateTime?
-  status               ReviewStatus @default(PENDING)
-  legacyId             String?
-  legacySource         String?
-  importedAt           DateTime?
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
+  id                     String                 @id @default(uuid())
+  userId                 String?
+  user                   User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  productId              String?
+  product                Product?               @relation(fields: [productId], references: [id], onDelete: SetNull)
+  /// Qualifying Order that backed verification (null when NONE / legacy).
+  orderId                String?
+  order                  Order?                 @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  verificationType       ReviewVerificationType @default(NONE)
+  /// Immutable OrderItem.variantLabel snapshots for verified product reviews.
+  purchasedVariantLabels String[]               @default([])
+  authorName             String
+  email                  String?
+  phone                  String?
+  text                   String                 @db.Text
+  image                  String?
+  images                 String[]               @default([])
+  rating                 Int                    @default(5)
+  storeReplyText         String?                @db.Text
+  storeReplyAuthorName   String?
+  storeReplyAt           DateTime?
+  status                 ReviewStatus           @default(PENDING)
+  legacyId               String?
+  legacySource           String?
+  importedAt             DateTime?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
 
   @@unique([legacySource, legacyId])
   @@index([status, createdAt(sort: Desc)])
   @@index([productId, status, createdAt(sort: Desc)])
   @@index([userId, createdAt(sort: Desc)])
+  @@index([orderId])
+  @@index([verificationType])
   @@index([rating])
+}
+
+/// Opaque post-purchase review invite (Phase 2). Raw token never stored — only SHA-256 hash.
+model ReviewRequest {
+  id              String    @id @default(uuid())
+  orderId         String    @unique
+  order           Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tokenHash       String    @unique
+  /// AES-GCM ciphertext of raw token (enc:v1:…) for stable resend without rotation. Never expose to clients.
+  tokenEncrypted  String?
+  expiresAt       DateTime
+  /// Reserved for delayed auto-send (Phase 3/4).
+  scheduledFor    DateTime?
+  /// Reserved for email send stamp (Phase 3).
+  sentAt          DateTime?
+  lastOpenedAt    DateTime?
+  /// Set when store + every order product has a review (token becomes inactive).
+  completedAt     DateTime?
+  revokedAt       DateTime?
+  /// Checkout UI locale snapshot from Order (email/page language).
+  locale          String?
+  createdByUserId String?
+  createdBy       User?     @relation("ReviewRequestCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  revokedByUserId String?
+  revokedBy       User?     @relation("ReviewRequestRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  lastGeneratedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@index([createdByUserId])
+
+  events ReviewRequestEvent[]
+}
+
+enum ReviewRequestEventType {
+  GENERATED
+  REGENERATED
+  REVOKED
+}
+
+/// Append-only audit for ReviewRequest lifecycle (no tokens/PII).
+model ReviewRequestEvent {
+  id              String                 @id @default(uuid())
+  reviewRequestId String
+  reviewRequest   ReviewRequest          @relation(fields: [reviewRequestId], references: [id], onDelete: Cascade)
+  type            ReviewRequestEventType
+  /// Null when system/automatic actor.
+  createdByUserId String?
+  createdBy       User?                  @relation("ReviewRequestEventCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime               @default(now())
+
+  @@index([reviewRequestId, createdAt(sort: Desc)])
+  @@index([createdByUserId])
 }
 
 model UserFavorite {

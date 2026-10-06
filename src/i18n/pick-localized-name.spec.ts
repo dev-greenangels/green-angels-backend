@@ -43,6 +43,17 @@ describe('pickLocalizedName — EU-safe for non-uk locales', () => {
     const skOnly = [{ locale: 'sk', name: 'Echinacea SK' }]
     assert.equal(pickLocalizedName(skOnly, 'uk', 'slug'), 'Echinacea SK')
   })
+
+  it('ignores Cyrillic mis-imported under sk locale', () => {
+    const polluted = [
+      { locale: 'uk', name: 'Туя західна' },
+      { locale: 'sk', name: 'Туя західна' },
+    ]
+    assert.equal(
+      pickLocalizedName(polluted, 'sk', 'thuja', { latinName: 'Thuja occidentalis' }),
+      'Thuja occidentalis',
+    )
+  })
 })
 
 describe('pickLocalizedLabel — never uses uk via arbitrary order on EU locales', () => {

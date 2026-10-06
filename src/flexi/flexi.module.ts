@@ -1,10 +1,11 @@
 import { BullModule } from '@nestjs/bullmq'
-import { Module } from '@nestjs/common'
+import { Module, forwardRef } from '@nestjs/common'
 
 import { AuthModule } from '../auth/auth.module'
 import { CommerceModule } from '../commerce/commerce.module'
 import { PrismaModule } from '../prisma/prisma.module'
 import { ProductsModule } from '../products/products.module'
+import { ReviewsModule } from '../reviews/reviews.module'
 import { SettingsModule } from '../settings/settings.module'
 import { FLEXI_QUEUE } from './flexi.constants'
 import { FlexiAdminController, FlexiWebhookController } from './flexi.controller'
@@ -40,6 +41,7 @@ import { FlexiStromEvidenceHandler } from './evidence/handlers/flexi-strom.evide
     CommerceModule,
     ProductsModule,
     SettingsModule,
+    forwardRef(() => ReviewsModule),
     BullModule.registerQueue({ name: FLEXI_QUEUE }),
   ],
   controllers: [FlexiWebhookController, FlexiAdminController],

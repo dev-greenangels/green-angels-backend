@@ -8,6 +8,10 @@ import {
   ValidateNested,
 } from 'class-validator'
 
+import { CHECKOUT_DELIVERY_METHODS } from '../../settings/checkout-methods.constants'
+
+const DELIVERY_METHODS = [...CHECKOUT_DELIVERY_METHODS] as string[]
+
 export class DeliveryDefaultsDto {
   @IsOptional()
   @IsString()
@@ -26,8 +30,66 @@ export class DeliveryDefaultsDto {
   houseNumber?: string
 
   @IsOptional()
-  @IsIn(['nova-poshta-branch', 'nova-poshta-address', 'pickup'])
+  @IsString()
+  postalCode?: string
+
+  @IsOptional()
+  @IsString()
+  countryCode?: string
+
+  @IsOptional()
+  @IsIn(DELIVERY_METHODS)
   method?: string
+}
+
+export class BillingDefaultsDto {
+  @IsOptional()
+  @IsIn(['individual', 'company'])
+  buyerType?: 'individual' | 'company'
+
+  @IsOptional()
+  @IsString()
+  firstName?: string
+
+  @IsOptional()
+  @IsString()
+  lastName?: string
+
+  @IsOptional()
+  @IsString()
+  countryCode?: string
+
+  @IsOptional()
+  @IsString()
+  street?: string
+
+  @IsOptional()
+  @IsString()
+  city?: string
+
+  @IsOptional()
+  @IsString()
+  postalCode?: string
+
+  @IsOptional()
+  @IsString()
+  companyLegalName?: string
+
+  @IsOptional()
+  @IsString()
+  companyIco?: string
+
+  @IsOptional()
+  @IsString()
+  companyDic?: string
+
+  @IsOptional()
+  @IsString()
+  companyVatId?: string
+
+  @IsOptional()
+  @IsString()
+  vatCountryCode?: string
 }
 
 export class UpdateAccountProfileDto {
@@ -59,4 +121,9 @@ export class UpdateAccountProfileDto {
   @ValidateNested()
   @Type(() => DeliveryDefaultsDto)
   deliveryDefaults?: DeliveryDefaultsDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BillingDefaultsDto)
+  billingDefaults?: BillingDefaultsDto
 }

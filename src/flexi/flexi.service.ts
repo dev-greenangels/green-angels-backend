@@ -1,8 +1,10 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   ServiceUnavailableException,
+  forwardRef,
 } from '@nestjs/common'
 import { VariantQuantityDiscountType } from '@prisma/client'
 
@@ -10,6 +12,7 @@ import { RETAIL_PRICE_TYPE } from '../commerce/commerce.constants'
 import { CommerceService } from '../commerce/commerce.service'
 import { PrismaService } from '../prisma/prisma.service'
 import { ProductsService } from '../products/products.service'
+import { ReviewRequestService } from '../reviews/review-request.service'
 import {
   classifyFlexiError,
   erpSyncErrorCodeForKind,
@@ -300,6 +303,8 @@ export class FlexiService {
     private readonly commerce: CommerceService,
     private readonly products: ProductsService,
     private readonly intake: FlexiChangeIntakeService,
+    @Inject(forwardRef(() => ReviewRequestService))
+    private readonly reviewRequests: ReviewRequestService,
   ) {}
 
   async isConfigured(): Promise<boolean> {
@@ -1694,7 +1699,13 @@ export class FlexiService {
       (externalErpId
         ? await this.prisma.order.findFirst({
             where: { externalErpId },
-            select: { id: true, status: true, deliveryMethod: true, deliveredAt: true },
+            select: {
+              id: true,
+              status: true,
+              deliveryMethod: true,
+              deliveredAt: true,
+              shippedAt: true,
+            },
           })
         : null) ?? null
 
@@ -1702,7 +1713,13 @@ export class FlexiService {
       const orderId = externalErpId.slice('ext:GA:'.length)
       order = await this.prisma.order.findUnique({
         where: { id: orderId },
-        select: { id: true, status: true, deliveryMethod: true, deliveredAt: true },
+        select: {
+          id: true,
+          status: true,
+          deliveryMethod: true,
+          deliveredAt: true,
+          shippedAt: true,
+        },
       })
     }
 
@@ -1743,15 +1760,28 @@ export class FlexiService {
             : null
       if (carrierHint) data.trackingCarrier = carrierHint
       if (!data.status) data.status = 'SHIPPED'
-      data.shippedAt = new Date()
+      if (!order.shippedAt) data.shippedAt = new Date()
     }
 
     if (Object.keys(data).length === 0) return
+
+    const becomingShipped =
+      order.status !== 'SHIPPED' && data.status === 'SHIPPED'
 
     await this.prisma.order.update({
       where: { id: order.id },
       data,
     })
+
+    if (becomingShipped) {
+      void this.reviewRequests.scheduleAutomaticAfterShipped(order.id).catch((err) => {
+        this.logger.warn(
+          `scheduleAutomaticAfterShipped failed orderId=${order.id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
+    }
   }
 
   private asArray<T>(value: unknown): T[] {

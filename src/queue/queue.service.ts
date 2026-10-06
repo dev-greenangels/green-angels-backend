@@ -9,6 +9,7 @@ import {
   EXPIRE_UNPAID_CARD_ORDERS_EVERY_MS,
   EXPIRE_UNPAID_CARD_ORDERS_JOB_ID,
   SANITIZE_CHECKOUT_DRAFT_PII_JOB_ID,
+  customerReviewRequestJobId,
   type AppJobPayload,
   type OrderEmailJobType,
 } from './queue.constants'
@@ -185,6 +186,48 @@ export class QueueService implements OnModuleInit {
         jobId,
         attempts: 3,
         backoff: { type: 'exponential', delay: 8000 },
+        removeOnComplete: 50,
+        removeOnFail: 80,
+      },
+    )
+  }
+
+  /**
+   * Delayed automatic review-request email (Phase 4).
+   * Deterministic jobId → at most one delayed/active job per order.
+   * Payload is orderId only (no token/PII/URL).
+   */
+  async enqueueCustomerReviewRequest(input: { orderId: string; delayMs: number }) {
+    const jobId = customerReviewRequestJobId(input.orderId)
+    try {
+      const existing = await this.queue.getJob(jobId)
+      if (existing) {
+        const state = await existing.getState()
+        if (state === 'waiting' || state === 'delayed' || state === 'active') {
+          return existing
+        }
+        // completed/failed: do not re-queue automatically from SHIPPED retries —
+        // execution-time idempotency already protects successful sends.
+        if (state === 'completed') {
+          return existing
+        }
+        await existing.remove().catch(() => undefined)
+      }
+    } catch {
+      // continue
+    }
+
+    return this.queue.add(
+      APP_JOB_NAMES.CUSTOMER_REVIEW_REQUEST,
+      {
+        type: 'customer-review-request',
+        orderId: input.orderId,
+      },
+      {
+        jobId,
+        delay: input.delayMs > 0 ? input.delayMs : undefined,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 15_000 },
         removeOnComplete: 50,
         removeOnFail: 80,
       },

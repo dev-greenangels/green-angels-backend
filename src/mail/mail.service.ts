@@ -340,6 +340,43 @@ export class MailService {
     return { id: result.id, subject, text }
   }
 
+  async sendCustomerReviewRequestEmail(input: {
+    to: string
+    subject: string
+    text: string
+    html: string
+    countrySiteCode?: CountrySiteCode | null
+  }): Promise<{ id: string | null; subject: string; text: string }> {
+    const subject = input.subject.trim()
+    const text = input.text.trim()
+    if (!subject || !text) {
+      throw new Error('Тема та текст листа обовʼязкові.')
+    }
+
+    if (!this.isConfigured()) {
+      this.logger.warn('Resend не налаштовано — лист із запитом відгуку не надіслано')
+      throw new Error('Resend не налаштовано')
+    }
+
+    const identity = await this.identity.resolve({
+      kind: 'order',
+      countrySiteCode: input.countrySiteCode,
+    })
+    if (!identity) {
+      throw new Error('Не вдалося визначити from/reply-to для листа')
+    }
+
+    const result = await this.resend.send({
+      from: identity.from,
+      to: input.to,
+      replyTo: identity.replyTo,
+      subject,
+      text,
+      html: input.html,
+    })
+    return { id: result.id, subject, text }
+  }
+
   async sendWholesaleInquiryEmail(input: {
     to: string | null
     region: 'ua' | 'sk'

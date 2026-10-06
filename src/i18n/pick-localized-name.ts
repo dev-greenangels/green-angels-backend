@@ -10,6 +10,21 @@ function firstFilledName(
   return undefined
 }
 
+function hasCyrillic(value: string): boolean {
+  return /[\u0400-\u04FF]/.test(value)
+}
+
+/**
+ * For non-uk storefront locales, treat Cyrillic “translations” as missing
+ * (mis-imported UK text under sk/en/… must not leak into EU UI).
+ */
+function usableNameForLocale(name: string | null | undefined, locale: string): string | undefined {
+  const trimmed = name?.trim()
+  if (!trimmed) return undefined
+  if (locale !== 'uk' && hasCyrillic(trimmed)) return undefined
+  return trimmed
+}
+
 export type PickLocalizedNameOptions = {
   /** Botanical / Latin name used after English when locale row is missing. */
   latinName?: string | null
@@ -18,7 +33,7 @@ export type PickLocalizedNameOptions = {
 /**
  * Storefront product/category names.
  * - `uk`: requested → uk → first filled → latin → slug (UA catalog remains valid)
- * - other locales: requested → en → latin → slug — never first-filled Ukrainian
+ * - other locales: requested → en → latin → slug — never Ukrainian / Cyrillic first-filled
  */
 export function pickLocalizedName(
   translations: Array<{ locale?: string; name?: string | null }>,
@@ -26,7 +41,10 @@ export function pickLocalizedName(
   slugFallback: string,
   options?: PickLocalizedNameOptions,
 ): string {
-  const requested = translations.find((row) => row.locale === locale)?.name?.trim()
+  const requested = usableNameForLocale(
+    translations.find((row) => row.locale === locale)?.name,
+    locale,
+  )
   if (requested) return requested
 
   const latin = options?.latinName?.trim()
@@ -40,7 +58,10 @@ export function pickLocalizedName(
     )
   }
 
-  const english = translations.find((row) => row.locale === 'en')?.name?.trim()
+  const english = usableNameForLocale(
+    translations.find((row) => row.locale === 'en')?.name,
+    locale,
+  )
   if (english) return english
 
   return latin || slugFallback

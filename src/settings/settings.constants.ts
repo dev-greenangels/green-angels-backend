@@ -25,6 +25,7 @@ export const SETTINGS_KEYS = {
   WHOLESALE_PAGE: 'page.wholesale',
   ABOUT_PAGE: 'page.about',
   WITHDRAWAL: 'commerce.withdrawal',
+  REVIEWS: 'commerce.reviews',
 } as const
 
 export type {

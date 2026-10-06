@@ -1,10 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common'
-import { Prisma, ReviewStatus } from '@prisma/client'
+import { Prisma, ReviewStatus, ReviewVerificationType } from '@prisma/client'
 
 import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
@@ -13,68 +14,34 @@ import { ReviewQueryDto, ReviewSortOrder, ReviewTypeFilter } from './dto/review-
 import { UpdateReviewReplyDto } from './dto/update-review-reply.dto'
 import { UpdateReviewStatusDto } from './dto/update-review-status.dto'
 import { REVIEW_IMAGE_PATH_REGEX } from './review.constants'
+import {
+  type BackstageReviewListItem,
+  type PublicReviewListItem,
+  toBackstageReviewListItem,
+  toPublicReviewListItem,
+} from './review-serializers'
+import {
+  REVIEW_ELIGIBLE_ORDER_STATUSES,
+  REVIEW_EXCLUDED_PAYMENT_STATUS,
+  collectPurchasedVariantLabels,
+  noneVerification,
+  type ReviewVerificationDecision,
+} from './review-verification'
 
 const DEFAULT_LOCALE = 'uk'
 const DEFAULT_PAGE_SIZE = 10
 
-export type ReviewStoreReply = {
-  authorName: string
-  text: string
-  createdAt: string
-}
+export type { BackstageReviewListItem, PublicReviewListItem, ReviewStoreReplyDto as ReviewStoreReply } from './review-serializers'
 
-export type ReviewListItem = {
-  id: string
-  authorName: string
-  email: string | null
-  phone: string | null
-  text: string
-  image: string | null
-  images: string[]
-  rating: number
-  productId: string | null
-  productName: string | null
-  productSlug: string | null
-  status: ReviewStatus
-  storeReply: ReviewStoreReply | null
-  legacyId: string | null
-  legacySource: string | null
-  importedAt: string | null
-  createdAt: string
-  updatedAt: string
-}
+/** @deprecated Prefer PublicReviewListItem / BackstageReviewListItem */
+export type ReviewListItem = BackstageReviewListItem
 
 export type ReviewsPageResult = {
-  items: ReviewListItem[]
+  items: PublicReviewListItem[]
   total: number
   page: number
   pageSize: number
   totalPages: number
-}
-
-type ReviewRecord = {
-  id: string
-  authorName: string
-  email: string | null
-  phone: string | null
-  text: string
-  image: string | null
-  images: string[]
-  rating: number
-  productId: string | null
-  status: ReviewStatus
-  storeReplyText: string | null
-  storeReplyAuthorName: string | null
-  storeReplyAt: Date | null
-  legacyId: string | null
-  legacySource: string | null
-  importedAt: Date | null
-  createdAt: Date
-  updatedAt: Date
-  product?: {
-    slug: string
-    translations: Array<{ name: string }>
-  } | null
 }
 
 @Injectable()
@@ -116,22 +83,6 @@ export class ReviewsService {
     }
 
     return unique
-  }
-
-  private resolveReviewImages(review: { image: string | null; images?: string[] }): string[] {
-    if (review.images?.length) return review.images
-    return review.image ? [review.image] : []
-  }
-
-  private buildStoreReply(review: ReviewRecord): ReviewStoreReply | null {
-    const text = review.storeReplyText?.trim()
-    if (!text) return null
-    return {
-      // Empty → storefront localizes via common.brand (do not hardcode UA).
-      authorName: review.storeReplyAuthorName?.trim() || '',
-      text,
-      createdAt: (review.storeReplyAt ?? review.updatedAt).toISOString(),
-    }
   }
 
   private buildWhere(query: ReviewQueryDto, publishedOnly: boolean): Prisma.ReviewWhereInput {
@@ -194,28 +145,141 @@ export class ReviewsService {
     } satisfies Prisma.ReviewInclude
   }
 
-  private toListItem(review: ReviewRecord): ReviewListItem {
-    const productName = review.product?.translations[0]?.name ?? null
+  private eligibleOrderWhere(userId: string): Prisma.OrderWhereInput {
     return {
-      id: review.id,
-      authorName: review.authorName,
-      email: review.email,
-      phone: review.phone,
-      text: review.text,
-      image: this.resolveReviewImages(review)[0] ?? null,
-      images: this.resolveReviewImages(review),
-      rating: review.rating,
-      productId: review.productId,
-      productName,
-      productSlug: review.product?.slug ?? null,
-      status: review.status,
-      storeReply: this.buildStoreReply(review),
-      legacyId: review.legacyId,
-      legacySource: review.legacySource,
-      importedAt: review.importedAt?.toISOString() ?? null,
-      createdAt: review.createdAt.toISOString(),
-      updatedAt: review.updatedAt.toISOString(),
+      userId,
+      status: { in: [...REVIEW_ELIGIBLE_ORDER_STATUSES] },
+      NOT: { paymentStatus: REVIEW_EXCLUDED_PAYMENT_STATUS },
     }
+  }
+
+  private eligibleOrderOrderBy(): Prisma.OrderOrderByWithRelationInput[] {
+    return [
+      { shippedAt: { sort: 'desc', nulls: 'last' } },
+      { createdAt: 'desc' },
+      { id: 'desc' },
+    ]
+  }
+
+  private async resolveProductVerification(
+    userId: string,
+    productId: string,
+  ): Promise<ReviewVerificationDecision> {
+    const orders = await this.prisma.order.findMany({
+      where: {
+        ...this.eligibleOrderWhere(userId),
+        items: {
+          some: {
+            productVariantId: { not: null },
+            productVariant: { productId },
+          },
+        },
+      },
+      orderBy: this.eligibleOrderOrderBy(),
+      select: {
+        id: true,
+        items: {
+          where: {
+            productVariantId: { not: null },
+            productVariant: { productId },
+          },
+          select: {
+            productVariantId: true,
+            variantLabel: true,
+            productVariant: { select: { productId: true } },
+          },
+        },
+      },
+    })
+
+    if (!orders.length) return noneVerification()
+
+    const usedOrderIds = new Set(
+      (
+        await this.prisma.review.findMany({
+          where: {
+            productId,
+            orderId: { in: orders.map((order) => order.id) },
+          },
+          select: { orderId: true },
+        })
+      )
+        .map((row) => row.orderId)
+        .filter((id): id is string => Boolean(id)),
+    )
+
+    for (const order of orders) {
+      if (usedOrderIds.has(order.id)) continue
+
+      const hasFkMatch = order.items.some(
+        (item) => item.productVariantId && item.productVariant?.productId === productId,
+      )
+      if (!hasFkMatch) continue
+
+      const labels = collectPurchasedVariantLabels(
+        order.items.map((item) => ({
+          productVariantId: item.productVariantId,
+          matchesReviewedProduct: item.productVariant?.productId === productId,
+          variantLabel: item.variantLabel,
+        })),
+      )
+
+      return {
+        verificationType: 'VERIFIED_PURCHASE',
+        orderId: order.id,
+        purchasedVariantLabels: labels,
+      }
+    }
+
+    return noneVerification()
+  }
+
+  private async resolveStoreVerification(userId: string): Promise<ReviewVerificationDecision> {
+    const orders = await this.prisma.order.findMany({
+      where: this.eligibleOrderWhere(userId),
+      orderBy: this.eligibleOrderOrderBy(),
+      select: { id: true },
+    })
+
+    if (!orders.length) return noneVerification()
+
+    const usedOrderIds = new Set(
+      (
+        await this.prisma.review.findMany({
+          where: {
+            productId: null,
+            orderId: { in: orders.map((order) => order.id) },
+          },
+          select: { orderId: true },
+        })
+      )
+        .map((row) => row.orderId)
+        .filter((id): id is string => Boolean(id)),
+    )
+
+    for (const order of orders) {
+      if (usedOrderIds.has(order.id)) continue
+      return {
+        verificationType: 'VERIFIED_CUSTOMER',
+        orderId: order.id,
+        purchasedVariantLabels: [],
+      }
+    }
+
+    return noneVerification()
+  }
+
+  private async resolveVerification(
+    userId: string | null | undefined,
+    productId: string | null,
+  ): Promise<ReviewVerificationDecision> {
+    if (!userId) return noneVerification()
+    if (productId) return this.resolveProductVerification(userId, productId)
+    return this.resolveStoreVerification(userId)
+  }
+
+  private isUniqueVerificationConflict(error: unknown): boolean {
+    return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
   }
 
   async findPublished(query: ReviewQueryDto = {}): Promise<ReviewsPageResult> {
@@ -235,7 +299,7 @@ export class ReviewsService {
     ])
 
     return {
-      items: reviews.map((review) => this.toListItem(review)),
+      items: reviews.map((review) => toPublicReviewListItem(review)),
       total,
       page,
       pageSize,
@@ -243,13 +307,13 @@ export class ReviewsService {
     }
   }
 
-  async findAllBackstage(query: ReviewQueryDto = {}): Promise<ReviewListItem[]> {
+  async findAllBackstage(query: ReviewQueryDto = {}): Promise<BackstageReviewListItem[]> {
     const reviews = await this.prisma.review.findMany({
       where: this.buildWhere(query, false),
       include: this.productInclude(),
       orderBy: { createdAt: 'desc' },
     })
-    return reviews.map((review) => this.toListItem(review))
+    return reviews.map((review) => toBackstageReviewListItem(review))
   }
 
   private async assertProductReviewable(productId: string): Promise<void> {
@@ -265,7 +329,7 @@ export class ReviewsService {
     }
   }
 
-  async create(userId: string | null | undefined, dto: CreateReviewDto): Promise<ReviewListItem> {
+  async create(userId: string | null | undefined, dto: CreateReviewDto): Promise<PublicReviewListItem> {
     let email: string | null
     let phone: string | null
 
@@ -302,24 +366,39 @@ export class ReviewsService {
     }
 
     const images = this.normalizeImages(dto.images, dto.image)
+    const verification = await this.resolveVerification(userId, productId)
 
-    const created = await this.prisma.review.create({
-      data: {
-        userId: userId || null,
-        productId,
-        authorName: dto.authorName.trim(),
-        email,
-        phone,
-        text: dto.text.trim(),
-        image: images[0] ?? null,
-        images,
-        rating: dto.rating,
-        status: ReviewStatus.PENDING,
-      },
-      include: this.productInclude(),
-    })
+    try {
+      const created = await this.prisma.review.create({
+        data: {
+          userId: userId || null,
+          productId,
+          orderId: verification.orderId,
+          verificationType: verification.verificationType as ReviewVerificationType,
+          purchasedVariantLabels: [...verification.purchasedVariantLabels],
+          authorName: dto.authorName.trim(),
+          email,
+          phone,
+          text: dto.text.trim(),
+          image: images[0] ?? null,
+          images,
+          rating: dto.rating,
+          status: ReviewStatus.PENDING,
+        },
+        include: this.productInclude(),
+      })
 
-    return this.toListItem(created)
+      return toPublicReviewListItem(created)
+    } catch (error) {
+      if (this.isUniqueVerificationConflict(error)) {
+        throw new ConflictException(
+          productId
+            ? 'Ви вже залишили відгук про цей товар для цього замовлення.'
+            : 'Ви вже залишили відгук про магазин для цього замовлення.',
+        )
+      }
+      throw error
+    }
   }
 
   async countPendingBackstage(): Promise<{ count: number }> {
@@ -329,20 +408,39 @@ export class ReviewsService {
     return { count }
   }
 
-  async updateStatus(id: string, dto: UpdateReviewStatusDto): Promise<ReviewListItem> {
+  async updateStatus(id: string, dto: UpdateReviewStatusDto): Promise<BackstageReviewListItem> {
     try {
       const updated = await this.prisma.review.update({
         where: { id },
         data: { status: dto.status },
         include: this.productInclude(),
       })
-      return this.toListItem(updated)
+      return toBackstageReviewListItem(updated)
     } catch {
       throw new NotFoundException('Відгук не знайдено.')
     }
   }
 
-  async updateReply(id: string, dto: UpdateReviewReplyDto): Promise<ReviewListItem> {
+  /** Approve/reject every review tied to one order (post-purchase submission bundle). */
+  async updateStatusByOrderId(
+    orderId: string,
+    dto: UpdateReviewStatusDto,
+  ): Promise<{ updated: number; orderId: string; status: ReviewStatus }> {
+    const trimmed = orderId?.trim()
+    if (!trimmed) {
+      throw new BadRequestException('Некоректний ідентифікатор замовлення.')
+    }
+    const result = await this.prisma.review.updateMany({
+      where: { orderId: trimmed },
+      data: { status: dto.status },
+    })
+    if (result.count === 0) {
+      throw new NotFoundException('Відгуків для цього замовлення не знайдено.')
+    }
+    return { updated: result.count, orderId: trimmed, status: dto.status }
+  }
+
+  async updateReply(id: string, dto: UpdateReviewReplyDto): Promise<BackstageReviewListItem> {
     const text = dto.text?.trim() ?? ''
     const clearing = !text
 
@@ -369,7 +467,7 @@ export class ReviewsService {
             },
         include: this.productInclude(),
       })
-      return this.toListItem(updated)
+      return toBackstageReviewListItem(updated)
     } catch {
       throw new NotFoundException('Відгук не знайдено.')
     }

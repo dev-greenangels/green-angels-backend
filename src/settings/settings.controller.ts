@@ -23,6 +23,7 @@ import { UpdateMediaWatermarkSettingsDto } from './dto/update-media-watermark-se
 import { UpdateWholesalePageSettingsDto } from './dto/update-wholesale-page-settings.dto'
 import { UpdateAboutPageSettingsDto } from './dto/update-about-page-settings.dto'
 import { UpdateWithdrawalSettingsDto } from './dto/update-withdrawal-settings.dto'
+import { UpdateReviewsSettingsDto } from './dto/update-reviews-settings.dto'
 import { SettingsService } from './settings.service'
 import type { VariantLabelSettings } from './settings.constants'
 import type { NavigationSettings } from './navigation.types'
@@ -115,6 +116,13 @@ export class SettingsController {
   @Roles(Role.ADMIN, Role.MANAGER)
   updateWithdrawal(@Body() dto: UpdateWithdrawalSettingsDto) {
     return this.settings.updateWithdrawalSettings(dto as Partial<import('./withdrawal.types').WithdrawalSettings>)
+  }
+
+  @Patch('reviews')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  updateReviews(@Body() dto: UpdateReviewsSettingsDto) {
+    return this.settings.updateReviewsSettings(dto as Partial<import('./reviews.types').ReviewsSettings>)
   }
 
   @Patch('cart-checkout')
