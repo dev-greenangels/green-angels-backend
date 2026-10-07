@@ -19,6 +19,11 @@ import { isIso31661Alpha2 } from '../common/iso-3166-1-alpha2'
 import { roundMoney } from '../pricing/pricing.helpers'
 import { packetaCheckoutOrderSnapshot } from '../packeta/packeta-fulfilment'
 import { PacketaService } from '../packeta/packeta.service'
+import {
+  buildOrderPackingSummary,
+  orderPackagingCountSnapshot,
+  type OrderPackingSummary,
+} from './order-packing'
 import { DispatchCalendarService, resolveMarketTimeZone } from '../settings/dispatch-calendar.service'
 import {
   getCheckoutPaymentRuleError,
@@ -182,6 +187,12 @@ export type BackstageOrderDetail = BackstageOrderListItem & {
   productsSubtotal: number | null
   deliveryAmount: number | null
   packagingAmount: number | null
+  /** Immutable checkout packaging fee box count snapshot. */
+  packagingBoxCount: number | null
+  /** Immutable checkout packaging fee pallet count snapshot. */
+  packagingPalletCount: number | null
+  /** Warehouse packing summary (actual packages + completion). */
+  packing: OrderPackingSummary
   taxAmount: number | null
   codFeeAmount: number | null
   pointsDiscountAmount: number | null
@@ -918,6 +929,10 @@ export class OrdersService {
         },
         cancellationReason: true,
         viesCheck: true,
+        packages: {
+          select: { id: true },
+          orderBy: { sequence: 'asc' },
+        },
       },
     })
 
@@ -957,6 +972,9 @@ export class OrdersService {
         },
       }),
     ])
+
+    const packagingAmount =
+      order.packagingAmount != null ? Number(order.packagingAmount) : null
 
     return {
       ...base,
@@ -998,8 +1016,16 @@ export class OrdersService {
         order.productsSubtotal != null ? Number(order.productsSubtotal) : null,
       deliveryAmount:
         order.deliveryAmount != null ? Number(order.deliveryAmount) : null,
-      packagingAmount:
-        order.packagingAmount != null ? Number(order.packagingAmount) : null,
+      packagingAmount,
+      packagingBoxCount: order.packagingBoxCount ?? null,
+      packagingPalletCount: order.packagingPalletCount ?? null,
+      packing: buildOrderPackingSummary({
+        packagingBoxCount: order.packagingBoxCount,
+        packagingPalletCount: order.packagingPalletCount,
+        packagingAmount,
+        packingCompletedAt: order.packingCompletedAt,
+        actualPackageCount: order.packages.length,
+      }),
       taxAmount: order.taxAmount != null ? Number(order.taxAmount) : null,
       codFeeAmount: order.codFeeAmount != null ? Number(order.codFeeAmount) : null,
       pointsDiscountAmount:
@@ -2854,10 +2880,10 @@ export class OrdersService {
           productsSubtotal,
           deliveryAmount: checkout.deliveryAmount,
           packagingAmount: checkout.packagingAmount,
-          packagingBoxCount:
-            checkout.packagingBoxCount > 0 ? checkout.packagingBoxCount : null,
-          packagingPalletCount:
-            checkout.packagingPalletCount > 0 ? checkout.packagingPalletCount : null,
+          ...orderPackagingCountSnapshot({
+            packagingBoxCount: checkout.packagingBoxCount,
+            packagingPalletCount: checkout.packagingPalletCount,
+          }),
           taxAmount: checkout.taxAmount,
           taxRatePercent: tax.taxRatePercent,
           taxCountryCode: tax.taxCountryCode,

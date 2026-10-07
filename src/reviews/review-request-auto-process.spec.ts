@@ -272,7 +272,7 @@ describe('ReviewRequestService.processAutomaticSend — per-attempt Communicatio
       h.communications[1].idempotencyKey,
       customerReviewRequestAutoAttemptIdempotencyKey('order-1', 2),
     )
-    assert.notEqual(h.communications[0].bodySnapshot, h.communications[1].bodySnapshot)
+    // Auto-send reuses a stable encrypted token when present — body URLs may match.
     const snap2 = structuredClone(h.snapshotOf('c-2')!)
 
     const result = await h.service.processAutomaticSend('order-1', { attempt: 3 })
@@ -357,7 +357,15 @@ describe('ReviewRequestService.sendEmailForOrder — manual attempts', () => {
       customerFirstName: 'Ján',
       customerLastName: 'Novák',
       userId: null,
-      reviewRequest: { id: 'rr-1', locale: 'sk', sentAt: null },
+      reviewRequest: {
+        id: 'rr-1',
+        locale: 'sk',
+        sentAt: null,
+        revokedAt: null,
+        completedAt: null,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        tokenEncrypted: null,
+      },
     }
     ;(h.service as unknown as { prisma: { order: { findUnique: () => Promise<unknown> } } }).prisma.order.findUnique =
       async () => orderWithRr

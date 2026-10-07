@@ -1460,8 +1460,13 @@ export class ReviewRequestService {
     const bodyHtml = reviewRequestTemplateToHtml(bodyText)
     const { idempotencyKey } = input
 
+    type DeliverTxResult =
+      | { kind: 'ok'; result: ReviewRequestSendResult }
+      | { kind: 'mail_failed'; errorMessage: string }
+
+    let txResult: DeliverTxResult
     try {
-      return await this.prisma.$transaction(
+      txResult = await this.prisma.$transaction(
         async (tx) => {
           let row = await tx.communication.findUnique({ where: { idempotencyKey } })
           if (!row) {
@@ -1506,10 +1511,13 @@ export class ReviewRequestService {
             row.status === CommunicationStatus.SKIPPED
           ) {
             return {
-              communication: this.mapCommunication(row),
-              reviewUrl: null,
-              regenerated: input.regenerated,
-              requestSentAt: input.requestSentAt?.toISOString() ?? null,
+              kind: 'ok' as const,
+              result: {
+                communication: this.mapCommunication(row),
+                reviewUrl: null,
+                regenerated: input.regenerated,
+                requestSentAt: input.requestSentAt?.toISOString() ?? null,
+              },
             }
           }
 
@@ -1556,12 +1564,17 @@ export class ReviewRequestService {
             }
 
             return {
-              communication: this.mapCommunication(updated),
-              reviewUrl: input.reviewUrl,
-              regenerated: input.regenerated,
-              requestSentAt: requestSentAt?.toISOString() ?? null,
+              kind: 'ok' as const,
+              result: {
+                communication: this.mapCommunication(updated),
+                reviewUrl: input.reviewUrl,
+                regenerated: input.regenerated,
+                requestSentAt: requestSentAt?.toISOString() ?? null,
+              },
             }
           } catch (error) {
+            // Persist FAILED inside the tx, then signal failure *after* commit.
+            // Throwing ServiceUnavailableException here would roll back the row.
             await tx.communication.update({
               where: { id: row.id },
               data: {
@@ -1571,9 +1584,11 @@ export class ReviewRequestService {
                 errorMessage: error instanceof Error ? error.message : String(error),
               },
             })
-            throw new ServiceUnavailableException(
-              error instanceof Error ? error.message : 'Не вдалося надіслати лист.',
-            )
+            return {
+              kind: 'mail_failed' as const,
+              errorMessage:
+                error instanceof Error ? error.message : 'Не вдалося надіслати лист.',
+            }
           }
         },
         { maxWait: 10_000, timeout: 60_000 },
@@ -1582,6 +1597,11 @@ export class ReviewRequestService {
       if (error instanceof ServiceUnavailableException) throw error
       throw error
     }
+
+    if (txResult.kind === 'mail_failed') {
+      throw new ServiceUnavailableException(txResult.errorMessage)
+    }
+    return txResult.result
   }
 
   private mapCommunication(row: {

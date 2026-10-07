@@ -832,6 +832,8 @@ model Order {
   packagingBoxCount             Int?
   /// Snapshot: full pallets charged in packaging fee
   packagingPalletCount          Int?
+  /// Warehouse packing confirmed complete (not Order.status=PACKED — that can be skipped/overwritten).
+  packingCompletedAt            DateTime?
   taxAmount                     Decimal?             @db.Decimal(10, 2)
   /// Snapshot of applied VAT % at checkout (SK multi-domain / OSS)
   taxRatePercent                Float?
@@ -990,6 +992,7 @@ model Order {
   promoCode                     PromoCode?           @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
   promoCodes                    OrderPromoCode[]
   items                         OrderItem[]
+  packages                      Package[]
   referralAttribution           ReferralAttribution?
   pointsLedger                  PointsLedgerEntry[]
   legalConsentEvents            LegalConsentEvent[]
@@ -1006,6 +1009,7 @@ model Order {
 
   @@unique([legacySource, legacyId])
   @@index([trackingNumber])
+  @@index([packingCompletedAt])
   @@index([cancellationReasonId])
   @@index([legacyId])
   @@index([externalErpId])
@@ -1242,6 +1246,28 @@ model OrderItem {
   order                Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productVariantId     String?
   productVariant       ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+}
+
+/// Physical shipping carton created during warehouse packing (not commercial packaging fee).
+/// Internal `code` is for warehouse scan — not a carrier TTN.
+model Package {
+  id        String   @id @default(uuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// 1-based box number within the order
+  sequence  Int
+  /// Globally unique internal barcode/code for future scanner ops
+  code      String   @unique
+  lengthCm  Decimal? @db.Decimal(12, 3)
+  widthCm   Decimal? @db.Decimal(12, 3)
+  heightCm  Decimal? @db.Decimal(12, 3)
+  weightKg  Decimal? @db.Decimal(12, 3)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orderId, sequence])
+  @@index([orderId])
+  @@map("order_package")
 }
 
 /// Immutable VIES audit snapshot at order placement (EU B2B reverse charge evidence).
