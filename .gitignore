@@ -28,4 +28,9 @@ lerna-debug.log*
 .temp
 .tmp
 
+# Local one-shot codemods / scratch (do not use scripts/_* — too broad)
+scripts/_local_*.mjs
+scripts/_local_*.ts
+scripts/local/
+
 .DS_Store
