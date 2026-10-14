@@ -36,6 +36,12 @@ export class AuthController {
     return this.auth.backstageLogin(dto, res)
   }
 
+  /** PlantStock PWA — scoped Bearer JWT (aud=plant-stock). No Backoffice cookie. */
+  @Post('plant-stock/login')
+  plantStockLogin(@Body() dto: BackstageLoginDto) {
+    return this.auth.plantStockLogin(dto)
+  }
+
   @Post('logout')
   logout(@Res({ passthrough: true }) res: Response) {
     this.auth.clearCustomerAuth(res)

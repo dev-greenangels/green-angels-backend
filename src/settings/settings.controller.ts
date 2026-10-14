@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Patch, Post, UseGuards } fr
 import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { MailService } from '../mail/mail.service'
@@ -60,6 +61,7 @@ export class SettingsController {
 
   @Get('dispatch-calendar')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.view', 'settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   async getDispatchCalendar() {
     const [settings, report] = await Promise.all([
@@ -71,6 +73,7 @@ export class SettingsController {
 
   @Patch('dispatch-calendar')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateDispatchCalendar(@Body() dto: Partial<DispatchCalendarSettings>) {
     return this.dispatchCalendar.updateSettings(dto)
@@ -78,6 +81,7 @@ export class SettingsController {
 
   @Get()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.view', 'settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   getBackstage() {
     return this.settings.getBackstageSettings()
@@ -85,6 +89,7 @@ export class SettingsController {
 
   @Patch('store')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateStore(@Body() dto: UpdateStoreSettingsDto) {
     return this.settings.updateStore(dto)
@@ -92,6 +97,7 @@ export class SettingsController {
 
   @Patch('home')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateHome(@Body() dto: Partial<HomePageSettings>) {
     return this.settings.updateHomePage(dto)
@@ -99,6 +105,7 @@ export class SettingsController {
 
   @Patch('wholesale')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateWholesale(@Body() dto: UpdateWholesalePageSettingsDto) {
     return this.settings.updateWholesalePage(dto)
@@ -106,6 +113,7 @@ export class SettingsController {
 
   @Patch('about')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateAbout(@Body() dto: UpdateAboutPageSettingsDto) {
     return this.settings.updateAboutPage(dto)
@@ -113,6 +121,7 @@ export class SettingsController {
 
   @Patch('withdrawal')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateWithdrawal(@Body() dto: UpdateWithdrawalSettingsDto) {
     return this.settings.updateWithdrawalSettings(dto as Partial<import('./withdrawal.types').WithdrawalSettings>)
@@ -120,6 +129,7 @@ export class SettingsController {
 
   @Patch('reviews')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateReviews(@Body() dto: UpdateReviewsSettingsDto) {
     return this.settings.updateReviewsSettings(dto as Partial<import('./reviews.types').ReviewsSettings>)
@@ -127,6 +137,7 @@ export class SettingsController {
 
   @Patch('cart-checkout')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateCartCheckout(@Body() dto: UpdateCartCheckoutSettingsDto) {
     return this.settings.updateCartCheckout(dto as Partial<CartCheckoutSettings>)
@@ -134,6 +145,7 @@ export class SettingsController {
 
   @Post('cart-checkout/test-new-order-notify')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   async testNewOrderNotify() {
     const cart = await this.settings.getCartCheckoutSettings()
@@ -172,6 +184,7 @@ export class SettingsController {
 
   @Patch('catalog')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateCatalog(@Body() dto: Partial<CatalogPageSettings>) {
     return this.settings.updateCatalogPage(dto)
@@ -179,6 +192,7 @@ export class SettingsController {
 
   @Patch('recently-viewed')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateRecentlyViewed(@Body() dto: Partial<RecentlyViewedSettings>) {
     return this.settings.updateRecentlyViewed(dto)
@@ -186,6 +200,7 @@ export class SettingsController {
 
   @Patch('localization')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateLocalization(@Body() dto: UpdateLocalizationSettingsDto) {
     return this.settings.updateLocalization(dto as Partial<LocalizationSettings>)
@@ -193,6 +208,7 @@ export class SettingsController {
 
   @Get('variant-labels')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.view', 'settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   getVariantLabels() {
     return this.settings.getVariantLabelSettings()
@@ -200,6 +216,7 @@ export class SettingsController {
 
   @Patch('variant-labels')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateVariantLabels(@Body() dto: UpdateVariantLabelSettingsDto) {
     return this.settings.updateVariantLabelSettings(dto as Partial<VariantLabelSettings>)
@@ -207,6 +224,7 @@ export class SettingsController {
 
   @Patch('navigation')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateNavigation(@Body() dto: Partial<NavigationSettings>) {
     return this.settings.updateNavigation(dto)
@@ -214,6 +232,7 @@ export class SettingsController {
 
   @Patch('presta-import')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updatePrestaImport(@Body() dto: UpdatePrestaImportSettingsDto) {
     return this.settings.updatePrestaImport(dto)
@@ -221,6 +240,7 @@ export class SettingsController {
 
   @Patch('media-watermark')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateMediaWatermark(@Body() dto: UpdateMediaWatermarkSettingsDto) {
     return this.settings.updateMediaWatermark(dto)
@@ -228,6 +248,7 @@ export class SettingsController {
 
   @Patch('market')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateMarket(@Body() dto: UpdateMarketSettingsDto) {
     return this.settings.updateMarket(dto as Partial<MarketSettings>)

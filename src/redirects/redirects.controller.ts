@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } f
 import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { CreateRedirectDto } from './dto/create-redirect.dto'
@@ -26,6 +27,7 @@ export class RedirectsController {
 
   @Get('prefixes')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('site.redirects')
   @Roles(Role.ADMIN, Role.MANAGER)
   listPrefixes() {
     return this.redirects.listPrefixes()
@@ -33,6 +35,7 @@ export class RedirectsController {
 
   @Post('invalidate-cache')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('site.redirects')
   @Roles(Role.ADMIN, Role.MANAGER)
   async invalidateCache() {
     await this.redirects.invalidateCache()
@@ -41,6 +44,7 @@ export class RedirectsController {
 
   @Get()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('site.redirects')
   @Roles(Role.ADMIN, Role.MANAGER)
   findAll(@Query('prefix') prefix?: string) {
     return this.redirects.findAll(prefix)
@@ -48,6 +52,7 @@ export class RedirectsController {
 
   @Get(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('site.redirects')
   @Roles(Role.ADMIN, Role.MANAGER)
   findById(@Param('id') id: string) {
     return this.redirects.findById(id)
@@ -55,6 +60,7 @@ export class RedirectsController {
 
   @Post()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('site.redirects')
   @Roles(Role.ADMIN, Role.MANAGER)
   create(@Body() dto: CreateRedirectDto) {
     return this.redirects.create(dto)
@@ -62,6 +68,7 @@ export class RedirectsController {
 
   @Patch(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('site.redirects')
   @Roles(Role.ADMIN, Role.MANAGER)
   update(@Param('id') id: string, @Body() dto: UpdateRedirectDto) {
     return this.redirects.update(id, dto)
@@ -69,6 +76,7 @@ export class RedirectsController {
 
   @Delete(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('site.redirects')
   @Roles(Role.ADMIN, Role.MANAGER)
   async remove(@Param('id') id: string) {
     await this.redirects.remove(id)

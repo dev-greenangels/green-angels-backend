@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@n
 import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { DiscountRulesService } from './discount-rules.service'
@@ -9,6 +10,7 @@ import { UpsertDiscountRuleDto } from './dto/upsert-discount-rule.dto'
 
 @Controller('discount-rules')
 @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+@RequirePermissions('promotions.manage')
 @Roles(Role.ADMIN, Role.MANAGER)
 export class DiscountRulesController {
   constructor(private readonly rules: DiscountRulesService) {}

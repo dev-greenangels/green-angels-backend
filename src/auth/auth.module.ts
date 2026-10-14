@@ -16,8 +16,12 @@ import { JwtAuthGuard } from './jwt-auth.guard'
 import { BackstageJwtAuthGuard } from './backstage-jwt-auth.guard'
 import { OptionalJwtAuthGuard } from './optional-jwt-auth.guard'
 import { OptionalBackstageJwtAuthGuard } from './optional-backstage-jwt-auth.guard'
+import { PlantStockJwtAuthGuard } from './plant-stock-jwt-auth.guard'
 import { JwtStrategy } from './jwt.strategy'
 import { BackstageJwtStrategy } from './backstage-jwt.strategy'
+import { PlantStockJwtStrategy } from './plant-stock-jwt.strategy'
+import { PermissionsService } from './permissions/permissions.service'
+import { StaffPermissionsController } from './permissions/staff-permissions.controller'
 
 @Module({
   imports: [
@@ -39,14 +43,17 @@ import { BackstageJwtStrategy } from './backstage-jwt.strategy'
       },
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, StaffPermissionsController],
   providers: [
     AuthService,
     OtpService,
+    PermissionsService,
     JwtStrategy,
     BackstageJwtStrategy,
+    PlantStockJwtStrategy,
     JwtAuthGuard,
     BackstageJwtAuthGuard,
+    PlantStockJwtAuthGuard,
     OptionalJwtAuthGuard,
     OptionalBackstageJwtAuthGuard,
     RolesGuard,
@@ -54,9 +61,11 @@ import { BackstageJwtStrategy } from './backstage-jwt.strategy'
   exports: [
     AuthService,
     OtpService,
+    PermissionsService,
     JwtModule,
     JwtAuthGuard,
     BackstageJwtAuthGuard,
+    PlantStockJwtAuthGuard,
     OptionalJwtAuthGuard,
     OptionalBackstageJwtAuthGuard,
     RolesGuard,

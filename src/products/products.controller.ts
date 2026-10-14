@@ -3,6 +3,7 @@ import { Role } from '@prisma/client'
 import type { Request } from 'express'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { OptionalBackstageJwtAuthGuard } from '../auth/optional-backstage-jwt-auth.guard'
@@ -90,6 +91,7 @@ export class ProductsController {
 
   @Patch('bulk')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   bulk(@Body() dto: BulkProductsDto) {
     return this.products.bulkAction(dto)
@@ -97,6 +99,7 @@ export class ProductsController {
 
   @Patch('bulk-fields')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   bulkFields(@Body() dto: BulkUpdateProductFieldsDto) {
     return this.products.bulkUpdateFields(dto)
@@ -109,6 +112,7 @@ export class ProductsController {
 
   @Get('inventory-retail-value')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getInventoryRetailValue() {
     return this.products.getInventoryRetailValue()
@@ -145,6 +149,7 @@ export class ProductsController {
 
   @Post()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   create(@Body() dto: CreateProductDto) {
     return this.products.create(dto)
@@ -152,6 +157,7 @@ export class ProductsController {
 
   @Patch(':id/published')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   setPublished(@Param('id') id: string, @Body() dto: PatchProductPublishedDto) {
     return this.products.setPublished(id, dto.isPublished)
@@ -159,6 +165,7 @@ export class ProductsController {
 
   @Patch(':id/images')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   setImages(@Param('id') id: string, @Body() dto: PatchProductImagesDto) {
     return this.products.setImages(id, dto.images)
@@ -166,6 +173,7 @@ export class ProductsController {
 
   @Patch(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
     return this.products.update(id, dto)
@@ -173,6 +181,7 @@ export class ProductsController {
 
   @Get(':id/translations/name')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getNameTranslations(@Param('id') id: string) {
     return this.products.getNameTranslations(id)
@@ -180,6 +189,7 @@ export class ProductsController {
 
   @Patch(':id/translations/name')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   patchNameTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
     return this.products.patchNameTranslations(id, dto)
@@ -187,6 +197,7 @@ export class ProductsController {
 
   @Get(':id/translations/description')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getDescriptionTranslations(@Param('id') id: string) {
     return this.products.getDescriptionTranslations(id)
@@ -194,6 +205,7 @@ export class ProductsController {
 
   @Patch(':id/translations/description')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   patchDescriptionTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
     return this.products.patchDescriptionTranslations(id, dto)
@@ -201,6 +213,7 @@ export class ProductsController {
 
   @Get(':id/translations/meta-title')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getMetaTitleTranslations(@Param('id') id: string) {
     return this.products.getMetaTitleTranslations(id)
@@ -208,6 +221,7 @@ export class ProductsController {
 
   @Patch(':id/translations/meta-title')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   patchMetaTitleTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
     return this.products.patchMetaTitleTranslations(id, dto)
@@ -215,6 +229,7 @@ export class ProductsController {
 
   @Get(':id/translations/meta-desc')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getMetaDescTranslations(@Param('id') id: string) {
     return this.products.getMetaDescTranslations(id)
@@ -222,6 +237,7 @@ export class ProductsController {
 
   @Patch(':id/translations/meta-desc')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   patchMetaDescTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
     return this.products.patchMetaDescTranslations(id, dto)
@@ -229,6 +245,7 @@ export class ProductsController {
 
   @Get(':id/translations/search-synonyms')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getSearchSynonymsTranslations(@Param('id') id: string) {
     return this.products.getSearchSynonymsTranslations(id)
@@ -236,6 +253,7 @@ export class ProductsController {
 
   @Patch(':id/translations/search-synonyms')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   patchSearchSynonymsTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
     return this.products.patchSearchSynonymsTranslations(id, dto)

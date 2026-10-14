@@ -2,6 +2,7 @@ import { Controller, Get, UseGuards } from '@nestjs/common'
 import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { FlexiChangeIntakeService } from '../flexi/flexi.change-intake.service'
@@ -16,6 +17,7 @@ import { TedbService } from '../tedb/tedb.service'
 
 @Controller('backstage/jobs')
 @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+@RequirePermissions('jobs.view')
 @Roles(Role.ADMIN, Role.MANAGER)
 export class BackstageJobsController {
   constructor(

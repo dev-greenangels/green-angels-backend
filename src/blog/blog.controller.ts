@@ -12,6 +12,7 @@ import {
 import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { BlogService } from './blog.service'
@@ -33,6 +34,7 @@ export class BlogController {
   /** Повний список для бек-офісу (вкл. приховані). */
   @Get('admin')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('content.blog')
   @Roles(Role.ADMIN, Role.MANAGER)
   findAdmin(@Query() query: BlogQueryDto) {
     return this.blog.findPage({ ...query, publishedOnly: false }, false)
@@ -40,6 +42,7 @@ export class BlogController {
 
   @Post('bulk')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('content.blog')
   @Roles(Role.ADMIN, Role.MANAGER)
   bulk(@Body() dto: BlogBulkDto) {
     return this.blog.bulk(dto)
@@ -47,6 +50,7 @@ export class BlogController {
 
   @Get('id/:id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('content.blog')
   @Roles(Role.ADMIN, Role.MANAGER)
   findById(@Param('id') id: string) {
     return this.blog.findById(id)
@@ -59,6 +63,7 @@ export class BlogController {
 
   @Post()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('content.blog')
   @Roles(Role.ADMIN, Role.MANAGER)
   create(@Body() dto: CreateBlogPostDto) {
     return this.blog.create(dto)
@@ -66,6 +71,7 @@ export class BlogController {
 
   @Patch(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('content.blog')
   @Roles(Role.ADMIN, Role.MANAGER)
   update(@Param('id') id: string, @Body() dto: UpdateBlogPostDto) {
     return this.blog.update(id, dto)
@@ -73,6 +79,7 @@ export class BlogController {
 
   @Delete(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('content.blog')
   @Roles(Role.ADMIN, Role.MANAGER)
   remove(@Param('id') id: string) {
     return this.blog.remove(id)

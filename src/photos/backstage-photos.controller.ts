@@ -18,6 +18,7 @@ import { Type } from 'class-transformer'
 import { memoryStorage } from 'multer'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { PhotoUploadBodyDto } from './dto/photo-upload-body.dto'
@@ -97,6 +98,7 @@ export class BackstagePhotosController {
   ) {}
 
   @Get()
+  @RequirePermissions('photos.view', 'photos.manage')
   list(@Query() query: AdminPhotosQueryDto) {
     return this.photosService.listAdmin({
       search: query.search,
@@ -110,11 +112,13 @@ export class BackstagePhotosController {
   }
 
   @Post('delete')
+  @RequirePermissions('photos.manage')
   deleteMany(@Body() body: DeletePhotosDto) {
     return this.photosService.deletePhotos(body.ids ?? [])
   }
 
   @Post('upload')
+  @RequirePermissions('photos.manage')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -136,21 +140,25 @@ export class BackstagePhotosController {
   }
 
   @Delete(':id')
+  @RequirePermissions('photos.manage')
   deleteOne(@Param('id') id: string) {
     return this.photosService.deletePhotos([id])
   }
 
   @Get('viber-recipients')
+  @RequirePermissions('photos.manage')
   getViberRecipients() {
     return this.viberRecipients.list()
   }
 
   @Post('viber-recipients')
+  @RequirePermissions('photos.manage')
   updateViberRecipients(@Body() body: UpdateViberRecipientsDto) {
     return this.viberRecipients.replace(body.recipients ?? [])
   }
 
   @Post('sync-legacy')
+  @RequirePermissions('photos.manage')
   startLegacyPhotoSync(@Body() body: LegacyPhotoSyncDto) {
     return this.legacyPhotoSync.startSync({
       manifestUrl: body.manifestUrl,
@@ -159,11 +167,13 @@ export class BackstagePhotosController {
   }
 
   @Get('sync-legacy/status')
+  @RequirePermissions('photos.manage')
   getLegacyPhotoSyncStatus() {
     return this.legacyPhotoSync.getStatus()
   }
 
   @Post('sync-legacy/cancel')
+  @RequirePermissions('photos.manage')
   cancelLegacyPhotoSync() {
     return this.legacyPhotoSync.cancelSync()
   }

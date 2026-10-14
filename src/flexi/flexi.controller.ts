@@ -18,6 +18,7 @@ import { Role } from '@prisma/client'
 import type { Request, Response } from 'express'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import type { SessionJwtPayload } from '../auth/auth.constants'
@@ -105,6 +106,7 @@ export class FlexiWebhookController {
 
 @Controller('backstage/flexi')
 @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+@RequirePermissions('flexi.view', 'flexi.manage')
 @Roles(Role.ADMIN, Role.MANAGER)
 export class FlexiAdminController {
   constructor(
@@ -131,6 +133,7 @@ export class FlexiAdminController {
   }
 
   @Patch('settings')
+  @RequirePermissions('flexi.manage')
   async updateSettings(@Body() dto: Partial<FlexiSettings>) {
     const next = await this.settings.updateSettings(dto)
     await this.queue.rebuildRepeatableJobs()
@@ -138,11 +141,13 @@ export class FlexiAdminController {
   }
 
   @Post('test-connection')
+  @RequirePermissions('flexi.manage')
   testConnection() {
     return this.flexi.testConnection()
   }
 
   @Post('register-webhook')
+  @RequirePermissions('flexi.manage')
   @HttpCode(200)
   async registerWebhook() {
     const settings = await this.settings.getSettings()
@@ -154,6 +159,7 @@ export class FlexiAdminController {
   }
 
   @Post('disable-webhook')
+  @RequirePermissions('flexi.manage')
   @HttpCode(200)
   disableWebhook() {
     return this.flexi.disableWebhook()
@@ -178,6 +184,7 @@ export class FlexiAdminController {
    * Does not change globalVersion, Auto Sync, journal, or recreate a hook.
    */
   @Delete('webhooks/:id')
+  @RequirePermissions('flexi.manage')
   @Roles(Role.ADMIN)
   deleteWebhook(
     @Param('id') id: string,
@@ -191,6 +198,7 @@ export class FlexiAdminController {
    * Body: { confirm: "DELETE_ORPHAN_ABRA_HOOKS" }
    */
   @Post('webhooks/delete-orphans')
+  @RequirePermissions('flexi.manage')
   @HttpCode(200)
   @Roles(Role.ADMIN)
   deleteOrphanWebhooks(
@@ -206,6 +214,7 @@ export class FlexiAdminController {
    * Does NOT recreate a hook — use Enable Without Update / Update and Enable after.
    */
   @Post('webhooks/delete-all')
+  @RequirePermissions('flexi.manage')
   @HttpCode(200)
   @Roles(Role.ADMIN)
   deleteAllWebhooks(
@@ -217,51 +226,60 @@ export class FlexiAdminController {
 
   /** Backup: poll Changes API now */
   @Post('poll-changes')
+  @RequirePermissions('flexi.manage')
   async pollChanges() {
     const job = await this.queue.enqueuePollChanges()
     return { ok: true, jobId: job.id, message: 'Poll Changes поставлено в чергу.' }
   }
 
   @Post('poll-changes/run')
+  @RequirePermissions('flexi.manage')
   pollChangesRun() {
     return this.live.pollChangesLive()
   }
 
   @Post('sync-now')
+  @RequirePermissions('flexi.manage')
   async syncNow() {
     return this.pollChanges()
   }
 
   @Post('sync-now/run')
+  @RequirePermissions('flexi.manage')
   syncNowRun() {
     return this.live.pollChangesLive()
   }
 
   @Post('auto-sync/disable')
+  @RequirePermissions('flexi.manage')
   @HttpCode(200)
   autoSyncDisable(@Req() req: Request & { user: SessionJwtPayload }) {
     return this.autoSync.disableAutoSync({ initiatedBy: req.user.userId })
   }
 
   @Post('auto-sync/enable-without-update')
+  @RequirePermissions('flexi.manage')
   @HttpCode(200)
   autoSyncEnableWithoutUpdate(@Req() req: Request & { user: SessionJwtPayload }) {
     return this.autoSync.enableWithoutUpdate({ initiatedBy: req.user.userId })
   }
 
   @Post('auto-sync/update-and-enable')
+  @RequirePermissions('flexi.manage')
   @HttpCode(200)
   autoSyncUpdateAndEnable(@Req() req: Request & { user: SessionJwtPayload }) {
     return this.autoSync.updateAndEnable({ initiatedBy: req.user.userId })
   }
 
   @Post('orders/reconcile/run')
+  @RequirePermissions('flexi.manage')
   @HttpCode(200)
   orderReconcileRun(@Req() req: Request & { user: SessionJwtPayload }) {
     return this.orderReconcile.reconcileActiveErpOrders({ initiatedBy: req.user.userId })
   }
 
   @Post('full-refresh/run')
+  @RequirePermissions('flexi.manage')
   @HttpCode(200)
   fullRefreshRun(@Req() req: Request & { user: SessionJwtPayload }) {
     return this.fullRefresh.runAuthoritative({
@@ -360,6 +378,7 @@ export class FlexiAdminController {
    * ADMIN only. confirm=DELETE_LEGACY_FLEXI_JOURNAL
    */
   @Post('recovery/retire-legacy-journal')
+  @RequirePermissions('flexi.manage')
   @HttpCode(200)
   @Roles(Role.ADMIN)
   async retireLegacyJournal(
@@ -380,6 +399,7 @@ export class FlexiAdminController {
    * @deprecated Alias of retire-legacy-journal (same confirm token).
    */
   @Post('recovery/clear-legacy-journal')
+  @RequirePermissions('flexi.manage')
   @HttpCode(200)
   @Roles(Role.ADMIN)
   async recoveryClearLegacyJournal(
@@ -395,17 +415,20 @@ export class FlexiAdminController {
   }
 
   @Post('full-sync')
+  @RequirePermissions('flexi.manage')
   async fullSync() {
     const job = await this.queue.enqueueFullSync()
     return { ok: true, jobId: job.id, message: 'Повний sync cenik поставлено в чергу.' }
   }
 
   @Post('full-sync/run')
+  @RequirePermissions('flexi.manage')
   fullSyncRun() {
     return this.flexi.syncCenikFull()
   }
 
   @Post('sync-strom')
+  @RequirePermissions('flexi.manage')
   async syncStrom(@Body() body?: { createMissing?: boolean }) {
     const createMissing = body?.createMissing !== false
     const job = await this.queue.enqueueSyncStrom(createMissing)
@@ -419,6 +442,7 @@ export class FlexiAdminController {
   }
 
   @Post('sync-strom/run')
+  @RequirePermissions('flexi.manage')
   syncStromRun(@Body() body?: { createMissing?: boolean }) {
     const createMissing = body?.createMissing !== false
     return this.flexi.syncStromCatalog({
@@ -429,17 +453,20 @@ export class FlexiAdminController {
   }
 
   @Post('backfill-category-legacy-ids/run')
+  @RequirePermissions('flexi.manage')
   backfillCategoryLegacyIdsRun() {
     return this.flexi.backfillCategoryLegacyIds()
   }
 
   @Post('import-new-products')
+  @RequirePermissions('flexi.manage')
   async importNewProducts() {
     const job = await this.queue.enqueueImportNewProducts()
     return { ok: true, jobId: job.id, message: 'Імпорт (Strom) поставлено в чергу.' }
   }
 
   @Post('import-new-products/run')
+  @RequirePermissions('flexi.manage')
   importNewProductsRun() {
     return this.flexi.importNewProducts()
   }
@@ -464,6 +491,7 @@ export class FlexiAdminController {
   }
 
   @Post('queue/retry-failed')
+  @RequirePermissions('flexi.manage')
   @Roles(Role.ADMIN)
   async retryFailed() {
     // Legacy journal processor is retired — do NOT wake process-intake (would only skip).
@@ -480,6 +508,7 @@ export class FlexiAdminController {
   }
 
   @Post('queue/skip-failed')
+  @RequirePermissions('flexi.manage')
   @Roles(Role.ADMIN)
   async skipFailed() {
     const count = await this.intake.skipFailedEvents()
@@ -494,6 +523,7 @@ export class FlexiAdminController {
   }
 
   @Post('queue/drain')
+  @RequirePermissions('flexi.manage')
   async drainQueue() {
     const removed = await this.queue.drainWaitingJobs()
     return { ok: true, removed, message: `Знято очікуючих jobs: ${removed}.` }
@@ -505,6 +535,7 @@ export class FlexiAdminController {
   }
 
   @Post('backlog/close')
+  @RequirePermissions('flexi.manage')
   @Roles(Role.ADMIN)
   backlogClose(
     @Req() req: Request & { user: SessionJwtPayload },

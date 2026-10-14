@@ -15,6 +15,7 @@ import type { Request } from 'express'
 
 import type { SessionJwtPayload } from '../auth/auth.constants'
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { CreateStaffDto } from './dto/create-staff.dto'
@@ -25,6 +26,7 @@ import { UsersService } from './users.service'
 
 @Controller('users')
 @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+@RequirePermissions('customers.view', 'customers.edit')
 @Roles(Role.ADMIN, Role.MANAGER)
 export class UsersController {
   constructor(private readonly users: UsersService) {}
@@ -63,6 +65,7 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @RequirePermissions('customers.edit')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateUserDto,
@@ -72,11 +75,13 @@ export class UsersController {
   }
 
   @Patch(':id/groups')
+  @RequirePermissions('customers.edit')
   updateGroups(@Param('id') id: string, @Body() dto: UpdateUserGroupsDto) {
     return this.users.updateGroups(id, dto)
   }
 
   @Delete(':id')
+  @RequirePermissions('customers.edit')
   remove(@Param('id') id: string, @Body() dto: DeleteUserDto) {
     return this.users.remove(id, dto.deleteOrders)
   }

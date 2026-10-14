@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } f
 import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { CharacteristicsService } from './characteristics.service'
@@ -26,6 +27,7 @@ export class CharacteristicsController {
 
   @Post()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   create(@Body() dto: CreateCharacteristicDto) {
     return this.service.create(dto)
@@ -33,6 +35,7 @@ export class CharacteristicsController {
 
   @Get('bulk-matrix')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getBulkMatrix(
     @Query('locale') locale?: string,
@@ -52,6 +55,7 @@ export class CharacteristicsController {
 
   @Patch('bulk-matrix')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   bulkUpdateBulkMatrix(@Body() dto: BulkUpdateBulkMatrixDto) {
     return this.service.bulkUpdateBulkMatrix(dto)
@@ -59,6 +63,7 @@ export class CharacteristicsController {
 
   @Get(':id/product-matrix')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getProductMatrix(@Param('id') id: string, @Query('locale') locale?: string) {
     return this.service.getProductMatrix(id, locale)
@@ -66,6 +71,7 @@ export class CharacteristicsController {
 
   @Patch(':id/product-matrix')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   bulkUpdateProductMatrix(@Param('id') id: string, @Body() dto: BulkUpdateProductMatrixDto) {
     return this.service.bulkUpdateProductMatrix(id, dto)
@@ -73,6 +79,7 @@ export class CharacteristicsController {
 
   @Patch(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   update(@Param('id') id: string, @Body() dto: UpdateCharacteristicDto) {
     return this.service.update(id, dto)
@@ -80,6 +87,7 @@ export class CharacteristicsController {
 
   @Get(':id/translations/name')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getNameTranslations(@Param('id') id: string) {
     return this.service.getNameTranslations(id)
@@ -87,6 +95,7 @@ export class CharacteristicsController {
 
   @Patch(':id/translations/name')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   patchNameTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
     return this.service.patchNameTranslations(id, dto)
@@ -94,6 +103,7 @@ export class CharacteristicsController {
 
   @Get(':id/options/:optionId/translations/label')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getOptionLabelTranslations(@Param('id') id: string, @Param('optionId') optionId: string) {
     return this.service.getOptionLabelTranslations(id, optionId)
@@ -101,6 +111,7 @@ export class CharacteristicsController {
 
   @Patch(':id/options/:optionId/translations/label')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   patchOptionLabelTranslations(
     @Param('id') id: string,
@@ -112,6 +123,7 @@ export class CharacteristicsController {
 
   @Delete(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   remove(@Param('id') id: string) {
     return this.service.remove(id)

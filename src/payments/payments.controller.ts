@@ -14,6 +14,7 @@ import { Role } from '@prisma/client'
 
 import type { SessionJwtPayload } from '../auth/auth.constants'
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard'
@@ -62,6 +63,7 @@ export class PaymentsController {
 
   @Get('providers/status')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.view', 'orders.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   getProvidersStatus() {
     return this.payments.getProvidersStatus()

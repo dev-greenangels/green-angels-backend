@@ -4,7 +4,12 @@ import { PassportStrategy } from '@nestjs/passport'
 import { Request } from 'express'
 import { ExtractJwt, Strategy } from 'passport-jwt'
 
-import { BACKSTAGE_SESSION_COOKIE_NAME, type SessionJwtPayload } from './auth.constants'
+import {
+  BACKSTAGE_SESSION_COOKIE_NAME,
+  JWT_AUD_BACKSTAGE,
+  JWT_AUD_PLANT_STOCK,
+  type SessionJwtPayload,
+} from './auth.constants'
 
 @Injectable()
 export class BackstageJwtStrategy extends PassportStrategy(Strategy, 'jwt-backstage') {
@@ -15,24 +20,41 @@ export class BackstageJwtStrategy extends PassportStrategy(Strategy, 'jwt-backst
     }
 
     super({
+      // Cookie-only: never accept Authorization Bearer (closes legacy PlantStock
+      // backstage tokens stored as Bearer in PWA localStorage).
       jwtFromRequest: ExtractJwt.fromExtractors([
         (req: Request) => req.cookies?.[BACKSTAGE_SESSION_COOKIE_NAME] ?? null,
-        ExtractJwt.fromAuthHeaderAsBearerToken(),
       ]),
       ignoreExpiration: false,
       secretOrKey: secret,
     })
   }
 
-  validate(payload: { sub?: string; role?: string; v?: number }): SessionJwtPayload {
+  validate(payload: {
+    sub?: string
+    role?: string
+    v?: number
+    aud?: string
+  }): SessionJwtPayload {
     const userId = typeof payload.sub === 'string' ? payload.sub : null
     const role = payload.role === 'admin' ? 'admin' : null
     const v = payload.v === 1 ? 1 : null
+    const aud = payload.aud
+
+    // PlantStock tokens must not authenticate Backoffice routes.
+    if (aud === JWT_AUD_PLANT_STOCK) {
+      throw new UnauthorizedException()
+    }
 
     if (!userId || !role || !v) {
       throw new UnauthorizedException()
     }
 
-    return { userId, role, v }
+    // Legacy cookie tokens without aud are treated as backstage.
+    if (aud != null && aud !== JWT_AUD_BACKSTAGE) {
+      throw new UnauthorizedException()
+    }
+
+    return { userId, role, v, aud: JWT_AUD_BACKSTAGE }
   }
 }

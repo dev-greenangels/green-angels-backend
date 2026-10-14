@@ -4,6 +4,7 @@ import type { Request, Response } from 'express'
 
 import type { SessionJwtPayload } from '../auth/auth.constants'
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard'
@@ -27,6 +28,7 @@ export class LegalController {
 
   @Get('admin')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('legal.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   listAdmin(@Query() query: LegalLocaleQueryDto) {
     return this.legal.listAdmin(query.locale)
@@ -34,6 +36,7 @@ export class LegalController {
 
   @Post('admin/revisions')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('legal.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   createDraft(
     @Body() dto: CreateLegalRevisionDto,
@@ -44,6 +47,7 @@ export class LegalController {
 
   @Patch('admin/revisions/:id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('legal.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateDraft(@Param('id') id: string, @Body() dto: UpdateLegalRevisionDto) {
     return this.legal.updateDraft(id, dto)
@@ -51,6 +55,7 @@ export class LegalController {
 
   @Post('admin/revisions/:id/publish')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('legal.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   publish(@Param('id') id: string) {
     return this.legal.publish(id)
@@ -58,6 +63,7 @@ export class LegalController {
 
   @Get('admin/marketing-subscribers')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('legal.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   listMarketingSubscribers(@Query() query: MarketingSubscribersQueryDto) {
     return this.legal.listMarketingSubscribersBackstage(query)
@@ -65,6 +71,7 @@ export class LegalController {
 
   @Get('admin/marketing-subscribers/export')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('legal.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   async exportMarketingSubscribers(
     @Query() query: MarketingSubscribersExportQueryDto,

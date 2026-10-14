@@ -14,6 +14,7 @@ import { memoryStorage } from 'multer'
 
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BlogImageImportService } from './blog-image-import.service'
 import { IMPORT_TYPES, ImportService } from './import.service'
@@ -22,6 +23,7 @@ import { ReviewImageImportService } from './review-image-import.service'
 
 @Controller('import')
 @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+@RequirePermissions('catalog.import')
 @Roles(Role.ADMIN, Role.MANAGER)
 export class ImportController {
   constructor(

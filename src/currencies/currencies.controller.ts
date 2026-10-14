@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } f
 import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { CurrenciesService } from './currencies.service'
@@ -23,6 +24,7 @@ export class CurrenciesController {
 
   @Post()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('site.reference')
   @Roles(Role.ADMIN, Role.MANAGER)
   create(@Body() dto: UpsertCurrencyDto) {
     return this.currencies.create(dto)
@@ -30,6 +32,7 @@ export class CurrenciesController {
 
   @Patch(':code')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('site.reference')
   @Roles(Role.ADMIN, Role.MANAGER)
   update(@Param('code') code: string, @Body() dto: UpsertCurrencyDto) {
     return this.currencies.update(code, dto)
@@ -37,6 +40,7 @@ export class CurrenciesController {
 
   @Delete(':code')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('site.reference')
   @Roles(Role.ADMIN, Role.MANAGER)
   remove(@Param('code') code: string) {
     return this.currencies.remove(code)

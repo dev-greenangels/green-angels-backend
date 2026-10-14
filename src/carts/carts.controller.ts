@@ -21,6 +21,7 @@ import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard'
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { GUEST_CART_COOKIE_NAME } from './cart.constants'
 import { CART_SOURCE_HEADERS } from './cart-source-headers'
@@ -182,6 +183,7 @@ export class CartsController {
 
   @Get()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('carts.view')
   @Roles(Role.ADMIN, Role.MANAGER)
   listBackstage(@Query() query: BackstageCartsQueryDto) {
     return this.carts.listBackstage({
@@ -198,6 +200,7 @@ export class CartsController {
 
   @Get(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('carts.view')
   @Roles(Role.ADMIN, Role.MANAGER)
   findOne(@Param('id') id: string) {
     return this.carts.findBackstageOne(id)

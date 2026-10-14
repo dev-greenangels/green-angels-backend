@@ -6,6 +6,7 @@ import { memoryStorage } from 'multer'
 
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { parseTemplateMode, parseTemplateSheets } from './catalog-excel.constants'
 import { CatalogExcelService } from './catalog-excel.service'
@@ -15,6 +16,7 @@ const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.s
 
 @Controller('catalog-excel')
 @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+@RequirePermissions('catalog.import')
 @Roles(Role.ADMIN, Role.MANAGER)
 export class CatalogExcelController {
   constructor(private readonly catalogExcel: CatalogExcelService) {}

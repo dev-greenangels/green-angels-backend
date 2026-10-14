@@ -1,7 +1,7 @@
 import { ExecutionContext, Injectable } from '@nestjs/common'
 import { AuthGuard } from '@nestjs/passport'
 
-/** Backstage JWT if cookie/Bearer present; otherwise request continues without req.user. */
+/** Backstage JWT if cookie present; otherwise request continues without req.user. */
 @Injectable()
 export class OptionalBackstageJwtAuthGuard extends AuthGuard('jwt-backstage') {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

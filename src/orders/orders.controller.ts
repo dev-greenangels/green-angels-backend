@@ -18,6 +18,7 @@ import { Request } from 'express'
 
 import type { SessionJwtPayload } from '../auth/auth.constants'
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard'
@@ -41,6 +42,7 @@ export class OrdersController {
 
   @Get()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.view', 'orders.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   findAll(
     @Query('search') search?: string,
@@ -60,6 +62,7 @@ export class OrdersController {
 
   @Get('summary')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.view', 'orders.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   findSummary() {
     return this.orders.findSummary()
@@ -125,6 +128,7 @@ export class OrdersController {
 
   @Get(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.view', 'orders.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   findOne(@Param('id') id: string) {
     return this.orders.findOne(id)
@@ -132,6 +136,7 @@ export class OrdersController {
 
   @Post(':id/communications/manual')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   sendManualEmail(
     @Param('id') id: string,
@@ -166,6 +171,7 @@ export class OrdersController {
 
   @Patch(':id/status')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateStatus(@Param('id') id: string, @Body() dto: PatchOrderStatusDto) {
     return this.orders.updateStatus(id, dto.status, {
@@ -176,6 +182,7 @@ export class OrdersController {
 
   @Patch(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   patch(@Param('id') id: string, @Body() dto: PatchOrderDto) {
     return this.orders.patch(id, dto)
@@ -183,6 +190,7 @@ export class OrdersController {
 
   @Post(':id/mark-bank-paid')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   markBankPaid(@Param('id') id: string) {
     return this.orders.markBankTransferPaid(id)
@@ -190,6 +198,7 @@ export class OrdersController {
 
   @Post(':id/sync-tracking')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   syncTracking(@Param('id') id: string) {
     return this.orders.syncTracking(id)
@@ -197,6 +206,7 @@ export class OrdersController {
 
   @Post(':id/erp-sync')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   syncErp(@Param('id') id: string) {
     return this.orders.syncErp(id)
@@ -205,6 +215,7 @@ export class OrdersController {
   /** AUDIT ONLY — refreshes OrderViesCheck; never mutates tax/payment/Flexi. */
   @Post(':id/vies-retry')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   retryVies(@Param('id') id: string) {
     return this.orders.retryViesCheck(id)
@@ -212,6 +223,7 @@ export class OrdersController {
 
   @Delete(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   remove(
     @Param('id') id: string,

@@ -12,6 +12,7 @@ import { Role } from '@prisma/client'
 import { memoryStorage } from 'multer'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { CatalogMediaService } from './catalog-media.service'
@@ -29,6 +30,7 @@ const IMAGE_MIMES = new Set([
 
 @Controller('backstage/media')
 @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+@RequirePermissions('photos.manage')
 @Roles(Role.ADMIN, Role.MANAGER)
 export class BackstageMediaController {
   constructor(private readonly catalogMedia: CatalogMediaService) {}

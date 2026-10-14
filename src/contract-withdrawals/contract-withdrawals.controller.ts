@@ -5,6 +5,7 @@ import type { Request } from 'express'
 import type { SessionJwtPayload } from '../auth/auth.constants'
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { ContractWithdrawalsService } from './contract-withdrawals.service'
@@ -52,6 +53,7 @@ export class ContractWithdrawalsController {
 
   @Get('backstage')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('contract.withdrawals')
   @Roles(Role.ADMIN, Role.MANAGER)
   findAllBackstage(@Query() query: ContractWithdrawalQueryDto) {
     return this.withdrawals.findAllBackstage(query)
@@ -59,6 +61,7 @@ export class ContractWithdrawalsController {
 
   @Get('backstage/new-count')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('contract.withdrawals')
   @Roles(Role.ADMIN, Role.MANAGER)
   newCount() {
     return this.withdrawals.countSubmittedBackstage()
@@ -66,6 +69,7 @@ export class ContractWithdrawalsController {
 
   @Get('backstage/:id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('contract.withdrawals')
   @Roles(Role.ADMIN, Role.MANAGER)
   findOneBackstage(@Param('id') id: string) {
     return this.withdrawals.findOneBackstage(id)
@@ -73,6 +77,7 @@ export class ContractWithdrawalsController {
 
   @Patch('backstage/:id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('contract.withdrawals')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateBackstage(
     @Param('id') id: string,

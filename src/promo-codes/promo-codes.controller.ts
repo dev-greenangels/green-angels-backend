@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@n
 import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { UpsertPromoCodeDto } from './dto/upsert-promo-code.dto'
@@ -9,6 +10,7 @@ import { PromoCodesService } from './promo-codes.service'
 
 @Controller('promo-codes')
 @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+@RequirePermissions('promotions.manage')
 @Roles(Role.ADMIN, Role.MANAGER)
 export class PromoCodesController {
   constructor(private readonly promos: PromoCodesService) {}

@@ -3,6 +3,7 @@ import { Role } from '@prisma/client'
 import type { Request } from 'express'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { CreateWholesaleInquiryDto } from './dto/create-wholesale-inquiry.dto'
@@ -29,6 +30,7 @@ export class WholesaleInquiriesController {
 
   @Get('backstage/new-count')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('wholesale.inquiries')
   @Roles(Role.ADMIN, Role.MANAGER)
   newCount() {
     return this.inquiries.countNewBackstage()
@@ -36,6 +38,7 @@ export class WholesaleInquiriesController {
 
   @Get('backstage')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('wholesale.inquiries')
   @Roles(Role.ADMIN, Role.MANAGER)
   findAll(@Query() query: WholesaleInquiryQueryDto) {
     return this.inquiries.findAllBackstage(query)
@@ -43,6 +46,7 @@ export class WholesaleInquiriesController {
 
   @Patch('backstage/:id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('wholesale.inquiries')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateStatus(@Param('id') id: string, @Body() dto: UpdateWholesaleInquiryStatusDto) {
     return this.inquiries.updateStatus(id, dto.status)
@@ -50,6 +54,7 @@ export class WholesaleInquiriesController {
 
   @Post('backstage/:id/sync-abra')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('wholesale.inquiries')
   @Roles(Role.ADMIN, Role.MANAGER)
   syncToAbra(@Param('id') id: string) {
     return this.inquiries.syncToAbra(id)

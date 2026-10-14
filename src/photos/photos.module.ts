@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 
+import { AuthModule } from '../auth/auth.module'
 import { CategoriesModule } from '../categories/categories.module'
 import { MediaModule } from '../media/media.module'
 import { PhotoApiKeyGuard } from '../common/photo-api-key.guard'
@@ -15,7 +16,7 @@ import { PhotosService } from './photos.service'
 import { SettingsModule } from '../settings/settings.module'
 
 @Module({
-  imports: [ViberPhotosModule, CategoriesModule, MediaModule, SettingsModule],
+  imports: [AuthModule, ViberPhotosModule, CategoriesModule, MediaModule, SettingsModule],
   controllers: [
     PhotosController,
     PhotosDebugController,

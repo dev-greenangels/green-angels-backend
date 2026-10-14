@@ -5,6 +5,7 @@ import type { Request } from 'express'
 import type { SessionJwtPayload } from '../auth/auth.constants'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { RedeemPointsPreviewDto } from './dto/redeem-points-preview.dto'
@@ -42,6 +43,7 @@ export class ReferralsController {
 
   @Get('program')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('referrals.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   getBackstageProgram() {
     return this.referrals.getBackstageProgram()
@@ -49,6 +51,7 @@ export class ReferralsController {
 
   @Patch('program')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('referrals.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateProgram(@Body() dto: UpsertReferralProgramDto) {
     return this.referrals.upsertProgram(dto)

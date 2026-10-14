@@ -3,6 +3,7 @@ import { Role } from '@prisma/client'
 import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { TedbQueueService } from './tedb.queue'
@@ -21,6 +22,7 @@ class UpdateTedbSettingsDto {
 
 @Controller('backstage/tedb')
 @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+@RequirePermissions('tedb.manage')
 @Roles(Role.ADMIN, Role.MANAGER)
 export class TedbController {
   constructor(

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Patch, Post, Query, UseGuards } from '@nestjs/co
 import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { TriggerNovaPoshtaSyncDto } from './dto/trigger-nova-poshta-sync.dto'
@@ -47,6 +48,7 @@ export class NovaPoshtaController {
 
 @Controller('nova-poshta/admin')
 @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+@RequirePermissions('orders.view', 'orders.manage')
 @Roles(Role.ADMIN, Role.MANAGER)
 export class NovaPoshtaAdminController {
   constructor(
@@ -61,6 +63,7 @@ export class NovaPoshtaAdminController {
   }
 
   @Patch('settings')
+  @RequirePermissions('orders.manage')
   async updateSettings(@Body() dto: UpdateNovaPoshtaSettingsDto) {
     const patch = {
       ...(dto.apiKey !== undefined ? { apiKey: dto.apiKey } : {}),
@@ -88,6 +91,7 @@ export class NovaPoshtaAdminController {
   }
 
   @Post('sync')
+  @RequirePermissions('orders.manage')
   async triggerSync(@Body() dto: TriggerNovaPoshtaSyncDto) {
     const allowed: NpSyncTarget[] = ['all', 'settlements', 'warehouses', 'warehouse_types']
     const target = dto.target ?? 'all'
@@ -96,6 +100,7 @@ export class NovaPoshtaAdminController {
   }
 
   @Post('sync/cancel')
+  @RequirePermissions('orders.manage')
   cancelSync() {
     return this.queue.cancelSync()
   }

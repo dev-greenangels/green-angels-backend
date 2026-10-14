@@ -49,7 +49,8 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       JWT_SECRET: dev-only-green-angels-session-secret-min-32-chars!!
-      CORS_ORIGIN: http://localhost:3000
+      # Local allowlist: Next shop + Expo PlantStock web. Overrides .env for this key.
+      CORS_ORIGIN: http://localhost:3000,http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006,http://127.0.0.1:19006
       CHOKIDAR_USEPOLLING: 'false'
       WATCHPACK_POLLING: 'false'
       UPLOAD_ROOT: /data/uploads

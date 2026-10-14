@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } f
 import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { UpsertOrderStatusDefinitionDto } from './dto/upsert-order-status.dto'
@@ -18,6 +19,7 @@ export class OrderStatusesController {
 
   @Post()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.dictionaries')
   @Roles(Role.ADMIN, Role.MANAGER)
   create(@Body() dto: UpsertOrderStatusDefinitionDto) {
     return this.orderStatuses.create(dto)
@@ -25,6 +27,7 @@ export class OrderStatusesController {
 
   @Patch(':code')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.dictionaries')
   @Roles(Role.ADMIN, Role.MANAGER)
   update(@Param('code') code: string, @Body() dto: UpsertOrderStatusDefinitionDto) {
     return this.orderStatuses.update(code, dto)
@@ -32,6 +35,7 @@ export class OrderStatusesController {
 
   @Delete(':code')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('orders.dictionaries')
   @Roles(Role.ADMIN, Role.MANAGER)
   remove(@Param('code') code: string) {
     return this.orderStatuses.remove(code)

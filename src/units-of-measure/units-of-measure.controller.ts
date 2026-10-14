@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } f
 import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { UpsertUnitOfMeasureDto } from './dto/upsert-unit-of-measure.dto'
@@ -23,6 +24,7 @@ export class UnitsOfMeasureController {
 
   @Post()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('site.reference')
   @Roles(Role.ADMIN, Role.MANAGER)
   create(@Body() dto: UpsertUnitOfMeasureDto) {
     return this.units.create(dto)
@@ -30,6 +32,7 @@ export class UnitsOfMeasureController {
 
   @Patch(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('site.reference')
   @Roles(Role.ADMIN, Role.MANAGER)
   update(@Param('id') id: string, @Body() dto: UpsertUnitOfMeasureDto) {
     return this.units.update(id, dto)
@@ -37,6 +40,7 @@ export class UnitsOfMeasureController {
 
   @Delete(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('site.reference')
   @Roles(Role.ADMIN, Role.MANAGER)
   remove(@Param('id') id: string) {
     return this.units.remove(id)

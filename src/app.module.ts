@@ -49,6 +49,7 @@ import { WholesaleInquiriesModule } from './wholesale-inquiries/wholesale-inquir
 import { ContractWithdrawalsModule } from './contract-withdrawals/contract-withdrawals.module'
 import { BackstageJobsModule } from './backstage-jobs/backstage-jobs.module'
 import { SupplierInvoicesModule } from './supplier-invoices/supplier-invoices.module'
+import { PlantStockModule } from './plant-stock/plant-stock.module'
 
 @Module({
   imports: [
@@ -114,6 +115,7 @@ import { SupplierInvoicesModule } from './supplier-invoices/supplier-invoices.mo
     BackstageJobsModule,
     SupplierInvoicesModule,
     MediaModule,
+    PlantStockModule,
   ],
 })
 export class AppModule {}

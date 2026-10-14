@@ -14,6 +14,7 @@ import { Role } from '@prisma/client'
 import type { Request } from 'express'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard'
@@ -67,6 +68,7 @@ export class ReviewsController {
 
   @Get('backstage/pending-count')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('reviews.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   pendingCount() {
     return this.reviews.countPendingBackstage()
@@ -74,6 +76,7 @@ export class ReviewsController {
 
   @Get('backstage/all')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('reviews.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   findAllBackstage(@Query() query: ReviewQueryDto) {
     return this.reviews.findAllBackstage(query)
@@ -81,6 +84,7 @@ export class ReviewsController {
 
   @Get('backstage/orders/:orderId/request')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('reviews.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   backstageRequestStatus(@Param('orderId') orderId: string) {
     return this.reviewRequests.getBackstageStatus(orderId)
@@ -88,6 +92,7 @@ export class ReviewsController {
 
   @Post('backstage/orders/:orderId/request')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('reviews.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   generateRequest(
     @Param('orderId') orderId: string,
@@ -98,6 +103,7 @@ export class ReviewsController {
 
   @Post('backstage/orders/:orderId/request/regenerate')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('reviews.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   regenerateRequest(
     @Param('orderId') orderId: string,
@@ -108,6 +114,7 @@ export class ReviewsController {
 
   @Post('backstage/orders/:orderId/request/revoke')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('reviews.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   revokeRequest(
     @Param('orderId') orderId: string,
@@ -118,6 +125,7 @@ export class ReviewsController {
 
   @Post('backstage/orders/:orderId/request/preview')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('reviews.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   previewRequestEmail(
     @Param('orderId') orderId: string,
@@ -128,6 +136,7 @@ export class ReviewsController {
 
   @Post('backstage/orders/:orderId/request/send')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('reviews.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   sendRequestEmail(
     @Param('orderId') orderId: string,
@@ -143,6 +152,7 @@ export class ReviewsController {
 
   @Patch('backstage/orders/:orderId/reviews/status')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('reviews.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateStatusByOrder(
     @Param('orderId') orderId: string,
@@ -153,6 +163,7 @@ export class ReviewsController {
 
   @Patch(':id/status')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('reviews.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateStatus(@Param('id') id: string, @Body() dto: UpdateReviewStatusDto) {
     return this.reviews.updateStatus(id, dto)
@@ -160,6 +171,7 @@ export class ReviewsController {
 
   @Patch(':id/reply')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('reviews.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   updateReply(@Param('id') id: string, @Body() dto: UpdateReviewReplyDto) {
     return this.reviews.updateReply(id, dto)
@@ -167,6 +179,7 @@ export class ReviewsController {
 
   @Delete(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('reviews.manage')
   @Roles(Role.ADMIN, Role.MANAGER)
   remove(@Param('id') id: string) {
     return this.reviews.remove(id)

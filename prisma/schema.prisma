@@ -75,9 +75,27 @@ model User {
   reviewRequestsCreated          ReviewRequest[]       @relation("ReviewRequestCreatedBy")
   reviewRequestsRevoked          ReviewRequest[]       @relation("ReviewRequestRevokedBy")
   reviewRequestEventsCreated     ReviewRequestEvent[]  @relation("ReviewRequestEventCreatedBy")
+  staffPermissions               UserPermission[]      @relation("StaffPermissionOwner")
+  staffPermissionsGranted        UserPermission[]      @relation("StaffPermissionGrantedBy")
 
   @@unique([legacySource, legacyId])
   @@index([legacyId])
+}
+
+/// Individual MANAGER permissions (ADMIN has implicit full access — no rows required).
+model UserPermission {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation("StaffPermissionOwner", fields: [userId], references: [id], onDelete: Cascade)
+  /// Registry key, e.g. orders.view — not a Prisma enum (new keys without DB migration).
+  permission      String
+  createdAt       DateTime @default(now())
+  createdByUserId String?
+  createdBy       User?    @relation("StaffPermissionGrantedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, permission])
+  @@index([permission])
+  @@map("user_permission")
 }
 
 model Account {
@@ -1808,4 +1826,102 @@ model StripeWebhookEvent {
   createdAt DateTime @default(now())
 
   @@index([createdAt])
+}
+
+// ==========================================
+// PlantStock SK — ABRA cache (not shop catalog)
+// ==========================================
+
+/// Full ABRA cenik snapshot for PlantStock (includes unpublished; not ProductVariant).
+model PlantStockCenikCache {
+  id          String   @id @default(uuid())
+  flexiId     String
+  kod         String   @unique
+  nazev       String
+  /// ABRA strom leaf uzel id (plant group). Null = singleton (group = sku:kod).
+  stromLeafId String?  @map("strom_leaf_id")
+  /// Display name of the plant (leaf nazev or singleton nazev).
+  plantNazev  String?  @map("plant_nazev")
+  /// Parsed size label (C2, P9, CUT…) when known.
+  sizeLabel   String?  @map("size_label")
+  inactive    Boolean  @default(false)
+  syncedAt    DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([nazev])
+  @@index([plantNazev])
+  @@index([stromLeafId])
+  @@index([inactive, kod])
+  @@map("plant_stock_cenik_cache")
+}
+
+/// ABRA sklad list for PlantStock warehouse picker.
+model PlantStockSkladCache {
+  id        String   @id @default(uuid())
+  flexiId   String
+  kod       String   @unique
+  nazev     String
+  syncedAt  DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("plant_stock_sklad_cache")
+}
+
+/// Physical + sellable stock snapshot per warehouse SKU (ABRA GET only).
+model PlantStockStockCache {
+  id            String   @id @default(uuid())
+  warehouseCode String   @map("warehouse_code")
+  sku           String
+  stavMj        Decimal  @default(0) @map("stav_mj") @db.Decimal(14, 4)
+  dostupMj      Decimal  @default(0) @map("dostup_mj") @db.Decimal(14, 4)
+  /// ABRA skladova-karta.rezervMJ — null when ABRA omitted the field (never invent 0).
+  reservedQty   Decimal? @map("reserved_qty") @db.Decimal(14, 4)
+  syncedAt      DateTime @map("synced_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@unique([warehouseCode, sku])
+  @@index([warehouseCode])
+  @@index([sku])
+  @@map("plant_stock_stock_cache")
+}
+
+enum PlantStockOperationKind {
+  RESERVATION_SYNC
+  INVENTORY_CREATE
+  INVENTORY_POST
+}
+
+enum PlantStockOperationStatus {
+  IDLE
+  PENDING
+  CREATED_NOT_POSTED
+  POSTED
+  SYNCED
+  NOOP
+  CONFLICT
+  FAILED
+}
+
+/// Idempotency / status journal for PlantStock ↔ ABRA ops (writes gated separately).
+model PlantStockOperation {
+  id             String                    @id @default(uuid())
+  kind           PlantStockOperationKind
+  idempotencyKey String                    @unique
+  status         PlantStockOperationStatus @default(IDLE)
+  localDocRef    String?
+  sku            String?
+  skladKod       String?
+  abraId         String?
+  payload        Json                      @default("{}")
+  result         Json                      @default("{}")
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+
+  @@index([kind, status])
+  @@index([localDocRef])
+  @@index([sku, skladKod])
+  @@map("plant_stock_operation")
 }

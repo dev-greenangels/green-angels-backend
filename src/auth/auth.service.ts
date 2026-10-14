@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -23,11 +24,15 @@ import { isOtpChannelEnabled, type OtpPurpose } from '../settings/market.types'
 import { SettingsService } from '../settings/settings.service'
 import { UsersService } from '../users/users.service'
 import { OtpService } from './otp.service'
+import { PermissionsService } from './permissions/permissions.service'
 import { normalizeSessionOtpPurpose } from './session-otp-purpose'
 import { validatePhoneForPolicy } from './market-phone.util'
 import {
   BACKSTAGE_SESSION_COOKIE_NAME,
   BACKSTAGE_SESSION_MAX_AGE_SEC,
+  JWT_AUD_BACKSTAGE,
+  JWT_AUD_PLANT_STOCK,
+  PLANT_STOCK_JWT_MAX_AGE_SEC_DEFAULT,
   SESSION_COOKIE_NAME,
   SESSION_MAX_AGE_SEC,
   type ApiUserRole,
@@ -70,6 +75,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly otp: OtpService,
+    private readonly permissions: PermissionsService,
     @Inject(forwardRef(() => SettingsService))
     private readonly settings: SettingsService,
   ) {}
@@ -86,10 +92,28 @@ export class AuthService {
 
   private signBackstageToken(userId: string, role: ApiUserRole): string {
     return this.jwt.sign(
-      { role, v: 1 },
+      { role, v: 1, aud: JWT_AUD_BACKSTAGE },
       {
         subject: userId,
         expiresIn: BACKSTAGE_SESSION_MAX_AGE_SEC,
+      },
+    )
+  }
+
+  private plantStockJwtTtlSec(): number {
+    const raw = Number(this.config.get('PLANT_STOCK_JWT_TTL_SEC'))
+    if (Number.isFinite(raw) && raw >= 300 && raw <= 60 * 60 * 24 * 7) {
+      return Math.trunc(raw)
+    }
+    return PLANT_STOCK_JWT_MAX_AGE_SEC_DEFAULT
+  }
+
+  private signPlantStockToken(userId: string, role: ApiUserRole): string {
+    return this.jwt.sign(
+      { role, v: 1, aud: JWT_AUD_PLANT_STOCK },
+      {
+        subject: userId,
+        expiresIn: this.plantStockJwtTtlSec(),
       },
     )
   }
@@ -295,11 +319,78 @@ export class AuthService {
       )
     }
 
+    if (user.role === Role.MANAGER) {
+      const ok = await this.permissions.userHasAnyPermission(user.id, [
+        'backoffice.access',
+      ])
+      if (!ok) {
+        throw new ForbiddenException('Немає доступу до Backoffice.')
+      }
+    }
+
     const sessionUser = this.toSessionUser(user)
     const token = this.signBackstageToken(user.id, sessionUser.role)
     this.setBackstageSessionCookie(res, token)
 
+    // Cookie-only for Backoffice. Use POST /auth/plant-stock/login for PlantStock Bearer.
     return { ok: true, ...this.toLegacySessionResponse(sessionUser) }
+  }
+
+  /**
+   * PlantStock PWA login — scoped JWT (aud=plant-stock), short TTL.
+   * Does not set Backoffice cookie.
+   */
+  async plantStockLogin(dto: BackstageLoginDto) {
+    const email = dto.email.trim().toLowerCase()
+    const user = await this.prisma.user.findUnique({ where: { email } })
+
+    if (!user || !this.isStaffRole(user.role)) {
+      throw customerUnauthorized(
+        CustomerErrorCode.AUTH_INVALID_CREDENTIALS,
+        'Невірний email або пароль.',
+      )
+    }
+
+    if (!user.passwordHash) {
+      throw customerUnauthorized(
+        CustomerErrorCode.AUTH_INVALID_CREDENTIALS,
+        'Невірний email або пароль.',
+      )
+    }
+
+    const valid = await bcrypt.compare(dto.password, user.passwordHash)
+    if (!valid) {
+      throw customerUnauthorized(
+        CustomerErrorCode.AUTH_INVALID_CREDENTIALS,
+        'Невірний email або пароль.',
+      )
+    }
+
+    if (user.role === Role.MANAGER) {
+      const ok = await this.permissions.userHasAnyPermission(user.id, [
+        'plantstock.access',
+      ])
+      if (!ok) {
+        throw new ForbiddenException('Немає доступу до PlantStock.')
+      }
+    }
+
+    const sessionUser = this.toSessionUser(user)
+    const accessToken = this.signPlantStockToken(user.id, sessionUser.role)
+    const expiresIn = this.plantStockJwtTtlSec()
+
+    return {
+      ok: true,
+      accessToken,
+      expiresIn,
+      tokenType: 'Bearer' as const,
+      audience: JWT_AUD_PLANT_STOCK,
+      ...this.toLegacySessionResponse(sessionUser),
+      user: {
+        ...this.toLegacySessionResponse(sessionUser).user,
+        staffRole: user.role,
+      },
+    }
   }
 
   async register(dto: RegisterDto, res: Response, req: Request) {
@@ -1019,12 +1110,24 @@ export class AuthService {
       throw new UnauthorizedException()
     }
 
+    if (user.role === Role.MANAGER) {
+      const ok = await this.permissions.userHasAnyPermission(user.id, [
+        'backoffice.access',
+      ])
+      if (!ok) {
+        throw new ForbiddenException('Немає доступу до Backoffice.')
+      }
+    }
+
     const sessionUser = this.toSessionUser(user)
+    const permissions = await this.permissions.getUserPermissions(user.id)
+
     return {
       ...this.toLegacySessionResponse(sessionUser),
       user: {
         ...this.toLegacySessionResponse(sessionUser).user,
         staffRole: user.role,
+        permissions,
       },
     }
   }

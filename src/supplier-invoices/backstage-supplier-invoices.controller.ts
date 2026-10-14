@@ -20,6 +20,7 @@ import { memoryStorage } from 'multer'
 import type { SessionJwtPayload } from '../auth/auth.constants'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import {
   CreateSupplierInvoiceDto,
@@ -34,6 +35,7 @@ type AuthedRequest = Request & { user: SessionJwtPayload }
 
 @Controller('backstage/supplier-invoices')
 @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+@RequirePermissions('supplier.invoices')
 @Roles(Role.ADMIN, Role.MANAGER)
 export class BackstageSupplierInvoicesController {
   constructor(private readonly supplierInvoices: SupplierInvoicesService) {}

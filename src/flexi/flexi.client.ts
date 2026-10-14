@@ -23,6 +23,21 @@ import type {
   FlexiStromCenikLink,
   FlexiStromNode,
 } from './flexi.types'
+import { parseAbraReservedQty } from '../plant-stock/plant-stock-reserved-qty'
+import {
+  mapStromCenikRow,
+  shouldContinueStromCenikPagination,
+  STROM_CENIK_PAGE_SIZE,
+  stromCenikPagePath,
+} from './flexi-strom-cenik-links'
+
+/** PlantStock warehouse stock snapshot from one skladova-karta row. */
+export type PlantStockWarehouseQty = {
+  stavMj: number
+  dostupMj: number
+  /** ABRA rezervMJ — null when omitted (never invent 0). */
+  reservedQty: number | null
+}
 
 type FlexiListResponse = {
   winstrom?: Record<string, unknown>
@@ -506,6 +521,186 @@ export class FlexiClient {
       return item?.id ?? null
     }
     return null
+  }
+
+  /**
+   * PlantStock catalog sync — light GET page, no skladova-karta overlay (avoids N stock calls).
+   */
+  async fetchCenikCatalogPage(
+    start: number,
+    limit: number,
+  ): Promise<Array<{ id: string; kod: string; nazev: string }>> {
+    const detail = 'custom:id,kod,nazev'
+    const path = `/cenik.json?start=${start}&limit=${limit}&detail=${encodeURIComponent(detail)}`
+    const payload = await this.request<unknown>('GET', path, undefined, undefined, {
+      usageCategory: 'catalog',
+    })
+    const rows = this.extractEvidence<Record<string, unknown>>(payload, 'cenik')
+    const out: Array<{ id: string; kod: string; nazev: string }> = []
+    for (const row of rows) {
+      const kod = String(row.kod ?? '').trim()
+      if (!kod) continue
+      out.push({
+        id: String(row.id ?? kod),
+        kod,
+        nazev: String(row.nazev ?? kod).trim() || kod,
+      })
+    }
+    return out
+  }
+
+  /** PlantStock — list warehouses (GET /sklad). */
+  async listSklady(): Promise<Array<{ id: string; kod: string; nazev: string }>> {
+    const path = `/sklad.json?limit=0&detail=${encodeURIComponent('custom:id,kod,nazev')}`
+    const payload = await this.request<unknown>('GET', path, undefined, undefined, {
+      usageCategory: 'catalog',
+    })
+    const rows = this.extractEvidence<Record<string, unknown>>(payload, 'sklad')
+    const out: Array<{ id: string; kod: string; nazev: string }> = []
+    for (const row of rows) {
+      const kod = String(row.kod ?? '').trim()
+      if (!kod) continue
+      out.push({
+        id: String(row.id ?? kod),
+        kod,
+        nazev: String(row.nazev ?? kod).trim() || kod,
+      })
+    }
+    return out
+  }
+
+  /**
+   * PlantStock Phase 3B — ALL stock cards for one warehouse + current period.
+   * One (or few paginated) GET — not N SKU filter chunks.
+   * Returns stavMj (physical), dostupMj (sellable), reservedQty (rezervMJ).
+   */
+  async fetchStockForWarehouse(
+    stockCode: string,
+  ): Promise<Map<string, PlantStockWarehouseQty>> {
+    const result = new Map<string, PlantStockWarehouseQty>()
+    const warehouse = stockCode.trim()
+    if (!warehouse) return result
+
+    const periodId = await this.getCurrentAccountingPeriodId()
+    if (!periodId) {
+      throw new Error('Flexi stock: немає облікового періоду (ucetni-obdobi) для skladova-karta.')
+    }
+
+    const filter =
+      `ucetObdobi = ${periodId}` +
+      ` and sklad = 'code:${this.escapeFlexiLiteral(warehouse)}'`
+    // rezervMJ = total reserved (not rezervovanoMj / pozadavkyMj). Same GET as before.
+    const detail = encodeURIComponent('custom:cenik(kod),stavMJ,dostupMj,rezervMJ')
+    // Page with explicit limit — do not assume unlimited limit=0 payload size.
+    const pageSize = 500
+    let start = 0
+    for (;;) {
+      const path =
+        `/skladova-karta/(${encodeURIComponent(filter)}).json` +
+        `?detail=${detail}&start=${start}&limit=${pageSize}&no-ext-ids=true`
+      const payload = await this.request<unknown>('GET', path, undefined, undefined, {
+        usageCategory: 'catalog',
+      })
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'skladova-karta')
+      for (const row of rows) {
+        const kod = this.extractCenikKod(row.cenik ?? row['cenik@ref'])
+        if (!kod) continue
+        const stavMj = this.parseStockQty(row.stavMJ, row.stavMj)
+        const dostupMj = this.parseStockQty(row.dostupMj, row.dostupMJ, row.stavMJ, row.stavMj)
+        result.set(kod, {
+          stavMj,
+          dostupMj,
+          reservedQty: parseAbraReservedQty(row),
+        })
+      }
+      if (rows.length < pageSize) break
+      start += pageSize
+    }
+    return result
+  }
+
+  /**
+   * PlantStock — stock for explicit SKU list on a warehouse (GET skladova-karta only).
+   * Prefer fetchStockForWarehouse for full warehouse sync; this remains for small lookups.
+   */
+  async fetchStockBySkusForWarehouse(
+    skus: string[],
+    stockCode: string,
+  ): Promise<Map<string, { stavMj: number; dostupMj: number }>> {
+    const result = new Map<string, { stavMj: number; dostupMj: number }>()
+    const unique = [...new Set(skus.map((s) => s.trim()).filter(Boolean))]
+    const warehouse = stockCode.trim()
+    if (!warehouse || unique.length === 0) return result
+
+    const periodId = await this.getCurrentAccountingPeriodId()
+    if (!periodId) {
+      throw new Error('Flexi stock: немає облікового періоду (ucetni-obdobi) для skladova-karta.')
+    }
+
+    for (let i = 0; i < unique.length; i += FLEXI_STOCK_FILTER_CHUNK) {
+      const chunk = unique.slice(i, i + FLEXI_STOCK_FILTER_CHUNK)
+      const cenikOr = chunk
+        .map((kod) => `cenik='code:${this.escapeFlexiLiteral(kod)}'`)
+        .join(' or ')
+      const filter =
+        `ucetObdobi = ${periodId} and (${cenikOr})` +
+        ` and sklad = 'code:${this.escapeFlexiLiteral(warehouse)}'`
+      const path =
+        `/skladova-karta/(${encodeURIComponent(filter)}).json` +
+        `?detail=${encodeURIComponent('custom:cenik(kod),stavMJ,dostupMj,rezervovanoMj')}&limit=0&no-ext-ids=true`
+      const payload = await this.request<unknown>('GET', path, undefined, undefined, {
+        usageCategory: 'catalog',
+      })
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'skladova-karta')
+      for (const row of rows) {
+        const kod = this.extractCenikKod(row.cenik ?? row['cenik@ref'])
+        if (!kod) continue
+        const stavMj = this.parseStockQty(row.stavMJ, row.stavMj)
+        const dostupMj = this.parseStockQty(row.dostupMj, row.dostupMJ, row.stavMJ, row.stavMj)
+        result.set(kod, { stavMj, dostupMj })
+      }
+    }
+    return result
+  }
+
+  /** PlantStock — READ rezervace by Flexi filter expression (GET only). */
+  async listRezervace(
+    filter: string,
+    opts?: { limit?: number },
+  ): Promise<
+    Array<{
+      id: string
+      firma: string
+      cenik: string
+      sklad: string
+      mnozstvi: number
+      datumOd: string
+      datumDo: string
+      poznamka: string
+      polObch: string
+    }>
+  > {
+    const limit = opts?.limit ?? 0
+    const detail =
+      'custom:id,firma,cenik,sklad,mnozstvi,datumOd,datumDo,poznamka,polObch'
+    const path =
+      `/rezervace/(${encodeURIComponent(filter)}).json` +
+      `?limit=${limit}&detail=${encodeURIComponent(detail)}`
+    const payload = await this.request<unknown>('GET', path, undefined, undefined, {
+      usageCategory: 'other',
+    })
+    const rows = this.extractEvidence<Record<string, unknown>>(payload, 'rezervace')
+    return rows.map((row) => ({
+      id: String(row.id ?? ''),
+      firma: String(row.firma ?? ''),
+      cenik: String(row.cenik ?? ''),
+      sklad: String(row.sklad ?? ''),
+      mnozstvi: this.num(row.mnozstvi),
+      datumOd: String(row.datumOd ?? ''),
+      datumDo: String(row.datumDo ?? ''),
+      poznamka: String(row.poznamka ?? ''),
+      polObch: String(row.polObch ?? ''),
+    }))
   }
 
   async listHooks(): Promise<
@@ -1356,21 +1551,19 @@ export class FlexiClient {
   }
 
   async fetchStromCenikLinks(): Promise<FlexiStromCenikLink[]> {
-    const path = `/strom-cenik.json?limit=0&detail=full`
-    const payload = await this.request<unknown>('GET', path)
-    const rows = this.extractEvidence<Record<string, unknown>>(payload, 'strom-cenik')
+    // Prefer cenik(kod) — idZaznamu is often a numeric cenik id, not SKU kod.
+    let start = 0
     const links: FlexiStromCenikLink[] = []
-    for (const row of rows) {
-      const uzelRaw = row.uzel ?? row['uzel@ref']
-      const uzelId =
-        typeof uzelRaw === 'object' && uzelRaw
-          ? String((uzelRaw as { id?: unknown }).id ?? '')
-          : String(uzelRaw ?? '').replace(/^code:/, '')
-      const idZaznamu = String(row.idZaznamu ?? row.cenik ?? row['idZaznamu@ref'] ?? '').trim()
-      if (!uzelId || !idZaznamu) continue
-      const cenikKod = idZaznamu.startsWith('code:') ? idZaznamu.slice(5) : idZaznamu
-      const cenikId = /^\d+$/.test(idZaznamu) ? idZaznamu : cenikKod
-      links.push({ cenikKod, cenikId, uzelId: String(uzelId).replace(/^code:/, '') })
+    for (;;) {
+      const path = stromCenikPagePath(start)
+      const payload = await this.request<unknown>('GET', path)
+      const rows = this.extractEvidence<Record<string, unknown>>(payload, 'strom-cenik')
+      for (const row of rows) {
+        const link = mapStromCenikRow(row)
+        if (link) links.push(link)
+      }
+      if (!shouldContinueStromCenikPagination(rows.length)) break
+      start += STROM_CENIK_PAGE_SIZE
     }
     return links
   }

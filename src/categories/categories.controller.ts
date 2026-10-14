@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } f
 import { Role } from '@prisma/client'
 
 import { Roles } from '../auth/decorators/roles.decorator'
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { CategorySearchService } from '../search/category-search.service'
@@ -35,6 +36,7 @@ export class CategoriesController {
 
   @Post()
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   create(@Body() dto: CreateCategoryDto) {
     return this.categories.create(dto)
@@ -42,6 +44,7 @@ export class CategoriesController {
 
   @Patch('reorder')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   reorder(@Body() dto: ReorderCategoriesDto) {
     return this.categories.reorderSiblings(dto.parentId, dto.orderedIds)
@@ -49,6 +52,7 @@ export class CategoriesController {
 
   @Patch(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   update(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
     return this.categories.update(id, dto)
@@ -56,6 +60,7 @@ export class CategoriesController {
 
   @Delete(':id')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   remove(@Param('id') id: string) {
     return this.categories.remove(id)
@@ -63,6 +68,7 @@ export class CategoriesController {
 
   @Get(':id/translations/name')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getNameTranslations(@Param('id') id: string) {
     return this.categories.getNameTranslations(id)
@@ -70,6 +76,7 @@ export class CategoriesController {
 
   @Patch(':id/translations/name')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   patchNameTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
     return this.categories.patchNameTranslations(id, dto)
@@ -77,6 +84,7 @@ export class CategoriesController {
 
   @Get(':id/translations/description')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getDescriptionTranslations(@Param('id') id: string) {
     return this.categories.getDescriptionTranslations(id)
@@ -84,6 +92,7 @@ export class CategoriesController {
 
   @Patch(':id/translations/description')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   patchDescriptionTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
     return this.categories.patchDescriptionTranslations(id, dto)
@@ -91,6 +100,7 @@ export class CategoriesController {
 
   @Get(':id/translations/footer-description')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getFooterDescriptionTranslations(@Param('id') id: string) {
     return this.categories.getFooterDescriptionTranslations(id)
@@ -98,6 +108,7 @@ export class CategoriesController {
 
   @Patch(':id/translations/footer-description')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   patchFooterDescriptionTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
     return this.categories.patchFooterDescriptionTranslations(id, dto)
@@ -105,6 +116,7 @@ export class CategoriesController {
 
   @Get(':id/translations/meta-title')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getMetaTitleTranslations(@Param('id') id: string) {
     return this.categories.getMetaTitleTranslations(id)
@@ -112,6 +124,7 @@ export class CategoriesController {
 
   @Patch(':id/translations/meta-title')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   patchMetaTitleTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
     return this.categories.patchMetaTitleTranslations(id, dto)
@@ -119,6 +132,7 @@ export class CategoriesController {
 
   @Get(':id/translations/meta-desc')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.view', 'catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   getMetaDescTranslations(@Param('id') id: string) {
     return this.categories.getMetaDescTranslations(id)
@@ -126,6 +140,7 @@ export class CategoriesController {
 
   @Patch(':id/translations/meta-desc')
   @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('catalog.edit')
   @Roles(Role.ADMIN, Role.MANAGER)
   patchMetaDescTranslations(@Param('id') id: string, @Body() dto: PatchTranslationsDto) {
     return this.categories.patchMetaDescTranslations(id, dto)
