@@ -26,6 +26,7 @@ import {
 import { isOtpChannelEnabled } from '../settings/market.types'
 import { SettingsService } from '../settings/settings.service'
 import { UsersService } from '../users/users.service'
+import { formatOrderNumber as formatOrderNumberLabel } from '../orders/order-number'
 import type { OrderStatus } from '../orders/order-status.constants'
 import { DeleteAccountDto } from './dto/delete-account.dto'
 import {
@@ -211,7 +212,7 @@ export class AccountService {
   }
 
   private formatOrderNumber(orderNumber: number): string {
-    return `ZY-${String(orderNumber).padStart(8, '0')}`
+    return formatOrderNumberLabel(orderNumber)
   }
 
   private normalizeLocale(locale?: string | null): string {

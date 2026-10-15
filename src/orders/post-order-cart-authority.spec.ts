@@ -86,6 +86,7 @@ describe('post-order cart authority (Order.cartId only)', { skip: !hasDb }, () =
   async function createMinimalOrder(cartId: string | null) {
     const order = await prisma.order.create({
       data: {
+        orderNumber: 88_100_000 + Math.floor(Math.random() * 90_000),
         status: 'PENDING',
         totalAmount: 10,
         currency: 'EUR',

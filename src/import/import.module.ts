@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common'
 
 import { AuthModule } from '../auth/auth.module'
 import { MediaModule } from '../media/media.module'
+import { OrderNumberModule } from '../orders/order-number.module'
 import { PrismaModule } from '../prisma/prisma.module'
 import { ProductsModule } from '../products/products.module'
 import { SettingsModule } from '../settings/settings.module'
@@ -12,7 +13,14 @@ import { ProductImageImportService } from './product-image-import.service'
 import { ReviewImageImportService } from './review-image-import.service'
 
 @Module({
-  imports: [PrismaModule, AuthModule, SettingsModule, MediaModule, forwardRef(() => ProductsModule)],
+  imports: [
+    PrismaModule,
+    AuthModule,
+    SettingsModule,
+    MediaModule,
+    OrderNumberModule,
+    forwardRef(() => ProductsModule),
+  ],
   controllers: [ImportController],
   providers: [
     ImportService,

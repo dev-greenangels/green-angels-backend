@@ -2,6 +2,10 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 
 import { sanitizeReturnBaseUrl } from '../mail/country-hosts'
+import {
+  formatOrderNumber as formatOrderNumberLabel,
+  variableSymbolFromOrderNumber,
+} from '../orders/order-number'
 import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
 import { ONLINE_CARD_PAYMENT_METHOD } from './payments.constants'
@@ -100,7 +104,7 @@ export class PaymentsService {
   }
 
   private formatOrderNumber(orderNumber: number): string {
-    return `ZY-${String(orderNumber).padStart(8, '0')}`
+    return formatOrderNumberLabel(orderNumber)
   }
 
   /** Creates an online-payment session for an already-created order, if its method needs one. */
@@ -134,7 +138,7 @@ export class PaymentsService {
     const confirmationQuery = confirmationToken
       ? `&confirmation=${encodeURIComponent(confirmationToken)}`
       : ''
-    const variableSymbol = String(order.orderNumber)
+    const variableSymbol = variableSymbolFromOrderNumber(order.orderNumber)
     const stripeMeta: Record<string, string> = {
       orderId: order.id,
       orderNumber,

@@ -18,6 +18,7 @@ import { CreateStaffDto } from './dto/create-staff.dto'
 import { UpdateUserDto } from './dto/update-user.dto'
 import { UpdateUserGroupsDto } from './dto/update-user-groups.dto'
 import { PrismaService } from '../prisma/prisma.service'
+import { formatOrderNumber as formatOrderNumberLabel } from '../orders/order-number'
 import { type OrderStatus } from '../orders/order-status.constants'
 
 export type FindOrCreateCustomerParams = {
@@ -118,7 +119,7 @@ export class UsersService {
   }
 
   private formatOrderNumber(orderNumber: number): string {
-    return `ZY-${String(orderNumber).padStart(8, '0')}`
+    return formatOrderNumberLabel(orderNumber)
   }
 
   private normalizeOrderStatus(status: string): OrderStatus {

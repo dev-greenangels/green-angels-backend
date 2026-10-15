@@ -15,6 +15,11 @@ import { PrismaService } from '../prisma/prisma.service'
 import {
   ORDER_CONFIRMATION_TOKEN_PURPOSE,
 } from '../orders/order-confirmation.constants'
+import {
+  formatOrderNumber as formatOrderNumberLabel,
+  parseOrderNumberInput,
+  variableSymbolFromOrderNumber,
+} from '../orders/order-number'
 import { OrderPaymentLifecycleService } from '../orders/order-payment-lifecycle.service'
 import { CUSTOMER_PAYMENT_WINDOW_SEC } from '../orders/payment-lifecycle.constants'
 import { ONLINE_CARD_PAYMENT_METHOD } from './payments.constants'
@@ -145,8 +150,8 @@ export class StripePaymentProvider implements PaymentProvider {
     const returnUrl = this.buildElementsReturnUrl(input)
     const expiresAt = Math.floor(Date.now() / 1000) + CUSTOMER_PAYMENT_WINDOW_SEC
 
-    const orderNumberLabel = `ZY-${String(input.orderNumber).padStart(8, '0')}`
-    const variableSymbol = String(input.orderNumber)
+    const orderNumberLabel = formatOrderNumberLabel(input.orderNumber)
+    const variableSymbol = variableSymbolFromOrderNumber(input.orderNumber)
     const sessionMetadata: Record<string, string> = {
       orderId: input.orderId,
       orderNumber: orderNumberLabel,
@@ -363,7 +368,7 @@ export class StripePaymentProvider implements PaymentProvider {
   }
 
   private formatOrderNumber(orderNumber: number): string {
-    return `ZY-${String(orderNumber).padStart(8, '0')}`
+    return formatOrderNumberLabel(orderNumber)
   }
 
   private async findOrderByOrderNumber(rawOrderNumber: string): Promise<{
@@ -376,9 +381,8 @@ export class StripePaymentProvider implements PaymentProvider {
     orderNumber: number
     stripePaymentId: string | null
   } | null> {
-    const match = rawOrderNumber.trim().match(/(\d+)$/)
-    const numeric = match ? Number(match[1]) : Number.NaN
-    if (!Number.isFinite(numeric) || numeric <= 0) return null
+    const numeric = parseOrderNumberInput(rawOrderNumber)
+    if (numeric == null) return null
 
     return this.prisma.order.findUnique({
       where: { orderNumber: numeric },

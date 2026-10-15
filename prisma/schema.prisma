@@ -838,9 +838,17 @@ model CancellationReason {
   orders      Order[]
 }
 
+/// Per-calendar-year sequence for `Order.orderNumber` = year*10000 + seq (seq 1…9999).
+/// One counter per database (UA and SK/EU are separate deploys / DBs).
+model OrderNumberCounter {
+  year    Int @id
+  lastSeq Int
+}
+
 model Order {
   id                            String               @id @default(uuid())
-  orderNumber                   Int                  @unique @default(autoincrement())
+  /// Business number: legacy SERIAL ints or yearly YYYYNNNN (e.g. 20260075). Not a technical FK.
+  orderNumber                   Int                  @unique
   status                        String               @default("PENDING")
   totalAmount                   Decimal              @db.Decimal(10, 2)
   productsSubtotal              Decimal?             @db.Decimal(10, 2)

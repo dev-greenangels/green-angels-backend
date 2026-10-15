@@ -36,6 +36,7 @@ import {
 } from './order-communication.constants'
 import { OrderConfirmationTokenService } from './order-confirmation-token.service'
 import { OrderDocumentService } from './order-document.service'
+import { formatOrderNumber as formatOrderNumberLabel } from './order-number'
 
 type ClaimResult =
   | { action: 'skip'; reason: 'sent' | 'skipped' }
@@ -1064,7 +1065,7 @@ export class OrderCommunicationService {
   }
 
   private formatOrderNumber(orderNumber: number): string {
-    return `ZY-${String(orderNumber).padStart(8, '0')}`
+    return formatOrderNumberLabel(orderNumber)
   }
 
   private normalizeSiteCode(

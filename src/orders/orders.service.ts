@@ -54,7 +54,15 @@ import {
   isBankPaymentMethod,
   isCardPaymentMethod,
   isCodPaymentMethod,
+  isUnpaidFulfillmentOkPaymentMethod,
 } from './order-dispatch-dates'
+import {
+  calendarYearInTimeZone,
+  formatOrderNumber as formatOrderNumberDisplay,
+  OrderNumberLimitExceededError,
+  parseOrderNumberInput,
+} from './order-number'
+import { OrderNumberAllocator } from './order-number.allocator'
 import { OrderStatusesService } from '../order-statuses/order-statuses.service'
 import { CancellationReasonsService } from '../cancellation-reasons/cancellation-reasons.service'
 import { ReferralsService } from '../referrals/referrals.service'
@@ -429,6 +437,7 @@ export class OrdersService {
     private readonly vies: ViesService,
     private readonly confirmationTokens: OrderConfirmationTokenService,
     private readonly orderIdempotency: OrderIdempotencyService,
+    private readonly orderNumbers: OrderNumberAllocator,
     private readonly legal: LegalService,
     private readonly paymentLifecycle: OrderPaymentLifecycleService,
     private readonly stripeProvider: StripePaymentProvider,
@@ -455,7 +464,7 @@ export class OrdersService {
   }
 
   formatOrderNumber(orderNumber: number): string {
-    return `ZY-${String(orderNumber).padStart(8, '0')}`
+    return formatOrderNumberDisplay(orderNumber)
   }
 
   private mapViesCheck(
@@ -553,9 +562,8 @@ export class OrdersService {
     auth?: { userId?: string; confirmationToken?: string },
     options?: { internal?: boolean },
   ): Promise<Buffer> {
-    const match = rawOrderNumber.trim().match(/(\d+)$/)
-    const numeric = match ? Number(match[1]) : Number.NaN
-    if (!Number.isFinite(numeric) || numeric <= 0) {
+    const numeric = parseOrderNumberInput(rawOrderNumber)
+    if (numeric == null) {
       throw new NotFoundException('Замовлення не знайдено.')
     }
 
@@ -709,19 +717,7 @@ export class OrdersService {
   }
 
   private parseOrderNumberSearch(search: string): number | null {
-    const trimmed = search.trim()
-    const prefixed = trimmed.match(/^ZY-?(\d+)$/i)
-    if (prefixed) {
-      const value = Number.parseInt(prefixed[1], 10)
-      return Number.isNaN(value) ? null : value
-    }
-
-    if (/^\d+$/.test(trimmed.replace(/\s/g, ''))) {
-      const value = Number.parseInt(trimmed.replace(/\s/g, ''), 10)
-      return Number.isNaN(value) ? null : value
-    }
-
-    return null
+    return parseOrderNumberInput(search)
   }
 
   private async toListItem(
@@ -1144,9 +1140,8 @@ export class OrdersService {
     rawOrderNumber: string,
     auth?: { userId?: string; confirmationToken?: string },
   ): Promise<PublicOrderConfirmation> {
-    const match = rawOrderNumber.trim().match(/(\d+)$/)
-    const numeric = match ? Number(match[1]) : Number.NaN
-    if (!Number.isFinite(numeric) || numeric <= 0) {
+    const numeric = parseOrderNumberInput(rawOrderNumber)
+    if (numeric == null) {
       throw new NotFoundException('Замовлення не знайдено.')
     }
 
@@ -1619,9 +1614,8 @@ export class OrdersService {
     rawOrderNumber: string,
     auth?: { userId?: string; confirmationToken?: string },
   ) {
-    const match = rawOrderNumber.trim().match(/(\d+)$/)
-    const numeric = match ? Number(match[1]) : Number.NaN
-    if (!Number.isFinite(numeric) || numeric <= 0) {
+    const numeric = parseOrderNumberInput(rawOrderNumber)
+    if (numeric == null) {
       throw new NotFoundException('Замовлення не знайдено.')
     }
 
@@ -2852,11 +2846,13 @@ export class OrdersService {
 
     const paymentMethod = dto.paymentMethod.trim()
     // Card + bank-transfer require payment before fulfillment → AWAITING_PAYMENT.
-    // COD / pay-on-pickup: unpaid is normal — fulfillment may proceed (PENDING).
+    // Dobierka / pay-on-pickup: unpaid is normal — ready for packing (PROCESSING).
     const initialStatus: OrderStatus =
       isCardPaymentMethod(paymentMethod) || isBankPaymentMethod(paymentMethod)
         ? 'AWAITING_PAYMENT'
-        : 'PENDING'
+        : isUnpaidFulfillmentOkPaymentMethod(paymentMethod)
+          ? 'PROCESSING'
+          : 'PENDING'
 
     // ERP-CONNECTED-001: EXTERNAL + ERP up + immediate export → await accept before customer success.
     // Card + on_paid stays deferred (queue after payment). Offline path never awaits.
@@ -2872,9 +2868,27 @@ export class OrdersService {
     const originatingCartId = cartOwner
       ? ((await this.carts.findOpenCartByOwner(cartOwner))?.id ?? null)
       : null
-    const order = await this.prisma.$transaction(async (tx) => {
+    const orderYear = calendarYearInTimeZone(
+      new Date(),
+      resolveMarketTimeZone(marketSettings.region),
+    )
+    let order: {
+      id: string
+      orderNumber: number
+      status: string
+      totalAmount: Prisma.Decimal
+      currency: string
+      createdAt: Date
+      paymentExpiresAtValue: Date | null
+      paymentDueAtValue: Date | null
+      shipByDateValue: Date | null
+    }
+    try {
+      order = await this.prisma.$transaction(async (tx) => {
+      const allocatedOrderNumber = await this.orderNumbers.allocateNext(tx, orderYear)
       const created = await tx.order.create({
         data: {
+          orderNumber: allocatedOrderNumber,
           status: initialStatus,
           totalAmount,
           productsSubtotal,
@@ -3144,6 +3158,15 @@ export class OrdersService {
 
       return { ...created, paymentExpiresAtValue, paymentDueAtValue, shipByDateValue }
     })
+    } catch (error) {
+      if (error instanceof OrderNumberLimitExceededError) {
+        throw customerBadRequest(
+          CustomerErrorCode.ORDER_NUMBER_YEAR_LIMIT,
+          error.message,
+        )
+      }
+      throw error
+    }
     this.products.flushRestockNotifications(restockNotifyIds)
 
     void this.legal

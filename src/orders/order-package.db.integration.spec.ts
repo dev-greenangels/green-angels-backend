@@ -20,6 +20,7 @@ describe('order_package physical packages', { skip: !hasDb }, () => {
   before(async () => {
     const order = await prisma.order.create({
       data: {
+        orderNumber: 88_000_001 + Math.floor(Math.random() * 90_000),
         status: 'PROCESSING',
         totalAmount: 20,
         packagingAmount: 3.08,
@@ -133,6 +134,7 @@ describe('order_package physical packages', { skip: !hasDb }, () => {
   it('cascades package delete when order is deleted', async () => {
     const orphanOrder = await prisma.order.create({
       data: {
+        orderNumber: 88_200_000 + Math.floor(Math.random() * 90_000),
         status: 'PENDING',
         totalAmount: 1,
         currency: 'EUR',

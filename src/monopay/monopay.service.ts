@@ -10,6 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config'
 import { createPublicKey, createVerify } from 'crypto'
 
+import { formatOrderNumber as formatOrderNumberLabel } from '../orders/order-number'
 import { OrderPaymentLifecycleService } from '../orders/order-payment-lifecycle.service'
 import { PrismaService } from '../prisma/prisma.service'
 import { MonopaySyncTokenService } from './monopay-sync-token.service'
@@ -54,7 +55,7 @@ export class MonopayService {
   ) {}
 
   private formatOrderNumber(orderNumber: number): string {
-    return `ZY-${String(orderNumber).padStart(8, '0')}`
+    return formatOrderNumberLabel(orderNumber)
   }
 
   isConfigured(): boolean {

@@ -20,6 +20,10 @@ import {
 } from '../orders/erp-sync.errors'
 import { resolveErpSyncStatus } from '../orders/erp-sync.constants'
 import {
+  formatOrderNumber as formatOrderNumberLabel,
+  variableSymbolFromOrderNumber,
+} from '../orders/order-number'
+import {
   advanceExternalId,
   bankPayExternalId,
   isBankPaymentMethod,
@@ -1872,7 +1876,7 @@ export class FlexiService {
       }
     }
 
-    const orderNumberLabel = `ZY-${String(order.orderNumber).padStart(8, '0')}`
+    const orderNumberLabel = formatOrderNumberLabel(order.orderNumber)
     const stockCode = settings.defaultStockCode.trim()
     const useStock = Boolean(stockCode && !/^WH-MAIN$/i.test(stockCode))
     const reserveLines = mode === 'normal'
@@ -2091,7 +2095,7 @@ export class FlexiService {
       typCenyDphK,
       datVyst: order.createdAt.toISOString().slice(0, 10),
       cisDosle: orderNumberLabel,
-      varSym: String(order.orderNumber),
+      varSym: variableSymbolFromOrderNumber(order.orderNumber),
       popis: `E-shop ${orderNumberLabel}`,
       poznam,
       kontaktJmeno: hasDifferentReceiver ? receiverName : contactName,
@@ -2975,7 +2979,7 @@ export class FlexiService {
       id: advExtId,
       typDokl: `code:${settings.advanceDocTypeCode}`,
       procent: 100,
-      varSym: String(order.orderNumber),
+      varSym: variableSymbolFromOrderNumber(order.orderNumber),
       konSym: toFlexiKonSymRef(settings.salesConstantSymbol),
     }
     if (paymentRef) zaloha.formaUhradyCis = paymentRef

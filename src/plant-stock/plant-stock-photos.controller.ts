@@ -111,7 +111,10 @@ export class PlantStockPhotosController {
     if (!file) {
       throw new BadRequestException('Оберіть файл зображення.')
     }
-    const result = await this.photosService.uploadPhoto(file, body)
+    // SK PlantStock library shows botanical/Latin names, not UA catalog labels.
+    const result = await this.photosService.uploadPhoto(file, body, {
+      plantNameScript: 'latin',
+    })
     if (result && typeof result === 'object' && 'error' in result && result.error) {
       throw new BadRequestException(String(result.error))
     }

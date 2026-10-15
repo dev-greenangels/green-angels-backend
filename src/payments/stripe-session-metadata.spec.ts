@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import {
+  formatOrderNumber,
+  variableSymbolFromOrderNumber,
+} from '../orders/order-number'
+
 /**
  * Mirrors StripePaymentProvider session metadata shape for regression without
  * hitting the live Stripe API.
@@ -12,8 +17,8 @@ function buildStripeSessionPayload(input: {
   customerEmail?: string
   metadata?: Record<string, string>
 }) {
-  const orderNumberLabel = `ZY-${String(input.orderNumber).padStart(8, '0')}`
-  const variableSymbol = String(input.orderNumber)
+  const orderNumberLabel = formatOrderNumber(input.orderNumber)
+  const variableSymbol = variableSymbolFromOrderNumber(input.orderNumber)
   const sessionMetadata: Record<string, string> = {
     orderId: input.orderId,
     orderNumber: orderNumberLabel,
@@ -41,7 +46,7 @@ function buildStripeSessionPayload(input: {
 }
 
 describe('Stripe Checkout Session metadata/description', () => {
-  it('sets Session + PI metadata and PI description with matching variableSymbol', () => {
+  it('sets Session + PI metadata for legacy order numbers', () => {
     const payload = buildStripeSessionPayload({
       orderId: 'ord-uuid-1',
       orderNumber: 33,
@@ -57,6 +62,17 @@ describe('Stripe Checkout Session metadata/description', () => {
     assert.equal(payload.payment_intent_data.description, 'Green Angels order ZY-00000033')
     assert.equal(payload.payment_intent_data.metadata.orderNumber, 'ZY-00000033')
     assert.equal(payload.payment_intent_data.metadata.variableSymbol, '33')
-    assert.equal(payload.payment_intent_data.metadata.variableSymbol, String(33))
+  })
+
+  it('sets Session + PI metadata for yearly order numbers', () => {
+    const payload = buildStripeSessionPayload({
+      orderId: 'ord-uuid-2',
+      orderNumber: 20260075,
+      description: 'Green Angels order ZY-20260075',
+    })
+
+    assert.equal(payload.metadata.orderNumber, 'ZY-20260075')
+    assert.equal(payload.metadata.variableSymbol, '20260075')
+    assert.equal(payload.payment_intent_data.metadata.variableSymbol, '20260075')
   })
 })

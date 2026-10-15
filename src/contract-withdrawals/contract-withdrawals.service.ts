@@ -18,6 +18,10 @@ import { createHash } from 'crypto'
 import { resolveSupportEmail } from '../legal/legal-seller'
 import { resolveOtpRateLimitPeerIp } from '../auth/otp.service'
 import { MailService } from '../mail/mail.service'
+import {
+  formatOrderNumber as formatOrderNumberLabel,
+  parseOrderNumberInput,
+} from '../orders/order-number'
 import { PrismaService } from '../prisma/prisma.service'
 import { RedisService } from '../redis/redis.service'
 import type { AppLocale } from '../settings/localization.types'
@@ -161,14 +165,11 @@ export class ContractWithdrawalsService {
   }
 
   private formatOrderNumber(orderNumber: number): string {
-    return String(orderNumber)
+    return formatOrderNumberLabel(orderNumber)
   }
 
   private parseSubmittedOrderNumber(raw: string): number | null {
-    const digits = raw.replace(/\D/g, '')
-    if (!digits) return null
-    const n = Number(digits)
-    return Number.isFinite(n) && n > 0 ? n : null
+    return parseOrderNumberInput(raw)
   }
 
   private async tryMatchOrder(

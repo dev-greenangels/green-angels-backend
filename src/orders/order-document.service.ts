@@ -9,6 +9,7 @@ import {
 import { MediaStorageService } from '../media/media-storage.service'
 import { orderConfirmationPdfKey } from '../media/media-keys'
 import { PrismaService } from '../prisma/prisma.service'
+import { formatOrderNumber as formatOrderNumberLabel } from './order-number'
 import { OrdersService } from './orders.service'
 
 export type EnsuredOrderDocument = {
@@ -48,7 +49,7 @@ export class OrderDocumentService {
     if (!order) {
       throw new Error(`Order ${orderId} missing during PDF archive`)
     }
-    const filename = `order-ZY-${String(order.orderNumber).padStart(8, '0')}.pdf`
+    const filename = `order-${formatOrderNumberLabel(order.orderNumber)}.pdf`
     const storageKey = orderConfirmationPdfKey(orderId)
     const sha256 = createHash('sha256').update(buffer).digest('hex')
 

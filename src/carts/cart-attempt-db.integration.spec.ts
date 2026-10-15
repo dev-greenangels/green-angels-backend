@@ -104,6 +104,7 @@ describe('Option A DB integration', { skip: !hasDb }, () => {
 
     const order1 = await prisma.order.create({
       data: {
+        orderNumber: 88_300_000 + Math.floor(Math.random() * 90_000),
         status: 'PENDING',
         totalAmount: 10,
         currency: 'EUR',
@@ -157,6 +158,7 @@ describe('Option A DB integration', { skip: !hasDb }, () => {
 
     const order2 = await prisma.order.create({
       data: {
+        orderNumber: 88_400_000 + Math.floor(Math.random() * 90_000),
         status: 'PENDING',
         totalAmount: 20,
         currency: 'EUR',

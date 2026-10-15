@@ -11,6 +11,7 @@ import {
   stripePayExternalId,
   toDateOnlyIso,
 } from '../orders/order-dispatch-dates'
+import { variableSymbolFromOrderNumber } from '../orders/order-number'
 import {
   toFlexiKonSymRef,
   toFlexiRelationCode,
@@ -137,7 +138,11 @@ export function buildIncomingClearingBankaDocument(
     bezPolozek: true,
     sumOsv: amount,
     mena: `code:${menaCode}`,
-    varSym: String(input.orderNumber),
+    varSym: variableSymbolFromOrderNumber(
+      typeof input.orderNumber === 'number'
+        ? input.orderNumber
+        : Number.parseInt(String(input.orderNumber), 10),
+    ),
     konSym: toFlexiKonSymRef(input.salesConstantSymbol),
     banka: toFlexiRelationCode(bankCode),
     sparovani: {

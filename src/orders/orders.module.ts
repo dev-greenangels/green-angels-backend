@@ -26,6 +26,7 @@ import { OrderCommunicationService } from './order-communication.service'
 import { OrderConfirmationTokenService } from './order-confirmation-token.service'
 import { OrderDocumentService } from './order-document.service'
 import { OrderIdempotencyService } from './order-idempotency.service'
+import { OrderNumberModule } from './order-number.module'
 import { OrderPaymentLifecycleService } from './order-payment-lifecycle.service'
 import { OrdersController } from './orders.controller'
 import { OrdersService } from './orders.service'
@@ -33,6 +34,7 @@ import { OrdersService } from './orders.service'
 @Module({
   imports: [
     PrismaModule,
+    OrderNumberModule,
     // UsersModule → OrdersModule (communications) → AuthModule → UsersModule
     forwardRef(() => AuthModule),
     PricingModule,
@@ -71,6 +73,7 @@ import { OrdersService } from './orders.service'
     OrderConfirmationTokenService,
     OrderCommunicationService,
     OrderDocumentService,
+    OrderNumberModule,
   ],
 })
 export class OrdersModule {}

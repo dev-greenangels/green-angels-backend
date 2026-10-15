@@ -20,6 +20,7 @@ import {
   customerBadRequest,
   customerNotFound,
 } from '../common/customer-error'
+import { formatOrderNumber as formatOrderNumberLabel } from '../orders/order-number'
 import { deriveCartCheckoutProgress } from './cart-checkout-progress'
 import {
   abandonedCutoff,
@@ -1110,7 +1111,7 @@ export class CartsService {
   }
 
   private formatOrderNumber(orderNumber: number): string {
-    return `ZY-${String(orderNumber).padStart(8, '0')}`
+    return formatOrderNumberLabel(orderNumber)
   }
 
   private formatCartNumber(cartNumber: number): string {

@@ -2,8 +2,12 @@ import { BadRequestException, Injectable } from '@nestjs/common'
 import { ReviewStatus, Role } from '@prisma/client'
 
 import { sanitizeBlogAuthor } from '../blog/blog.utils'
+import { calendarYearInTimeZone } from '../orders/order-number'
+import { OrderNumberAllocator } from '../orders/order-number.allocator'
 import { PrismaService } from '../prisma/prisma.service'
 import { ProductsService } from '../products/products.service'
+import { resolveMarketTimeZone } from '../settings/dispatch-calendar.service'
+import { SettingsService } from '../settings/settings.service'
 import {
   asBool,
   asNumber,
@@ -42,6 +46,8 @@ export class ImportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly products: ProductsService,
+    private readonly orderNumbers: OrderNumberAllocator,
+    private readonly settings: SettingsService,
   ) {}
 
   async importCsv(type: string, buffer: Buffer): Promise<ImportStats & { type: string }> {
@@ -1247,6 +1253,11 @@ export class ImportService {
       select: { id: true, legacyId: true, firstName: true, lastName: true },
     })
     const userByLegacy = new Map(users.map((u) => [u.legacyId!, u]))
+    const market = await this.settings.getMarketSettings()
+    const allocateYear = calendarYearInTimeZone(
+      new Date(),
+      resolveMarketTimeZone(market.region),
+    )
 
     for (const r of rows) {
       const legacyId = this.field(r, 'id_order')
@@ -1311,8 +1322,17 @@ export class ImportService {
         await this.prisma.order.update({ where: { id: existing.id }, data })
         stats.updated++
       } else {
-        await this.prisma.order.create({
-          data: { ...data, legacyId, legacySource: 'prestashop', ...createdAtData },
+        await this.prisma.$transaction(async (tx) => {
+          const orderNumber = await this.orderNumbers.allocateNext(tx, allocateYear)
+          await tx.order.create({
+            data: {
+              ...data,
+              orderNumber,
+              legacyId,
+              legacySource: 'prestashop',
+              ...createdAtData,
+            },
+          })
         })
         stats.created++
       }

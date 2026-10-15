@@ -8,6 +8,7 @@ import {
   effectiveBillingFirstName,
   effectiveBillingLastName,
 } from './order-billing-identity'
+import { formatOrderNumber as formatOrderNumberLabel } from './order-number'
 import {
   getOrderPdfLabels,
   resolveOrderPdfLocale,
@@ -78,7 +79,7 @@ function isBankTransfer(method: string): boolean {
 }
 
 function formatOrderNumberDisplay(orderNumber: number): string {
-  return `ZY-${String(orderNumber).padStart(8, '0')}`
+  return formatOrderNumberLabel(orderNumber)
 }
 
 const UA_PAYMENT_PURPOSE_DEFAULT = 'Оплата за замовлення {orderNumber}'

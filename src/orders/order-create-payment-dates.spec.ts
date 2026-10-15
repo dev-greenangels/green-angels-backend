@@ -26,11 +26,12 @@ describe('OrdersService.executeCreate — payment/shipping date contracts', () =
     return text.slice(from, to)
   }
 
-  it('card OR bank-transfer → AWAITING_PAYMENT; COD/pay-on-pickup → PENDING', () => {
+  it('card OR bank-transfer → AWAITING_PAYMENT; COD/pay-on-pickup → PROCESSING', () => {
     const block = slice('const initialStatus: OrderStatus =', 'shouldExportNow')
     assert.match(block, /isCardPaymentMethod\(paymentMethod\)\s*\|\|\s*isBankPaymentMethod\(paymentMethod\)/)
     assert.match(block, /'AWAITING_PAYMENT'/)
-    assert.match(block, /'PENDING'/)
+    assert.match(block, /isUnpaidFulfillmentOkPaymentMethod\(paymentMethod\)/)
+    assert.match(block, /'PROCESSING'/)
   })
 
   it('post-create date block: card sets paymentExpiresAt, bank sets paymentDueAt, COD sets shipByDate', () => {

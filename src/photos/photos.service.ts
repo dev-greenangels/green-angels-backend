@@ -17,11 +17,19 @@ import {
   normalizeFreshPhotosLimit,
 } from './fresh-photo-variants'
 
-function getUkrainianPart(name: string): string {
-  const parts = name.split(',').map((p) => p.trim())
-  const hasCyrillic = (s: string) => /[а-яА-ЯіІїЇєЄґҐ]/.test(s)
-  const isOnlyNumber = (s: string) => /^\d+$/.test(s)
-  let index = parts.findIndex((p) => hasCyrillic(p))
+const hasCyrillic = (s: string) => /[а-яА-ЯіІїЇєЄґҐ]/.test(s)
+const isOnlyNumber = (s: string) => /^\d+$/.test(s)
+
+function pickNamePart(name: string, prefer: 'cyrillic' | 'latin'): string {
+  const parts = name
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean)
+  if (parts.length === 0) return name
+  let index =
+    prefer === 'cyrillic'
+      ? parts.findIndex((p) => hasCyrillic(p))
+      : parts.findIndex((p) => !hasCyrillic(p) && !isOnlyNumber(p))
   if (index === -1) {
     index = parts.findIndex((p) => !isOnlyNumber(p))
   }
@@ -33,6 +41,16 @@ function getUkrainianPart(name: string): string {
   }
   return base
 }
+
+function getUkrainianPart(name: string): string {
+  return pickNamePart(name, 'cyrillic')
+}
+
+function getLatinPart(name: string): string {
+  return pickNamePart(name, 'latin')
+}
+
+export type PhotoUploadNameScript = 'uk' | 'latin'
 
 @Injectable()
 export class PhotosService {
@@ -124,7 +142,11 @@ export class PhotosService {
     }
   }
 
-  async uploadPhoto(file: Express.Multer.File, body: PhotoUploadBodyDto) {
+  async uploadPhoto(
+    file: Express.Multer.File,
+    body: PhotoUploadBodyDto,
+    options?: { plantNameScript?: PhotoUploadNameScript },
+  ) {
     if (!file) return { error: 'No file uploaded' }
 
     const allowedMimeTypes = ['image/jpeg', 'image/webp']
@@ -137,10 +159,12 @@ export class PhotosService {
       throw new BadRequestException(identity.error)
     }
 
-    const plantNameUa = getUkrainianPart(body.plantName)
+    const script = options?.plantNameScript ?? 'uk'
+    const plantNameStored =
+      script === 'latin' ? getLatinPart(body.plantName) : getUkrainianPart(body.plantName)
     const appProperties: Record<string, string> = {
       productId: body.productId,
-      plantName: plantNameUa,
+      plantName: plantNameStored,
       plantSize: body.plantSize,
       sizeId: body.sizeId,
       barcode: identity.identifierType === 'EAN' ? identity.identifier : (body.barcode?.trim() || ''),

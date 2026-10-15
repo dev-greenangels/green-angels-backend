@@ -27,6 +27,7 @@ import {
   customerReviewRequestAutoAttemptIdempotencyKey,
   customerReviewRequestIdempotencyKey,
 } from '../orders/order-communication.constants'
+import { formatOrderNumber as formatOrderNumberLabel } from '../orders/order-number'
 import { PrismaService } from '../prisma/prisma.service'
 import { QueueService } from '../queue/queue.service'
 import { RedisService } from '../redis/redis.service'
@@ -196,7 +197,7 @@ export class ReviewRequestService {
   ) {}
 
   private formatOrderNumber(orderNumber: number): string {
-    return `ZY-${String(orderNumber).padStart(8, '0')}`
+    return formatOrderNumberLabel(orderNumber)
   }
 
   private resolveLocale(orderLocale: string | null | undefined): string {
