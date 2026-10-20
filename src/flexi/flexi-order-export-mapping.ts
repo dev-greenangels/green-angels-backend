@@ -592,7 +592,9 @@ export function shouldExportFlexiPercentTotalLed(input: {
     input.commercialLineAmount != null && Number.isFinite(Number(input.commercialLineAmount))
       ? Number(input.commercialLineAmount)
       : null
-  return percent != null && percent > 0 && base != null && sum != null && sum >= 0
+  // sum === 0 (promo gift / 100% off): use unit-priced cenaMj + slevaPol so ABRA
+  // shows catalog price with 100% discount instead of total-led with empty sumCelkem.
+  return percent != null && percent > 0 && base != null && sum != null && sum > 0
 }
 
 /**
@@ -613,7 +615,8 @@ export function shouldExportFlexiPercentTotalLedRc(input: {
     input.commercialLineAmount != null && Number.isFinite(Number(input.commercialLineAmount))
       ? Number(input.commercialLineAmount)
       : null
-  return percent != null && percent > 0 && sum != null && sum >= 0
+  // Same gift/100% rule as B2C: unit-priced net cenaMj + slevaPol when payable is 0.
+  return percent != null && percent > 0 && sum != null && sum > 0
 }
 
 export type FlexiProductCenaMjSource = 'commercial' | 'priceAtPurchase_legacy'

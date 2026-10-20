@@ -145,6 +145,21 @@ describe('flexi line discount snapshot', () => {
     assert.equal(snap.commercialLineAmount, 170)
   })
 
+  it('promo gift 100% → base kept, payable 0, slevaPol 100', () => {
+    const snap = buildFlexiLineDiscountSnapshot({
+      baseUnitPrice: 49.9,
+      unitPrice: 0,
+      quantity: 1,
+      appliedPercentSum: 100,
+      taxRegime: 'seller',
+      taxIncluded: true,
+    })
+    assert.equal(snap.commercialBaseUnitPrice, 49.9)
+    assert.equal(snap.flexiSlevaPol, 100)
+    assert.equal(snap.commercialUnitPrice, 0)
+    assert.equal(snap.commercialLineAmount, 0)
+  })
+
   it('FIXED_PRICE path → no slevaPol', () => {
     const snap = buildFlexiLineDiscountSnapshot({
       baseUnitPrice: 100,

@@ -2474,12 +2474,14 @@ export class OrdersService {
     }))
 
     for (const gift of quote.giftLines) {
+      const giftBase = gift.baseUnitPrice > 0 ? gift.baseUnitPrice : 0
       lineItems.push({
         productVariantId: gift.productVariantId,
         quantity: gift.quantity,
+        // Customer pays 0; catalog base + 100% → Flexi cenaMj + slevaPol 100.
         priceAtPurchase: 0,
-        baseUnitPrice: 0,
-        appliedPercentSum: null,
+        baseUnitPrice: giftBase,
+        appliedPercentSum: giftBase > 0 ? 100 : null,
         commercialUnitPrice: 0,
         commercialLineAmount: 0,
         commercialBaseUnitPrice: null,
@@ -2541,10 +2543,26 @@ export class OrdersService {
 
     for (const item of lineItems) {
       if (item.isGift) {
-        item.commercialUnitPrice = 0
-        item.commercialLineAmount = 0
-        item.commercialBaseUnitPrice = null
-        item.flexiSlevaPol = null
+        if (item.baseUnitPrice > 0 && item.appliedPercentSum === 100) {
+          const snap = buildFlexiLineDiscountSnapshot({
+            baseUnitPrice: item.baseUnitPrice,
+            unitPrice: 0,
+            quantity: item.quantity,
+            appliedPercentSum: 100,
+            taxRegime: tax.taxRegime,
+            taxIncluded: tax.taxIncluded,
+            stripVatRatePercent: tax.stripVatRatePercent,
+          })
+          item.commercialUnitPrice = snap.commercialUnitPrice
+          item.commercialLineAmount = snap.commercialLineAmount
+          item.commercialBaseUnitPrice = snap.commercialBaseUnitPrice
+          item.flexiSlevaPol = snap.flexiSlevaPol
+        } else {
+          item.commercialUnitPrice = 0
+          item.commercialLineAmount = 0
+          item.commercialBaseUnitPrice = null
+          item.flexiSlevaPol = null
+        }
         continue
       }
       const snap = buildFlexiLineDiscountSnapshot({
@@ -2912,7 +2930,9 @@ export class OrdersService {
             promos: (quote.appliedPromos ?? []).map((p) => ({
               promoCodeId: p.promoCodeId ?? null,
               code: p.code,
+              name: p.name,
               discountType: p.discountType ?? null,
+              value: p.value ?? null,
               applicationScope: p.applicationScope ?? null,
               totalDiscountAmount: p.appliedDiscountAmount ?? null,
               productDiscountAmount: p.productDiscountAmount ?? null,
@@ -2920,6 +2940,14 @@ export class OrdersService {
               eligibleAudiences: [],
               eligiblePriceSources: [],
             })),
+            /** DiscountRule names applied before promo rewrite (ABRA poznam). */
+            discountRules: [
+              ...new Set(
+                (quote.lines ?? [])
+                  .map((line) => line.discountRuleLabel?.trim())
+                  .filter((name): name is string => Boolean(name)),
+              ),
+            ],
           },
           packagingAmount: checkout.packagingAmount,
           ...orderPackagingCountSnapshot({

@@ -194,6 +194,7 @@ function createService(opts: {
     settings as never,
     mail as never,
     queue as never,
+    { storeReviewImageProcessed: async () => ({ url: "/uploads/reviews/x/main.webp", thumbUrl: "/uploads/reviews/x/thumb.webp" }), deleteReviewImageByPublicUrl: async () => undefined } as never,
   )
   return { service, rawToken, tokenHash, created, reviews, requestRow, prisma }
 }
@@ -644,6 +645,7 @@ describe('ReviewRequestService regenerate invalidates old token', () => {
       settings as never,
       mail as never,
       queue as never,
+      { storeReviewImageProcessed: async () => ({ url: "/uploads/reviews/x/main.webp", thumbUrl: "/uploads/reviews/x/thumb.webp" }), deleteReviewImageByPublicUrl: async () => undefined } as never,
     )
     const result = await service.regenerateForOrder('order-1', 'staff-1')
     assert.ok(result.reviewUrl.includes('/sk/reviews/request/'))

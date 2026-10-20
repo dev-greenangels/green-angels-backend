@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common'
 
 import { AuthModule } from '../auth/auth.module'
 import { MailModule } from '../mail/mail.module'
+import { MediaModule } from '../media/media.module'
 import { PrismaModule } from '../prisma/prisma.module'
 import { QueueModule } from '../queue/queue.module'
 import { SettingsModule } from '../settings/settings.module'
@@ -15,6 +16,7 @@ import { ReviewsService } from './reviews.service'
     AuthModule,
     SettingsModule,
     MailModule,
+    MediaModule,
     forwardRef(() => QueueModule),
   ],
   controllers: [ReviewsController],

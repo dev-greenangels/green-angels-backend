@@ -7,10 +7,10 @@ import {
   UseInterceptors,
 } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express'
-import { randomUUID } from 'crypto'
 import { memoryStorage } from 'multer'
 
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
+import { REVIEW_IMAGE_MAX_BYTES } from '../reviews/review.constants'
 import { CatalogMediaService } from './catalog-media.service'
 
 const REVIEW_MIMES = new Set([
@@ -31,7 +31,7 @@ export class ReviewsMediaController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
-      limits: { fileSize: 5 * 1024 * 1024 },
+      limits: { fileSize: REVIEW_IMAGE_MAX_BYTES },
     }),
   )
   async uploadReviewImage(@UploadedFile() file: Express.Multer.File) {
@@ -41,25 +41,6 @@ export class ReviewsMediaController {
     if (!REVIEW_MIMES.has(file.mimetype)) {
       throw new BadRequestException('Дозволені формати: JPG, PNG, WebP, GIF.')
     }
-    const ext = this.extension(file)
-    if (!ext) {
-      throw new BadRequestException('Невідомий формат файлу.')
-    }
-    return this.catalogMedia.storeReviewImage(
-      file.buffer,
-      `${randomUUID()}.${ext}`,
-      file.mimetype,
-    )
-  }
-
-  private extension(file: Express.Multer.File): string | null {
-    const mime = file.mimetype?.toLowerCase()
-    if (mime && REVIEW_MIMES.has(mime)) {
-      return mime.split('/')[1]?.replace('jpeg', 'jpg').replace('pjpeg', 'jpg') || null
-    }
-    const fromName = file.originalname.split('.').pop()?.toLowerCase()
-    if (!fromName) return null
-    if (!['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(fromName)) return null
-    return fromName === 'jpeg' ? 'jpg' : fromName
+    return this.catalogMedia.storeReviewImageProcessed(file.buffer)
   }
 }

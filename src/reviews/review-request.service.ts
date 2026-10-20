@@ -23,6 +23,7 @@ import {
 import { resolveOtpRateLimitPeerIp } from '../auth/otp.service'
 import { resolveShopPublicOrigin } from '../mail/country-hosts'
 import { MailService } from '../mail/mail.service'
+import { CatalogMediaService } from '../media/catalog-media.service'
 import {
   customerReviewRequestAutoAttemptIdempotencyKey,
   customerReviewRequestIdempotencyKey,
@@ -40,6 +41,28 @@ import type {
   SubmitOrderReviewByTokenDto,
   TokenProductReviewDto,
 } from './dto/submit-order-review-by-token.dto'
+import {
+  REVIEW_IMAGE_MAX_BYTES,
+  REVIEW_IMAGE_MAX_PER_PRODUCT,
+  REVIEW_IMAGE_PATH_REGEX,
+} from './review.constants'
+import {
+  cleanupManifestTtlSeconds,
+  isAllowedReviewImagePublicPath,
+  normalizeReviewImagePaths,
+  pendingCleanupDelayAfterInvalidationMs,
+  pendingCleanupDelayMs,
+  resolvePendingMediaScope,
+  REVIEW_MEDIA_RATE_MAX,
+  REVIEW_PENDING_MEDIA_STORE_SCOPE,
+  REVIEW_PENDING_MEDIA_TOKEN_CAP,
+  reviewMediaRateLimitKey,
+  reviewPendingCleanupLockKey,
+  reviewPendingCleanupManifestKey,
+  reviewPendingMediaKey,
+  reviewPendingMediaTokenIndexKey,
+  ttlSecondsUntil,
+} from './review-request-pending-media'
 import {
   computeReviewRequestDelayMs,
   evaluateAutomaticReviewEligibility,
@@ -194,6 +217,7 @@ export class ReviewRequestService {
     private readonly settings: SettingsService,
     private readonly mail: MailService,
     private readonly queue: QueueService,
+    private readonly catalogMedia: CatalogMediaService,
   ) {}
 
   private formatOrderNumber(orderNumber: number): string {
@@ -234,13 +258,380 @@ export class ReviewRequestService {
     return count > max
   }
 
-  private async assertRateLimit(kind: 'get' | 'post', remoteAddress: string | undefined) {
+  private async assertRateLimit(
+    kind: 'get' | 'post' | 'media',
+    remoteAddress: string | undefined,
+  ) {
     const ip = resolveOtpRateLimitPeerIp(remoteAddress) ?? 'unknown'
-    const key = `review-request:rl:${kind}:${ip}`
-    const max = kind === 'get' ? RATE_GET_MAX : RATE_POST_MAX
+    const key =
+      kind === 'media'
+        ? reviewMediaRateLimitKey(ip)
+        : `review-request:rl:${kind}:${ip}`
+    const max =
+      kind === 'get' ? RATE_GET_MAX : kind === 'post' ? RATE_POST_MAX : REVIEW_MEDIA_RATE_MAX
     if (await this.hitRateLimit(key, max)) {
       throw new BadRequestException('Забагато запитів. Спробуйте пізніше.')
     }
+  }
+
+  private tokenHashFromRaw(rawToken: string): string {
+    return hashReviewRequestToken(rawToken.trim())
+  }
+
+  private async assertMediaScopeAllowed(
+    request: Awaited<ReturnType<ReviewRequestService['loadValidRequest']>>,
+    scope: string,
+  ) {
+    if (scope === REVIEW_PENDING_MEDIA_STORE_SCOPE) {
+      const existing = await this.prisma.review.findFirst({
+        where: { orderId: request.orderId, productId: null },
+        select: { id: true },
+      })
+      if (existing) {
+        throw new ConflictException('Загальний відгук за цим замовленням уже залишено.')
+      }
+      return
+    }
+
+    const allowed = this.groupProducts(request.order.items)
+    if (!allowed.some((p) => p.productId === scope)) {
+      throw new BadRequestException('Товар не належить до цього замовлення.')
+    }
+    const existing = await this.prisma.review.findFirst({
+      where: { orderId: request.orderId, productId: scope },
+      select: { id: true },
+    })
+    if (existing) {
+      throw new ConflictException('Відгук для цього товару вже залишено.')
+    }
+  }
+
+  /** Verify paths belong to this token+product pending set (no mutate yet). */
+  private async assertPendingImagesOwned(
+    tokenHash: string,
+    productId: string,
+    images: string[] | undefined,
+  ): Promise<string[]> {
+    const requested = normalizeReviewImagePaths(images)
+    if (requested.length === 0) return []
+
+    const key = reviewPendingMediaKey(tokenHash, productId)
+    for (const url of requested) {
+      const owned = await this.redis.client.sismember(key, url)
+      if (owned !== 1) {
+        throw new BadRequestException(
+          'Одне або кілька фотографій недоступні для цього замовлення. Завантажте їх знову.',
+        )
+      }
+    }
+    return requested
+  }
+
+  private async releaseClaimedPendingImages(
+    tokenHash: string,
+    productId: string,
+    urls: string[],
+  ): Promise<void> {
+    if (urls.length === 0) return
+    const key = reviewPendingMediaKey(tokenHash, productId)
+    const indexKey = reviewPendingMediaTokenIndexKey(tokenHash)
+    const manifestKey = reviewPendingCleanupManifestKey(tokenHash)
+    await this.redis.client.srem(key, ...urls)
+    await this.redis.client.srem(indexKey, ...urls)
+    // Critical: attached photos must leave the cleanup manifest so expiry never deletes them.
+    await this.redis.client.srem(manifestKey, ...urls)
+  }
+
+  private async registerPendingMediaInRedis(args: {
+    tokenHash: string
+    scope: string
+    url: string
+    expiresAt: Date
+  }): Promise<void> {
+    const pendingKey = reviewPendingMediaKey(args.tokenHash, args.scope)
+    const indexKey = reviewPendingMediaTokenIndexKey(args.tokenHash)
+    const manifestKey = reviewPendingCleanupManifestKey(args.tokenHash)
+    const ownershipTtl = ttlSecondsUntil(args.expiresAt)
+    const manifestTtl = cleanupManifestTtlSeconds(args.expiresAt)
+
+    await this.redis.client.sadd(pendingKey, args.url)
+    await this.redis.client.expire(pendingKey, ownershipTtl)
+    await this.redis.client.sadd(indexKey, args.url)
+    await this.redis.client.expire(indexKey, ownershipTtl)
+    await this.redis.client.sadd(manifestKey, args.url)
+    await this.redis.client.expire(manifestKey, manifestTtl)
+
+    const scopeCount = await this.redis.client.scard(pendingKey)
+    if (scopeCount > REVIEW_IMAGE_MAX_PER_PRODUCT) {
+      await this.redis.client.srem(pendingKey, args.url)
+      await this.redis.client.srem(indexKey, args.url)
+      await this.redis.client.srem(manifestKey, args.url)
+      throw new BadRequestException(
+        `Можна додати щонайбільше ${REVIEW_IMAGE_MAX_PER_PRODUCT} фото до відгуку.`,
+      )
+    }
+    const tokenTotal = await this.redis.client.scard(indexKey)
+    if (tokenTotal > REVIEW_PENDING_MEDIA_TOKEN_CAP) {
+      await this.redis.client.srem(pendingKey, args.url)
+      await this.redis.client.srem(indexKey, args.url)
+      await this.redis.client.srem(manifestKey, args.url)
+      throw new BadRequestException('Досягнуто ліміт завантажених фото для цього посилання.')
+    }
+  }
+
+  private async schedulePendingMediaCleanup(tokenHash: string, expiresAt: Date): Promise<void> {
+    try {
+      await this.queue.enqueueReviewPendingMediaCleanup({
+        tokenHash,
+        delayMs: pendingCleanupDelayMs(expiresAt),
+      })
+    } catch (err) {
+      this.logger.warn(
+        `Failed to schedule pending media cleanup for ${tokenHash.slice(0, 8)}…: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
+  }
+
+  private async schedulePendingMediaCleanupAfterInvalidation(tokenHash: string): Promise<void> {
+    try {
+      await this.queue.enqueueReviewPendingMediaCleanup({
+        tokenHash,
+        delayMs: pendingCleanupDelayAfterInvalidationMs(),
+      })
+    } catch (err) {
+      this.logger.warn(
+        `Failed to schedule invalidation cleanup for ${tokenHash.slice(0, 8)}…: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
+  }
+
+  /**
+   * Returns URLs that appear on any Review.images / Review.image (must never be orphan-deleted).
+   */
+  async findAttachedReviewImageUrls(urls: string[]): Promise<Set<string>> {
+    const unique = [...new Set(urls.map((u) => u.trim()).filter(isAllowedReviewImagePublicPath))]
+    if (unique.length === 0) return new Set()
+
+    const rows = await this.prisma.review.findMany({
+      where: {
+        OR: [{ image: { in: unique } }, { images: { hasSome: unique } }],
+      },
+      select: { image: true, images: true },
+    })
+    const attached = new Set<string>()
+    for (const row of rows) {
+      if (row.image && unique.includes(row.image)) attached.add(row.image)
+      for (const url of row.images ?? []) {
+        if (unique.includes(url)) attached.add(url)
+      }
+    }
+    return attached
+  }
+
+  /**
+   * Idempotent storage delete for review media URLs.
+   * When skipIfAttached=true, never deletes files still referenced by a Review.
+   */
+  async deleteReviewMediaUrls(
+    urls: string[],
+    opts: { skipIfAttached: boolean },
+  ): Promise<{ deleted: number; skippedAttached: number; failed: number }> {
+    const unique = [...new Set(urls.map((u) => u.trim()).filter(isAllowedReviewImagePublicPath))]
+    const attached = opts.skipIfAttached
+      ? await this.findAttachedReviewImageUrls(unique)
+      : new Set<string>()
+
+    let deleted = 0
+    let skippedAttached = 0
+    let failed = 0
+    for (const url of unique) {
+      if (attached.has(url)) {
+        skippedAttached += 1
+        continue
+      }
+      try {
+        await this.catalogMedia.deleteReviewImageByPublicUrl(url)
+        deleted += 1
+      } catch (err) {
+        failed += 1
+        this.logger.warn(
+          `deleteReviewMediaUrls failed for ${url}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      }
+    }
+    return { deleted, skippedAttached, failed }
+  }
+
+  /**
+   * BullMQ: after token expiry (+ grace) or revoke/regenerate — delete unused pending photos.
+   * Never deletes URLs attached to Review.images / Review.image.
+   */
+  async processPendingMediaCleanup(tokenHash: string): Promise<{
+    deleted: number
+    skippedAttached: number
+    failed: number
+    remaining: number
+  }> {
+    const hash = tokenHash?.trim()
+    if (!hash || !/^[a-f0-9]{64}$/i.test(hash)) {
+      return { deleted: 0, skippedAttached: 0, failed: 0, remaining: 0 }
+    }
+
+    const lockKey = reviewPendingCleanupLockKey(hash)
+    const locked = await this.redis.client.set(lockKey, '1', 'EX', 120, 'NX')
+    if (locked !== 'OK') {
+      // Another worker is cleaning; treat as success so we do not thrash retries.
+      return { deleted: 0, skippedAttached: 0, failed: 0, remaining: 0 }
+    }
+
+    const manifestKey = reviewPendingCleanupManifestKey(hash)
+    try {
+      const urls = await this.redis.client.smembers(manifestKey)
+      if (urls.length === 0) {
+        return { deleted: 0, skippedAttached: 0, failed: 0, remaining: 0 }
+      }
+
+      const attached = await this.findAttachedReviewImageUrls(urls)
+      let deleted = 0
+      let skippedAttached = 0
+      let failed = 0
+      const stillPending: string[] = []
+
+      for (const url of urls) {
+        if (!isAllowedReviewImagePublicPath(url)) {
+          await this.redis.client.srem(manifestKey, url)
+          continue
+        }
+        if (attached.has(url)) {
+          skippedAttached += 1
+          await this.redis.client.srem(manifestKey, url)
+          continue
+        }
+        try {
+          await this.catalogMedia.deleteReviewImageByPublicUrl(url)
+          deleted += 1
+          await this.redis.client.srem(manifestKey, url)
+          await this.redis.client.srem(reviewPendingMediaTokenIndexKey(hash), url)
+        } catch (err) {
+          failed += 1
+          stillPending.push(url)
+          this.logger.warn(
+            `Pending media cleanup failed for ${url}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          )
+        }
+      }
+
+      const remaining = await this.redis.client.scard(manifestKey)
+      return { deleted, skippedAttached, failed, remaining }
+    } finally {
+      await this.redis.client.del(lockKey).catch(() => undefined)
+    }
+  }
+
+  async uploadMediaByToken(
+    rawToken: string,
+    productId: string | undefined,
+    file: Express.Multer.File | undefined,
+    remoteAddress: string | undefined,
+  ): Promise<{ url: string; thumbUrl: string }> {
+    await this.assertRateLimit('media', remoteAddress)
+    await this.assertFeatureEnabled()
+
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Оберіть файл зображення.')
+    }
+    if (file.size > REVIEW_IMAGE_MAX_BYTES) {
+      throw new BadRequestException('Максимальний розмір файлу — 5 МБ.')
+    }
+    const mime = file.mimetype?.toLowerCase() ?? ''
+    if (!['image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/webp'].includes(mime)) {
+      throw new BadRequestException('Дозволені формати: JPG, PNG, WebP.')
+    }
+
+    const request = await this.loadValidRequest(rawToken)
+    const scope = resolvePendingMediaScope(productId)
+    await this.assertMediaScopeAllowed(request, scope)
+
+    const tokenHash = this.tokenHashFromRaw(rawToken)
+    const pendingKey = reviewPendingMediaKey(tokenHash, scope)
+    const indexKey = reviewPendingMediaTokenIndexKey(tokenHash)
+    const existingCount = await this.redis.client.scard(pendingKey)
+    if (existingCount >= REVIEW_IMAGE_MAX_PER_PRODUCT) {
+      throw new BadRequestException(
+        `Можна додати щонайбільше ${REVIEW_IMAGE_MAX_PER_PRODUCT} фото до відгуку.`,
+      )
+    }
+    const tokenTotal = await this.redis.client.scard(indexKey)
+    if (tokenTotal >= REVIEW_PENDING_MEDIA_TOKEN_CAP) {
+      throw new BadRequestException('Досягнуто ліміт завантажених фото для цього посилання.')
+    }
+
+    const stored = await this.catalogMedia.storeReviewImageProcessed(file.buffer)
+    try {
+      await this.registerPendingMediaInRedis({
+        tokenHash,
+        scope,
+        url: stored.url,
+        expiresAt: request.expiresAt,
+      })
+    } catch (err) {
+      await this.catalogMedia.deleteReviewImageByPublicUrl(stored.url).catch((delErr) => {
+        this.logger.error(
+          `Compensating delete failed after Redis register error for ${stored.url}: ${
+            delErr instanceof Error ? delErr.message : String(delErr)
+          }`,
+        )
+      })
+      throw err
+    }
+
+    await this.schedulePendingMediaCleanup(tokenHash, request.expiresAt)
+    return stored
+  }
+
+  async removePendingMediaByToken(
+    rawToken: string,
+    productId: string | undefined,
+    url: string,
+    remoteAddress: string | undefined,
+  ): Promise<{ removed: boolean }> {
+    await this.assertRateLimit('media', remoteAddress)
+    await this.assertFeatureEnabled()
+    const request = await this.loadValidRequest(rawToken)
+    const scope = resolvePendingMediaScope(productId)
+    const imageUrl = url?.trim()
+    if (!imageUrl) {
+      throw new BadRequestException('Вкажіть посилання на фото.')
+    }
+    if (!isAllowedReviewImagePublicPath(imageUrl)) {
+      throw new BadRequestException('Некоректне посилання на зображення.')
+    }
+    await this.assertMediaScopeAllowed(request, scope)
+
+    const tokenHash = this.tokenHashFromRaw(rawToken)
+    const pendingKey = reviewPendingMediaKey(tokenHash, scope)
+    const removed = await this.redis.client.srem(pendingKey, imageUrl)
+    if (removed === 1) {
+      await this.redis.client.srem(reviewPendingMediaTokenIndexKey(tokenHash), imageUrl)
+      await this.redis.client.srem(reviewPendingCleanupManifestKey(tokenHash), imageUrl)
+      await this.catalogMedia.deleteReviewImageByPublicUrl(imageUrl).catch((err) => {
+        this.logger.warn(
+          `Failed to delete review pending media ${imageUrl}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      })
+      return { removed: true }
+    }
+    return { removed: false }
   }
 
   private async assertFeatureEnabled(settings?: ReviewsSettings) {
@@ -366,7 +757,7 @@ export class ReviewRequestService {
         paymentStatus: true,
         locale: true,
         countrySiteCode: true,
-        reviewRequest: { select: { id: true } },
+        reviewRequest: { select: { id: true, tokenHash: true } },
       },
     })
     if (!order) throw new NotFoundException('Замовлення не знайдено.')
@@ -377,6 +768,7 @@ export class ReviewRequestService {
       throw new NotFoundException('Запит відгуку ще не створено. Спочатку generate.')
     }
 
+    const previousTokenHash = order.reviewRequest.tokenHash
     const locale = this.resolveLocale(order.locale)
     const minted = await this.mintTokenMaterial(locale, order.countrySiteCode)
     const now = new Date()
@@ -404,6 +796,11 @@ export class ReviewRequestService {
       })
     })
 
+    // Old token is dead — schedule orphan cleanup for any unused uploads under the previous hash.
+    if (previousTokenHash && previousTokenHash !== minted.tokenHash) {
+      await this.schedulePendingMediaCleanupAfterInvalidation(previousTokenHash)
+    }
+
     this.logger.log(`ReviewRequest regenerated for order ${order.id} by staff ${staffUserId}`)
 
     return {
@@ -417,7 +814,7 @@ export class ReviewRequestService {
   async revokeForOrder(orderId: string, staffUserId: string): Promise<{ revoked: true }> {
     const existing = await this.prisma.reviewRequest.findUnique({
       where: { orderId },
-      select: { id: true, revokedAt: true },
+      select: { id: true, revokedAt: true, tokenHash: true },
     })
     if (!existing) throw new NotFoundException('Запит відгуку не знайдено.')
     if (existing.revokedAt) return { revoked: true }
@@ -438,6 +835,7 @@ export class ReviewRequestService {
         },
       })
     })
+    await this.schedulePendingMediaCleanupAfterInvalidation(existing.tokenHash)
     this.logger.log(`ReviewRequest revoked for order ${orderId} by staff ${staffUserId}`)
     return { revoked: true }
   }
@@ -1071,7 +1469,26 @@ export class ReviewRequestService {
       throw new BadRequestException('У замовленні немає email або телефону для відгуку.')
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const tokenHash = this.tokenHashFromRaw(rawToken)
+    const storeImages = hasStore
+      ? await this.assertPendingImagesOwned(
+          tokenHash,
+          REVIEW_PENDING_MEDIA_STORE_SCOPE,
+          dto.store?.images,
+        )
+      : []
+    // Legacy: product-line images still accepted if present, but UI no longer sends them.
+    const imagesByProduct = new Map<string, string[]>()
+    for (const line of uniqueProductLines) {
+      const owned = await this.assertPendingImagesOwned(
+        tokenHash,
+        line.productId,
+        line.images,
+      )
+      imagesByProduct.set(line.productId, owned)
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
       const fresh = await tx.reviewRequest.findUnique({
         where: { id: request.id },
         select: {
@@ -1169,6 +1586,8 @@ export class ReviewRequestService {
                 phone,
                 text: dto.store!.text?.trim() || '',
                 rating: dto.store!.rating,
+                images: storeImages,
+                image: storeImages[0] ?? null,
                 status: ReviewStatus.PENDING,
               },
             })
@@ -1191,6 +1610,7 @@ export class ReviewRequestService {
           skippedProductIds.push(line.productId)
           continue
         }
+        const images = imagesByProduct.get(line.productId) ?? []
         try {
           await tx.review.create({
             data: {
@@ -1204,6 +1624,8 @@ export class ReviewRequestService {
               phone,
               text: line.text?.trim() || '',
               rating: line.rating,
+              images,
+              image: images[0] ?? null,
               status: ReviewStatus.PENDING,
             },
           })
@@ -1252,6 +1674,20 @@ export class ReviewRequestService {
         fullyCompleted: Boolean(completedAt),
       }
     })
+
+    if (result.createdStore && storeImages.length) {
+      await this.releaseClaimedPendingImages(
+        tokenHash,
+        REVIEW_PENDING_MEDIA_STORE_SCOPE,
+        storeImages,
+      )
+    }
+    for (const productId of result.createdProductIds) {
+      const urls = imagesByProduct.get(productId) ?? []
+      await this.releaseClaimedPendingImages(tokenHash, productId, urls)
+    }
+
+    return result
   }
 
   async previewEmailForOrder(

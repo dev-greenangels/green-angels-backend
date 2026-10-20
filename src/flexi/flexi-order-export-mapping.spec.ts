@@ -752,6 +752,35 @@ describe('resolveFlexiProductCenaMj / typCeny / commercial parity', () => {
     )
   })
 
+  it('promo gift 100% (sumCelkem 0): unit-priced cenaMj + slevaPol, not total-led', () => {
+    assert.equal(
+      shouldExportFlexiPercentTotalLed({
+        taxRegime: 'seller',
+        flexiSlevaPol: 100,
+        commercialBaseUnitPrice: 49.9,
+        commercialLineAmount: 0,
+      }),
+      false,
+    )
+    assert.equal(
+      shouldExportFlexiPercentTotalLedRc({
+        taxRegime: 'reverse_charge',
+        flexiSlevaPol: 100,
+        commercialLineAmount: 0,
+      }),
+      false,
+    )
+    const line = buildFlexiCatalogProductLine({
+      sku: 'GIFT-SKU',
+      quantity: 1,
+      cenaMj: 49.9,
+      slevaPol: 100,
+    })
+    assert.equal(line.cenaMj, 49.9)
+    assert.equal(line.slevaPol, 100)
+    assert.equal(flexiLinePayableTotal(line), 0)
+  })
+
   it('reverse charge: B2C helper false; RC total-led uses sumZkl (LIVE OBP0038)', () => {
     assert.equal(
       shouldExportFlexiPercentTotalLed({

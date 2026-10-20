@@ -10,6 +10,8 @@ import {
   EXPIRE_UNPAID_CARD_ORDERS_JOB_ID,
   SANITIZE_CHECKOUT_DRAFT_PII_JOB_ID,
   customerReviewRequestJobId,
+  reviewMediaDeleteJobId,
+  reviewPendingMediaCleanupJobId,
   type AppJobPayload,
   type OrderEmailJobType,
 } from './queue.constants'
@@ -229,6 +231,75 @@ export class QueueService implements OnModuleInit {
         attempts: 3,
         backoff: { type: 'exponential', delay: 15_000 },
         removeOnComplete: 50,
+        removeOnFail: 80,
+      },
+    )
+  }
+
+  /**
+   * Delayed orphan cleanup for token-scoped pending review photos.
+   * Deterministic jobId per tokenHash; reschedule replaces waiting/delayed job.
+   * Payload is tokenHash only (no raw token / PII).
+   */
+  async enqueueReviewPendingMediaCleanup(input: { tokenHash: string; delayMs: number }) {
+    const jobId = reviewPendingMediaCleanupJobId(input.tokenHash)
+    try {
+      const existing = await this.queue.getJob(jobId)
+      if (existing) {
+        const state = await existing.getState()
+        if (state === 'active') {
+          return existing
+        }
+        if (state === 'waiting' || state === 'delayed' || state === 'completed' || state === 'failed') {
+          await existing.remove().catch(() => undefined)
+        }
+      }
+    } catch {
+      // continue
+    }
+
+    return this.queue.add(
+      APP_JOB_NAMES.REVIEW_PENDING_MEDIA_CLEANUP,
+      {
+        type: 'review-pending-media-cleanup',
+        tokenHash: input.tokenHash,
+      },
+      {
+        jobId,
+        delay: input.delayMs > 0 ? input.delayMs : undefined,
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 30_000 },
+        removeOnComplete: 40,
+        removeOnFail: 80,
+      },
+    )
+  }
+
+  /**
+   * Best-effort delete of review media after DB row removal (or storage failure retry).
+   * URLs are validated again at execution time.
+   */
+  async enqueueReviewMediaDelete(input: {
+    urls: string[]
+    reason?: string
+    delayMs?: number
+  }) {
+    const urls = [...new Set(input.urls.map((u) => u.trim()).filter(Boolean))]
+    if (urls.length === 0) return null
+    const suffix = `${Date.now()}-${urls.length}-${urls[0]!.slice(-24)}`
+    return this.queue.add(
+      APP_JOB_NAMES.REVIEW_MEDIA_DELETE,
+      {
+        type: 'review-media-delete',
+        urls,
+        reason: input.reason,
+      },
+      {
+        jobId: reviewMediaDeleteJobId(suffix),
+        delay: input.delayMs && input.delayMs > 0 ? input.delayMs : undefined,
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 20_000 },
+        removeOnComplete: 40,
         removeOnFail: 80,
       },
     )

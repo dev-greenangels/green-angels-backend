@@ -1,5 +1,7 @@
 import { ReviewStatus, ReviewVerificationType } from '@prisma/client'
 
+import { pickLocalizedName } from '../i18n/pick-localized-name'
+
 export type ReviewStoreReplyDto = {
   authorName: string
   text: string
@@ -26,6 +28,11 @@ export type PublicReviewListItem = {
    * Used only for UI grouping — not an order number / PII field name.
    */
   submissionGroupId: string | null
+  /**
+   * ISO 3166-1 alpha-2 delivery destination from the linked Order snapshot.
+   * Null when no order / unknown — never billing, locale, or IP.
+   */
+  deliveryCountryCode: string | null
   createdAt: string
   updatedAt: string
 }
@@ -64,8 +71,23 @@ export type ReviewSerializeInput = {
   updatedAt: Date
   product?: {
     slug: string
-    translations: Array<{ name: string }>
+    latinName?: string | null
+    translations: Array<{ locale?: string; name: string }>
   } | null
+  order?: {
+    deliveryCountryCode?: string | null
+  } | null
+}
+
+const DEFAULT_PUBLIC_LOCALE = 'uk'
+
+function resolveProductName(
+  product: NonNullable<ReviewSerializeInput['product']>,
+  locale: string,
+): string {
+  return pickLocalizedName(product.translations, locale, product.slug, {
+    latinName: product.latinName,
+  })
 }
 
 const PUBLIC_FORBIDDEN_KEYS = [
@@ -94,8 +116,21 @@ function buildStoreReply(review: ReviewSerializeInput): ReviewStoreReplyDto | nu
   }
 }
 
-export function toPublicReviewListItem(review: ReviewSerializeInput): PublicReviewListItem {
+/** Normalize Order.deliveryCountryCode → public ISO alpha-2 (or null). */
+export function normalizeDeliveryCountryCode(
+  value: string | null | undefined,
+): string | null {
+  const trimmed = value?.trim().toUpperCase() ?? ''
+  if (!/^[A-Z]{2}$/.test(trimmed)) return null
+  return trimmed
+}
+
+export function toPublicReviewListItem(
+  review: ReviewSerializeInput,
+  locale: string = DEFAULT_PUBLIC_LOCALE,
+): PublicReviewListItem {
   const images = resolveImages(review)
+  const resolvedLocale = locale.trim() || DEFAULT_PUBLIC_LOCALE
   return {
     id: review.id,
     authorName: review.authorName,
@@ -104,21 +139,27 @@ export function toPublicReviewListItem(review: ReviewSerializeInput): PublicRevi
     images,
     rating: review.rating,
     productId: review.productId,
-    productName: review.product?.translations[0]?.name ?? null,
+    productName: review.product ? resolveProductName(review.product, resolvedLocale) : null,
     productSlug: review.product?.slug ?? null,
     status: review.status,
     verificationType: review.verificationType ?? ReviewVerificationType.NONE,
     purchasedVariantLabels: review.purchasedVariantLabels ?? [],
     storeReply: buildStoreReply(review),
     submissionGroupId: review.orderId?.trim() || null,
+    deliveryCountryCode: normalizeDeliveryCountryCode(
+      review.order?.deliveryCountryCode,
+    ),
     createdAt: review.createdAt.toISOString(),
     updatedAt: review.updatedAt.toISOString(),
   }
 }
 
-export function toBackstageReviewListItem(review: ReviewSerializeInput): BackstageReviewListItem {
+export function toBackstageReviewListItem(
+  review: ReviewSerializeInput,
+  locale: string = DEFAULT_PUBLIC_LOCALE,
+): BackstageReviewListItem {
   return {
-    ...toPublicReviewListItem(review),
+    ...toPublicReviewListItem(review, locale),
     email: review.email,
     phone: review.phone,
     legacyId: review.legacyId,

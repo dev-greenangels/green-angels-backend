@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer'
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsInt,
@@ -15,7 +16,11 @@ import {
   ValidateNested,
 } from 'class-validator'
 
-import { PERSON_NAME_REGEX } from '../review.constants'
+import {
+  PERSON_NAME_REGEX,
+  REVIEW_IMAGE_MAX_PER_PRODUCT,
+  REVIEW_IMAGE_PATH_REGEX,
+} from '../review.constants'
 
 export class TokenStoreReviewDto {
   @IsInt()
@@ -32,6 +37,18 @@ export class TokenStoreReviewDto {
     message: 'Текст відгуку не може містити HTML-теги.',
   })
   text?: string
+
+  /** Paths from token-scoped upload (order-level photos). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(REVIEW_IMAGE_MAX_PER_PRODUCT)
+  @IsString({ each: true })
+  @MaxLength(300, { each: true })
+  @Matches(REVIEW_IMAGE_PATH_REGEX, {
+    each: true,
+    message: 'Некоректне посилання на зображення.',
+  })
+  images?: string[]
 }
 
 export class TokenProductReviewDto {
@@ -52,6 +69,18 @@ export class TokenProductReviewDto {
     message: 'Текст відгуку не може містити HTML-теги.',
   })
   text?: string
+
+  /** Paths from token-scoped upload; ownership checked server-side via Redis. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(REVIEW_IMAGE_MAX_PER_PRODUCT)
+  @IsString({ each: true })
+  @MaxLength(300, { each: true })
+  @Matches(REVIEW_IMAGE_PATH_REGEX, {
+    each: true,
+    message: 'Некоректне посилання на зображення.',
+  })
+  images?: string[]
 }
 
 /**

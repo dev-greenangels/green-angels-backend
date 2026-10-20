@@ -8,10 +8,14 @@ import {
   Post,
   Query,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common'
+import { FileInterceptor } from '@nestjs/platform-express'
 import { Role } from '@prisma/client'
 import type { Request } from 'express'
+import { memoryStorage } from 'multer'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator'
@@ -26,8 +30,10 @@ import {
   PreviewReviewRequestEmailDto,
   SendReviewRequestEmailDto,
 } from './dto/review-request-email.dto'
+import { UpdateReviewImagesDto } from './dto/update-review-images.dto'
 import { UpdateReviewReplyDto } from './dto/update-review-reply.dto'
 import { UpdateReviewStatusDto } from './dto/update-review-status.dto'
+import { REVIEW_IMAGE_MAX_BYTES } from './review.constants'
 import { ReviewRequestService } from './review-request.service'
 import { ReviewsService } from './reviews.service'
 
@@ -64,6 +70,36 @@ export class ReviewsController {
     @Req() req: Request,
   ) {
     return this.reviewRequests.submitByToken(token, dto, req.ip)
+  }
+
+  @Post('request/:token/media')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: REVIEW_IMAGE_MAX_BYTES },
+    }),
+  )
+  uploadRequestMedia(
+    @Param('token') token: string,
+    @Query('productId') productId: string | undefined,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: Request,
+  ) {
+    return this.reviewRequests.uploadMediaByToken(token, productId, file, req.ip)
+  }
+
+  @Delete('request/:token/media')
+  removeRequestMedia(
+    @Param('token') token: string,
+    @Body() body: { productId?: string; url?: string },
+    @Req() req: Request,
+  ) {
+    return this.reviewRequests.removePendingMediaByToken(
+      token,
+      body?.productId,
+      body?.url ?? '',
+      req.ip,
+    )
   }
 
   @Get('backstage/pending-count')
@@ -175,6 +211,14 @@ export class ReviewsController {
   @Roles(Role.ADMIN, Role.MANAGER)
   updateReply(@Param('id') id: string, @Body() dto: UpdateReviewReplyDto) {
     return this.reviews.updateReply(id, dto)
+  }
+
+  @Patch(':id/images')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('reviews.manage')
+  @Roles(Role.ADMIN, Role.MANAGER)
+  updateImages(@Param('id') id: string, @Body() dto: UpdateReviewImagesDto) {
+    return this.reviews.updateImages(id, dto)
   }
 
   @Delete(':id')

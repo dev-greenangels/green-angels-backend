@@ -7,6 +7,8 @@ export const APP_JOB_NAMES = {
   SEND_ORDER_EMAIL: 'send-order-email',
   SEND_STOCK_AVAILABLE: 'send-stock-available',
   CUSTOMER_REVIEW_REQUEST: 'customer-review-request',
+  REVIEW_PENDING_MEDIA_CLEANUP: 'review-pending-media-cleanup',
+  REVIEW_MEDIA_DELETE: 'review-media-delete',
 } as const
 
 export const EXPIRE_UNPAID_CARD_ORDERS_JOB_ID = 'expire-unpaid-card-orders-repeatable'
@@ -42,7 +44,24 @@ export type AppJobPayload =
       type: 'customer-review-request'
       orderId: string
     }
+  | {
+      type: 'review-pending-media-cleanup'
+      tokenHash: string
+    }
+  | {
+      type: 'review-media-delete'
+      urls: string[]
+      reason?: string
+    }
 
 export function customerReviewRequestJobId(orderId: string): string {
   return `customer-review-request:${orderId}`
+}
+
+export function reviewPendingMediaCleanupJobId(tokenHash: string): string {
+  return `review-pending-media-cleanup:${tokenHash}`
+}
+
+export function reviewMediaDeleteJobId(suffix: string): string {
+  return `review-media-delete:${suffix}`
 }

@@ -1,7 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common'
 import { randomUUID } from 'crypto'
 
-import { processBlogImage, processCategoryImage, processProductImage } from './media-image.process'
+import {
+  processBlogImage,
+  processCategoryImage,
+  processProductImage,
+  processReviewImage,
+} from './media-image.process'
 import { MediaStorageService } from './media-storage.service'
 import { MediaWatermarkService } from './media-watermark.service'
 import { isPendingCategoryPath, isPendingProductPath } from './upload-paths'
@@ -127,10 +132,59 @@ export class CatalogMediaService {
     }
   }
 
+  /**
+   * @deprecated Prefer {@link storeReviewImageProcessed} (strips EXIF, WebP pair).
+   * Kept for import paths that already pass processed buffers.
+   */
   async storeReviewImage(buffer: Buffer, filename: string, contentType: string): Promise<{ url: string }> {
     const key = `uploads/reviews/${filename}`
     await this.storage.putObject({ key, body: buffer, contentType })
     return { url: `/uploads/reviews/${filename}` }
+  }
+
+  /** Live customer / token review upload: EXIF strip + main/thumb WebP. */
+  async storeReviewImageProcessed(buffer: Buffer): Promise<{ url: string; thumbUrl: string }> {
+    let main: Buffer
+    let thumb: Buffer
+    try {
+      ;({ main, thumb } = await processReviewImage(buffer))
+    } catch (err) {
+      const code = err instanceof Error ? err.message : ''
+      if (code === 'IMAGE_TOO_LARGE') {
+        throw new BadRequestException(
+          'Зображення занадто велике (макс. 8000×8000 або 40 млн пікселів).',
+        )
+      }
+      throw new BadRequestException('Файл не є дійсним зображенням.')
+    }
+    const imageId = randomUUID()
+    const dirKey = `uploads/reviews/${imageId}`
+    await this.writePair(dirKey, 'main.webp', 'thumb.webp', main, thumb)
+    const url = `/uploads/reviews/${imageId}/main.webp`
+    return {
+      url,
+      thumbUrl: `/uploads/reviews/${imageId}/thumb.webp`,
+    }
+  }
+
+  async deleteReviewImageByPublicUrl(publicUrl: string): Promise<void> {
+    const trimmed = publicUrl.trim()
+    if (!trimmed.startsWith('/uploads/reviews/')) return
+    if (trimmed.includes('..') || trimmed.includes('\\') || trimmed.includes('\0')) return
+    // Only known review media shapes (pair dir or legacy flat file).
+    if (
+      !/^\/uploads\/reviews\/[a-f0-9-]+\/main\.webp$/i.test(trimmed) &&
+      !/^\/uploads\/reviews\/[a-f0-9-]+\.(jpg|jpeg|png|webp|gif)$/i.test(trimmed)
+    ) {
+      return
+    }
+    if (trimmed.endsWith('/main.webp')) {
+      const dir = trimmed.replace(/\/main\.webp$/i, '').replace(/^\//, '')
+      await this.storage.deletePrefix(dir)
+      return
+    }
+    const key = trimmed.replace(/^\//, '')
+    await this.storage.deleteObject(key)
   }
 
   async putProcessedProductFiles(productId: string, imageId: string, main: Buffer, thumb: Buffer) {

@@ -34,7 +34,12 @@ function sampleReview(overrides: Partial<ReviewSerializeInput> = {}): ReviewSeri
     updatedAt: new Date('2026-02-02T12:00:00.000Z'),
     product: {
       slug: 'thuja-smaragd',
-      translations: [{ name: "Thuja occidentalis 'Smaragd'" }],
+      latinName: "Thuja occidentalis 'Smaragd'",
+      translations: [
+        { locale: 'uk', name: "Туя західна 'Smaragd'" },
+        { locale: 'sk', name: "Tuja západná 'Smaragd'" },
+        { locale: 'en', name: "Thuja occidentalis 'Smaragd'" },
+      ],
     },
     ...overrides,
   }
@@ -42,15 +47,30 @@ function sampleReview(overrides: Partial<ReviewSerializeInput> = {}): ReviewSeri
 
 describe('public review response contract (Phase 0+1)', () => {
   it('exposes verificationType + purchasedVariantLabels but never orderId/PII', () => {
-    const pub = toPublicReviewListItem(sampleReview())
+    const pub = toPublicReviewListItem(
+      sampleReview({
+        order: { deliveryCountryCode: 'sk' },
+      }),
+    )
     assertPublicReviewContract(pub as unknown as Record<string, unknown>)
     assert.equal(pub.verificationType, ReviewVerificationType.VERIFIED_PURCHASE)
     assert.deepEqual(pub.purchasedVariantLabels, ['C2', 'C5'])
     assert.equal(pub.submissionGroupId, 'order-1')
+    assert.equal(pub.deliveryCountryCode, 'SK')
     assert.equal('orderId' in pub, false)
     assert.equal('email' in pub, false)
     assert.equal('phone' in pub, false)
     assert.equal('legacyId' in pub, false)
+  })
+
+  it('hides delivery country when order missing or code invalid', () => {
+    assert.equal(toPublicReviewListItem(sampleReview()).deliveryCountryCode, null)
+    assert.equal(
+      toPublicReviewListItem(
+        sampleReview({ order: { deliveryCountryCode: 'xxl' } }),
+      ).deliveryCountryCode,
+      null,
+    )
   })
 
   it('backstage DTO keeps orderId and contact fields', () => {
@@ -77,6 +97,47 @@ describe('public review response contract (Phase 0+1)', () => {
     assert.throws(
       () => assertPublicReviewContract({ id: 'x', orderId: 'o1' }),
       /must not expose "orderId"/,
+    )
+  })
+
+  it('localizes productName with pickLocalizedName (SK, not UK)', () => {
+    const pub = toPublicReviewListItem(sampleReview(), 'sk')
+    assert.equal(pub.productName, "Tuja západná 'Smaragd'")
+  })
+
+  it('keeps UK productName for uk locale', () => {
+    const pub = toPublicReviewListItem(sampleReview(), 'uk')
+    assert.equal(pub.productName, "Туя західна 'Smaragd'")
+  })
+
+  it('falls back to EN then latin for DE/HU/CS when locale row missing', () => {
+    const review = sampleReview({
+      product: {
+        slug: 'weigela-cherry-love',
+        latinName: "Weigela florida 'Cherry Love'",
+        translations: [
+          { locale: 'uk', name: "Вейгела рясноквітна 'Cherry Love'" },
+          { locale: 'en', name: "Weigela florida 'Cherry Love'" },
+        ],
+      },
+    })
+    assert.equal(toPublicReviewListItem(review, 'de').productName, "Weigela florida 'Cherry Love'")
+    assert.equal(toPublicReviewListItem(review, 'hu').productName, "Weigela florida 'Cherry Love'")
+    assert.equal(toPublicReviewListItem(review, 'cs').productName, "Weigela florida 'Cherry Love'")
+    assert.equal(toPublicReviewListItem(review, 'en').productName, "Weigela florida 'Cherry Love'")
+  })
+
+  it('never leaks Cyrillic UK name to SK when only UK translation exists', () => {
+    const review = sampleReview({
+      product: {
+        slug: 'weigela-cherry-love',
+        latinName: "Weigela florida 'Cherry Love'",
+        translations: [{ locale: 'uk', name: "Вейгела рясноквітна 'Cherry Love'" }],
+      },
+    })
+    assert.equal(
+      toPublicReviewListItem(review, 'sk').productName,
+      "Weigela florida 'Cherry Love'",
     )
   })
 })

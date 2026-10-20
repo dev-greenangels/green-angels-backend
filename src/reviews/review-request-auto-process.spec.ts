@@ -201,6 +201,7 @@ function buildProcessHarness(opts: {
     settings as never,
     mail as never,
     queue as never,
+    { storeReviewImageProcessed: async () => ({ url: "/uploads/reviews/x/main.webp", thumbUrl: "/uploads/reviews/x/thumb.webp" }), deleteReviewImageByPublicUrl: async () => undefined } as never,
   )
 
   return {

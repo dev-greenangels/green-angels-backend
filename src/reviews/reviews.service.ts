@@ -2,18 +2,34 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common'
 import { Prisma, ReviewStatus, ReviewVerificationType } from '@prisma/client'
 
+import { CatalogMediaService } from '../media/catalog-media.service'
 import { PrismaService } from '../prisma/prisma.service'
+import { QueueService } from '../queue/queue.service'
 import { SettingsService } from '../settings/settings.service'
+import { collectReviewImageUrls } from './review-request-pending-media'
 import { CreateReviewDto } from './dto/create-review.dto'
-import { ReviewQueryDto, ReviewSortOrder, ReviewTypeFilter } from './dto/review-query.dto'
+import {
+  ReviewGroupBy,
+  ReviewQueryDto,
+  ReviewSortOrder,
+  ReviewTypeFilter,
+} from './dto/review-query.dto'
+import { UpdateReviewImagesDto } from './dto/update-review-images.dto'
 import { UpdateReviewReplyDto } from './dto/update-review-reply.dto'
 import { UpdateReviewStatusDto } from './dto/update-review-status.dto'
 import { REVIEW_IMAGE_PATH_REGEX } from './review.constants'
+import {
+  orderReviewsByGroupKeys,
+  paginateSubmissionGroups,
+  uniqueStubsById,
+  type ReviewGroupStub,
+} from './review-group-pagination'
 import {
   type BackstageReviewListItem,
   type PublicReviewListItem,
@@ -30,6 +46,7 @@ import {
 
 const DEFAULT_LOCALE = 'uk'
 const DEFAULT_PAGE_SIZE = 10
+const SUPPORTED_REVIEW_LOCALES = new Set(['uk', 'en', 'sk', 'cs', 'hu', 'de'])
 
 export type { BackstageReviewListItem, PublicReviewListItem, ReviewStoreReplyDto as ReviewStoreReply } from './review-serializers'
 
@@ -46,9 +63,13 @@ export type ReviewsPageResult = {
 
 @Injectable()
 export class ReviewsService {
+  private readonly logger = new Logger(ReviewsService.name)
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
+    private readonly catalogMedia: CatalogMediaService,
+    private readonly queue: QueueService,
   ) {}
 
   private normalizeEmail(email?: string | null): string | null {
@@ -130,19 +151,132 @@ export class ReviewsService {
     return { page, pageSize, skip: (page - 1) * pageSize }
   }
 
+  private resolvePublicLocale(locale?: string | null): string {
+    const normalized = locale?.trim().toLowerCase()
+    if (normalized && SUPPORTED_REVIEW_LOCALES.has(normalized)) return normalized
+    return DEFAULT_LOCALE
+  }
+
   private productInclude() {
     return {
       product: {
         select: {
           slug: true,
+          latinName: true,
           translations: {
-            where: { locale: DEFAULT_LOCALE },
-            select: { name: true },
-            take: 1,
+            select: { locale: true, name: true },
           },
         },
       },
+      order: {
+        select: {
+          deliveryCountryCode: true,
+        },
+      },
     } satisfies Prisma.ReviewInclude
+  }
+
+  private stubSelect() {
+    return {
+      id: true,
+      orderId: true,
+      productId: true,
+      createdAt: true,
+      rating: true,
+    } satisfies Prisma.ReviewSelect
+  }
+
+  /**
+   * Group-aware list: pageSize/total = submission groups.
+   * Used for homepage + /reviews ALL. STORE/PRODUCT/PDP keep row pagination.
+   */
+  private shouldGroupBySubmission(query: ReviewQueryDto): boolean {
+    if (query.groupBy !== ReviewGroupBy.SUBMISSION) return false
+    if (query.productId) return false
+    if (query.type === ReviewTypeFilter.STORE || query.type === ReviewTypeFilter.PRODUCT) {
+      return false
+    }
+    return true
+  }
+
+  private async findPublishedGrouped(
+    query: ReviewQueryDto,
+    locale: string,
+  ): Promise<ReviewsPageResult> {
+    const where = this.buildWhere(query, true)
+    const { page, pageSize } = this.resolvePagination(query)
+    const sort = query.sort ?? ReviewSortOrder.NEWEST
+
+    const matchingStubs = (await this.prisma.review.findMany({
+      where,
+      select: this.stubSelect(),
+    })) as ReviewGroupStub[]
+
+    let workingStubs = matchingStubs
+    // Rating (or other) filters may match only part of an order — expand siblings
+    // so the UI can render a complete submission card.
+    if (query.rating) {
+      const orderIds = [
+        ...new Set(
+          matchingStubs
+            .map((row) => row.orderId?.trim())
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ]
+      if (orderIds.length > 0) {
+        const siblings = (await this.prisma.review.findMany({
+          where: {
+            status: ReviewStatus.APPROVED,
+            orderId: { in: orderIds },
+          },
+          select: this.stubSelect(),
+        })) as ReviewGroupStub[]
+        const standalones = matchingStubs.filter((row) => !row.orderId?.trim())
+        workingStubs = uniqueStubsById([...siblings, ...standalones])
+      }
+    }
+
+    const groupPage = paginateSubmissionGroups(workingStubs, {
+      page,
+      pageSize,
+      sort,
+    })
+
+    if (groupPage.groupKeys.length === 0) {
+      return {
+        items: [],
+        total: groupPage.total,
+        page: groupPage.page,
+        pageSize: groupPage.pageSize,
+        totalPages: groupPage.totalPages,
+      }
+    }
+
+    const orClauses: Prisma.ReviewWhereInput[] = []
+    if (groupPage.orderIds.length > 0) {
+      orClauses.push({ orderId: { in: groupPage.orderIds } })
+    }
+    if (groupPage.standaloneIds.length > 0) {
+      orClauses.push({ id: { in: groupPage.standaloneIds }, orderId: null })
+    }
+
+    const reviews = await this.prisma.review.findMany({
+      where: {
+        status: ReviewStatus.APPROVED,
+        OR: orClauses,
+      },
+      include: this.productInclude(),
+    })
+
+    const ordered = orderReviewsByGroupKeys(reviews, groupPage.groupKeys)
+
+    return {
+      items: ordered.map((review) => toPublicReviewListItem(review, locale)),
+      total: groupPage.total,
+      page: groupPage.page,
+      pageSize: groupPage.pageSize,
+      totalPages: groupPage.totalPages,
+    }
   }
 
   private eligibleOrderWhere(userId: string): Prisma.OrderWhereInput {
@@ -283,6 +417,12 @@ export class ReviewsService {
   }
 
   async findPublished(query: ReviewQueryDto = {}): Promise<ReviewsPageResult> {
+    const locale = this.resolvePublicLocale(query.locale)
+
+    if (this.shouldGroupBySubmission(query)) {
+      return this.findPublishedGrouped(query, locale)
+    }
+
     const where = this.buildWhere(query, true)
     const { page, pageSize, skip } = this.resolvePagination(query)
     const orderBy = this.resolveOrderBy(query.sort)
@@ -299,7 +439,7 @@ export class ReviewsService {
     ])
 
     return {
-      items: reviews.map((review) => toPublicReviewListItem(review)),
+      items: reviews.map((review) => toPublicReviewListItem(review, locale)),
       total,
       page,
       pageSize,
@@ -308,12 +448,13 @@ export class ReviewsService {
   }
 
   async findAllBackstage(query: ReviewQueryDto = {}): Promise<BackstageReviewListItem[]> {
+    const locale = this.resolvePublicLocale(query.locale)
     const reviews = await this.prisma.review.findMany({
       where: this.buildWhere(query, false),
       include: this.productInclude(),
       orderBy: { createdAt: 'desc' },
     })
-    return reviews.map((review) => toBackstageReviewListItem(review))
+    return reviews.map((review) => toBackstageReviewListItem(review, locale))
   }
 
   private async assertProductReviewable(productId: string): Promise<void> {
@@ -473,11 +614,119 @@ export class ReviewsService {
     }
   }
 
+  /**
+   * Staff: replace images with a subset of the current list (remove unwanted photos).
+   * Cannot attach arbitrary storage paths from other reviews.
+   */
+  async updateImages(id: string, dto: UpdateReviewImagesDto): Promise<BackstageReviewListItem> {
+    const existing = await this.prisma.review.findUnique({
+      where: { id },
+      select: { id: true, images: true, image: true },
+    })
+    if (!existing) throw new NotFoundException('Відгук не знайдено.')
+
+    const current = this.normalizeImages(existing.images, existing.image)
+    const next = this.normalizeImages(dto.images, null)
+    for (const url of next) {
+      if (!current.includes(url)) {
+        throw new BadRequestException(
+          'Можна лише прибрати існуючі фото цього відгуку, не додавати чужі шляхи.',
+        )
+      }
+    }
+    const removed = current.filter((url) => !next.includes(url))
+
+    const updated = await this.prisma.review.update({
+      where: { id },
+      data: {
+        images: next,
+        image: next[0] ?? null,
+      },
+      include: this.productInclude(),
+    })
+
+    const failedUrls: string[] = []
+    for (const url of removed) {
+      try {
+        await this.catalogMedia.deleteReviewImageByPublicUrl(url)
+      } catch (err) {
+        failedUrls.push(url)
+        this.logger.warn(
+          `Failed to delete review image ${url} after staff edit: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      }
+    }
+    if (failedUrls.length) {
+      await this.queue
+        .enqueueReviewMediaDelete({
+          urls: failedUrls,
+          reason: `staff-image-edit:${id}`,
+        })
+        .catch((err) => {
+          this.logger.error(
+            `Failed to enqueue media delete after staff edit ${id}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          )
+        })
+    }
+    this.logger.log(
+      `Staff updated review ${id} images: kept=${next.length} removed=${removed.length}`,
+    )
+    return toBackstageReviewListItem(updated)
+  }
+
+  /**
+   * Delete review row first (source of truth), then remove owned media.
+   * Storage failures are retried via BullMQ; attached-check skips if re-uploaded elsewhere.
+   */
   async remove(id: string): Promise<void> {
+    const existing = await this.prisma.review.findUnique({
+      where: { id },
+      select: { id: true, images: true, image: true },
+    })
+    if (!existing) throw new NotFoundException('Відгук не знайдено.')
+
+    const urls = collectReviewImageUrls(existing)
+
     try {
       await this.prisma.review.delete({ where: { id } })
     } catch {
       throw new NotFoundException('Відгук не знайдено.')
+    }
+
+    this.logger.log(`Staff deleted review ${id}; scheduling media cleanup urls=${urls.length}`)
+
+    if (urls.length === 0) return
+
+    const failedUrls: string[] = []
+    for (const url of urls) {
+      try {
+        await this.catalogMedia.deleteReviewImageByPublicUrl(url)
+      } catch (err) {
+        failedUrls.push(url)
+        this.logger.warn(
+          `Failed to delete review media ${url} after review ${id} delete: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        )
+      }
+    }
+    if (failedUrls.length) {
+      await this.queue
+        .enqueueReviewMediaDelete({
+          urls: failedUrls,
+          reason: `review-delete:${id}`,
+        })
+        .catch((err) => {
+          this.logger.error(
+            `Failed to enqueue media delete after review ${id} delete: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          )
+        })
     }
   }
 }

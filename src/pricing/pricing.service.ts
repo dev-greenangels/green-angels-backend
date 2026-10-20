@@ -86,6 +86,7 @@ import {
   LoadedPromo,
   normalizePromoCodesInput,
   promoAppliesToVariant,
+  promoCombinesWithOtherDiscounts,
   promoQualifiesForCart,
   resolvePromoUsageIncrement,
   shouldSkipSplitPromoUsageValidation,
@@ -1440,6 +1441,8 @@ export class PricingService {
         basePriceSource: dual.basePriceSource,
         appliedSource: dual.appliedSource,
         appliedLabel: dual.appliedLabel,
+        discountRuleLabel:
+          dual.appliedSource === 'discount_rule' ? dual.appliedLabel : null,
         appliedPercentSum: dual.appliedPercentSum,
         stockToDecrement: variant.stock > 0 ? quantity : 0,
       })
@@ -1504,6 +1507,10 @@ export class PricingService {
           line.appliedSource = 'promo_code'
           line.appliedLabel = `Промокод ${promo.code}`
           line.appliedPercentSum = appliedPercentSum
+          // BEST_PRICE promo replaced the rule on this line; STACK keeps both in audit.
+          if (!promoCombinesWithOtherDiscounts(promo)) {
+            line.discountRuleLabel = null
+          }
           appliedOnPromo = true
         } else if (appliedPercentSum !== line.appliedPercentSum) {
           line.appliedPercentSum = appliedPercentSum
@@ -1691,6 +1698,7 @@ export class PricingService {
         if (!priceSourceOk(line)) continue
         line.appliedSource = 'promo_code'
         line.appliedLabel = `Промокод ${promo.code}`
+        // FIXED does not stack into slevaPol; keep DiscountRule name when present.
       }
 
       appliedPromoIds.add(promo.id)
@@ -1741,6 +1749,7 @@ export class PricingService {
               translations: { where: { locale: DEFAULT_LOCALE }, take: 1 },
             },
           },
+          prices: { where: { currency, priceType: RETAIL_PRICE_TYPE } },
           attributeValues: {
             include: {
               value: {
@@ -1769,6 +1778,14 @@ export class PricingService {
 
       if (giftLines.some((gift) => gift.productVariantId === giftVariant.id)) continue
 
+      let giftBaseUnitPrice = 0
+      try {
+        giftBaseUnitPrice = this.resolveBaseUnitPrice(giftVariant, RETAIL_PRICE_TYPE)
+      } catch {
+        // Still grant the gift to the customer; Flexi export falls back without slevaPol.
+        giftBaseUnitPrice = 0
+      }
+
       const productName =
         giftVariant.product.translations[0]?.name ?? giftVariant.product.slug
       const typeOrder = await this.variantLabels.getTypeOrder()
@@ -1784,6 +1801,7 @@ export class PricingService {
         productSlug: giftVariant.product.slug,
         quantity: Math.max(1, promo.giftQuantity),
         label: `Подарунок: ${giftTitle}`,
+        baseUnitPrice: giftBaseUnitPrice,
       })
     }
 
@@ -1807,6 +1825,7 @@ export class PricingService {
         name: promo.name,
         promoCodeId: promo.id,
         discountType,
+        value: promo.value != null ? Number(promo.value) : null,
         applicationScope: details?.applicationScope ?? resolveAppScope(promo),
         appliedDiscountAmount: details?.appliedDiscountAmount ?? null,
         productDiscountAmount: details?.productDiscountAmount ?? null,

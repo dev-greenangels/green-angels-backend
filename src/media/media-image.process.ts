@@ -20,12 +20,38 @@ const MIN_WEBP_QUALITY = 50
 const QUALITY_STEP = 8
 const WIDTH_STEP = 100
 
+/** Cap decoded pixel count / side length (decompression-bomb guard for review uploads). */
+export const REVIEW_IMAGE_MAX_INPUT_PIXELS = 40_000_000
+export const REVIEW_IMAGE_MAX_SIDE = 8_000
+
 async function encodeWebp(input: Buffer, maxWidth: number, quality: number): Promise<Buffer> {
-  return sharp(input)
+  return sharp(input, { limitInputPixels: REVIEW_IMAGE_MAX_INPUT_PIXELS })
     .rotate()
     .resize({ width: maxWidth, withoutEnlargement: true })
     .webp({ quality, effort: WEBP_EFFORT })
     .toBuffer()
+}
+
+/**
+ * Reject absurd dimensions before full encode. Sharp limitInputPixels also applies
+ * during decode in encodeWebp / processReviewImage.
+ */
+export async function assertReviewImageSafeDimensions(buffer: Buffer): Promise<void> {
+  let meta: { width?: number; height?: number }
+  try {
+    meta = await sharp(buffer, { limitInputPixels: REVIEW_IMAGE_MAX_INPUT_PIXELS }).metadata()
+  } catch {
+    throw new Error('INVALID_IMAGE')
+  }
+  const width = meta.width ?? 0
+  const height = meta.height ?? 0
+  if (width < 1 || height < 1) throw new Error('INVALID_IMAGE')
+  if (width > REVIEW_IMAGE_MAX_SIDE || height > REVIEW_IMAGE_MAX_SIDE) {
+    throw new Error('IMAGE_TOO_LARGE')
+  }
+  if (width * height > REVIEW_IMAGE_MAX_INPUT_PIXELS) {
+    throw new Error('IMAGE_TOO_LARGE')
+  }
 }
 
 async function toWebp(
@@ -75,6 +101,15 @@ export async function encodeFreshPhotoMain(buffer: Buffer): Promise<Buffer> {
 /** Card / strip thumb; pass watermarked main to keep logo consistent. */
 export async function encodeFreshPhotoThumb(buffer: Buffer): Promise<Buffer> {
   return toWebp(buffer, PRODUCT_THUMB_MAX_WIDTH, PRODUCT_THUMB_QUALITY, PRODUCT_THUMB_MAX_BYTES)
+}
+
+/**
+ * Customer review photos: dimension guard + WebP main+thumb, EXIF stripped via sharp.rotate().
+ * Same size caps as product gallery so list thumbs stay light.
+ */
+export async function processReviewImage(buffer: Buffer): Promise<ProcessedImagePair> {
+  await assertReviewImageSafeDimensions(buffer)
+  return processProductImage(buffer)
 }
 
 export async function processBlogImage(buffer: Buffer): Promise<ProcessedImagePair> {

@@ -19,7 +19,12 @@ type Stub = {
 }
 
 function createService(prisma: Stub) {
-  return new ReviewsService(prisma as never, {} as never)
+  return new ReviewsService(
+    prisma as never,
+    {} as never,
+    { deleteReviewImageByPublicUrl: async () => undefined } as never,
+    { enqueueReviewMediaDelete: async () => null } as never,
+  )
 }
 
 function baseCreated(data: Record<string, unknown>) {

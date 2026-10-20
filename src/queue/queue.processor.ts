@@ -106,6 +106,44 @@ export class QueueProcessor extends WorkerHost {
       return result
     }
 
+    if (
+      job.name === APP_JOB_NAMES.REVIEW_PENDING_MEDIA_CLEANUP ||
+      job.data.type === 'review-pending-media-cleanup'
+    ) {
+      if (job.data.type !== 'review-pending-media-cleanup') {
+        return { skipped: true }
+      }
+      const result = await this.reviewRequests.processPendingMediaCleanup(job.data.tokenHash)
+      this.logger.log(
+        `review-pending-media-cleanup jobId=${job.id} tokenHash=${job.data.tokenHash.slice(0, 8)}… deleted=${result.deleted} skippedAttached=${result.skippedAttached} failed=${result.failed}`,
+      )
+      if (result.failed > 0) {
+        throw new Error(
+          `review-pending-media-cleanup incomplete: failed=${result.failed} remaining=${result.remaining}`,
+        )
+      }
+      return result
+    }
+
+    if (
+      job.name === APP_JOB_NAMES.REVIEW_MEDIA_DELETE ||
+      job.data.type === 'review-media-delete'
+    ) {
+      if (job.data.type !== 'review-media-delete') {
+        return { skipped: true }
+      }
+      const result = await this.reviewRequests.deleteReviewMediaUrls(job.data.urls, {
+        skipIfAttached: true,
+      })
+      this.logger.log(
+        `review-media-delete jobId=${job.id} reason=${job.data.reason ?? 'n/a'} deleted=${result.deleted} skipped=${result.skippedAttached} failed=${result.failed}`,
+      )
+      if (result.failed > 0) {
+        throw new Error(`review-media-delete incomplete: failed=${result.failed}`)
+      }
+      return result
+    }
+
     this.logger.warn(`Unknown app job ${job.name}`)
     return { skipped: true }
   }

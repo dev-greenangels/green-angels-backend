@@ -39,6 +39,10 @@ import {
   upsertViesPoznamBlock,
   type FlexiViesPoznamStatus,
 } from './flexi-vies-poznam'
+import {
+  buildFlexiOrderDiscountNoteLines,
+  readDiscountNotesFromPromoSnapshot,
+} from './flexi-order-discount-notes'
 import { FLEXI_ORDER_CONFLICT_USER_STATUS, FLEXI_ORDER_STORNO_USER_STATUS, FLEXI_CENIK_QUERY_BATCH, FLEXI_STOCK_FILTER_CHUNK, isFlexiMissingRecordError, isImplementedFlexiEvidence, normalizeFlexiEvidence } from './flexi.constants'
 import {
   applyFlexiBankAccountMapping,
@@ -2161,6 +2165,25 @@ export class FlexiService {
         })`,
       )
     }
+
+    const discountAudit = readDiscountNotesFromPromoSnapshot(
+      order.promoCommercialSnapshot,
+      order.currency,
+    )
+    // Legacy orders: snapshot may lack promos[].value — still emit code from relation.
+    if (
+      discountAudit.promos.length === 0 &&
+      order.promoCode?.code?.trim()
+    ) {
+      discountAudit.promos.push({ code: order.promoCode.code })
+    }
+    notes.push(
+      ...buildFlexiOrderDiscountNoteLines({
+        currency: discountAudit.currency || order.currency,
+        promos: discountAudit.promos,
+        discountRuleNames: discountAudit.discountRuleNames,
+      }),
+    )
 
     const fullBuyerVatId = formatEuVatId(order.vatCountryCode, order.companyVatId)
     const vies = order.viesCheck

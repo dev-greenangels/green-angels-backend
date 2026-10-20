@@ -44,6 +44,11 @@ export type PricingLineResult = {
   appliedSource: AppliedDiscountSource
   appliedLabel: string | null
   /**
+   * DiscountRule name(s) from dual-offer before PromoCode rewrite.
+   * Preserved when appliedSource later becomes promo_code (ABRA poznam audit).
+   */
+  discountRuleLabel: string | null
+  /**
    * Additive site PERCENT sum from `baseUnitPrice` when Flexi `slevaPol` is safe.
    * Null when FIXED/FIXED_PRICE/contractor tainted the payable (export final cenaMj only).
    */
@@ -56,6 +61,8 @@ export type PricingGiftLine = {
   productSlug: string
   quantity: number
   label: string
+  /** Product Card retail unit (catalog) — Flexi cenaMj before 100% gift slevaPol. 0 if unpriced. */
+  baseUnitPrice: number
 }
 
 export type AppliedPromoSummary = {
@@ -63,6 +70,8 @@ export type AppliedPromoSummary = {
   name: string
   promoCodeId?: string
   discountType?: 'PERCENT' | 'FIXED' | null
+  /** Configured PromoCode.value (PERCENT points or FIXED currency amount). */
+  value?: number | null
   applicationScope?: 'PRODUCTS' | 'PRODUCTS_AND_SHIPPING' | 'SHIPPING_ONLY' | null
   appliedDiscountAmount?: number | null
   productDiscountAmount?: number | null
