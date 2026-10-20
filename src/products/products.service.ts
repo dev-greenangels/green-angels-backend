@@ -6,7 +6,7 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common'
-import { DiscountTarget, Prisma, PromoEligibleAudience, VariantAttributeType } from '@prisma/client'
+import { Prisma, VariantAttributeType } from '@prisma/client'
 
 import { PrismaService } from '../prisma/prisma.service'
 import { PricingService } from '../pricing/pricing.service'
@@ -101,6 +101,8 @@ export type PaginatedBackstageProducts = {
   page: number
   pageSize: number
   totalPages: number
+  /** Present when hasDiscount=true — stable qty chips for storefront «Акції». */
+  discountQuantityBreakpoints?: number[]
 }
 
 export type BackstageProductVariant = {
@@ -1708,67 +1710,71 @@ export class ProductsService {
     const normalizedSearch = params.search ? normalizeSearchQuery(params.search) : ''
     const listOptions = { merchant: Boolean(params.merchant) }
 
+    const promotionCatalog =
+      params.hasDiscount === 'true'
+        ? await this.pricing.resolvePublicRetailPromotionCatalog({
+            atQuantity: params.discountMinQuantity,
+          })
+        : null
+    const discountQuantityBreakpoints = promotionCatalog?.quantityBreakpoints
+    const emptyPromotionPage = (): PaginatedBackstageProducts => ({
+      items: [],
+      total: 0,
+      page: Math.max(1, params.page ?? 1),
+      pageSize: Math.min(200, Math.max(1, params.pageSize ?? 100)),
+      totalPages: 0,
+      discountQuantityBreakpoints: discountQuantityBreakpoints ?? [],
+    })
+
     if (normalizedSearch) {
       let searchParams = { ...params, search: normalizedSearch, locale }
-      if (params.hasDiscount === 'true') {
-        const discountIds = await this.resolveDiscountCatalogProductIds({
-          discountMinQuantity: params.discountMinQuantity,
-          discountQuantityMode: params.discountQuantityMode,
-        })
-        if (discountIds !== null) {
-          const existing = params.ids
-            ?.split(',')
-            .map((v) => v.trim())
-            .filter(Boolean)
-          const allowed = existing?.length
-            ? discountIds.filter((id) => existing.includes(id))
-            : discountIds
-          if (!allowed.length) {
-            const usePagination = params.page != null || params.pageSize != null
-            if (usePagination) {
-              return {
-                items: [],
-                total: 0,
-                page: Math.max(1, params.page ?? 1),
-                pageSize: Math.min(200, Math.max(1, params.pageSize ?? 100)),
-                totalPages: 0,
-              }
-            }
-            return []
-          }
-          searchParams = { ...searchParams, ids: allowed.join(',') }
+      if (promotionCatalog) {
+        const existing = params.ids
+          ?.split(',')
+          .map((v) => v.trim())
+          .filter(Boolean)
+        const allowed = existing?.length
+          ? promotionCatalog.productIds.filter((id) => existing.includes(id))
+          : promotionCatalog.productIds
+        if (!allowed.length) {
+          const usePagination = params.page != null || params.pageSize != null
+          if (usePagination) return emptyPromotionPage()
+          return []
         }
+        searchParams = { ...searchParams, ids: allowed.join(',') }
       }
       if (this.hasCatalogFacetFilters(searchParams)) {
-        return this.findAllWithSearchAndFacetFilters({
+        const result = await this.findAllWithSearchAndFacetFilters({
           ...searchParams,
           search: normalizedSearch,
           locale,
         })
+        return this.withDiscountQuantityBreakpoints(result, discountQuantityBreakpoints)
       }
-      return this.findAllWithSearch({ ...searchParams, search: normalizedSearch, locale })
+      const result = await this.findAllWithSearch({
+        ...searchParams,
+        search: normalizedSearch,
+        locale,
+      })
+      return this.withDiscountQuantityBreakpoints(result, discountQuantityBreakpoints)
     }
 
     const categorySubtreeIds = params.categorySlug?.trim()
       ? await this.categories.findCategoryIdsInSubtreeBySlug(params.categorySlug)
       : undefined
-    const discountProductIds =
-      params.hasDiscount === 'true'
-        ? await this.resolveDiscountCatalogProductIds({
-            discountMinQuantity: params.discountMinQuantity,
-            discountQuantityMode: params.discountQuantityMode,
-          })
-        : undefined
+    if (promotionCatalog && !promotionCatalog.productIds.length) {
+      const usePagination = params.page != null || params.pageSize != null
+      if (usePagination) return emptyPromotionPage()
+      return []
+    }
+    const discountProductIds = promotionCatalog?.productIds
     // Public catalog price filters always use Product Card (not ALL Sales Prices).
     const where = this.buildListWhere(
       {
         ...params,
         categorySubtreeIds,
-        // null → ALL_PRODUCTS rule: skip id filter; [] → no matches
-        discountProductIds:
-          discountProductIds === null ? undefined : discountProductIds,
-        hasDiscount:
-          discountProductIds === null ? undefined : params.hasDiscount,
+        discountProductIds,
+        hasDiscount: discountProductIds != null ? params.hasDiscount : undefined,
       },
       locale,
       currency,
@@ -1778,7 +1784,7 @@ export class ProductsService {
     if (usePagination) {
       const page = Math.max(1, params.page ?? 1)
       const pageSize = Math.min(200, Math.max(1, params.pageSize ?? 100))
-      return this.findPaginatedCatalog(
+      const result = await this.findPaginatedCatalog(
         where,
         locale,
         page,
@@ -1788,6 +1794,7 @@ export class ProductsService {
         params.lowStockThreshold,
         listOptions,
       )
+      return this.withDiscountQuantityBreakpoints(result, discountQuantityBreakpoints)
     }
 
     const slugList = parseSlugQueryList(params.slugs)
@@ -2099,84 +2106,12 @@ export class ProductsService {
     return and.length ? { AND: and } : undefined
   }
 
-  /**
-   * Product ids with an active RETAIL DiscountRule (any target scope).
-   * Returns null when ALL_PRODUCTS rule matches (no id restriction needed).
-   */
-  private async resolveDiscountCatalogProductIds(input: {
-    discountMinQuantity?: number
-    discountQuantityMode?: string
-  }): Promise<string[] | null> {
-    const now = new Date()
-    const minQuantity =
-      input.discountMinQuantity != null && Number.isFinite(input.discountMinQuantity)
-        ? Math.max(1, Math.floor(input.discountMinQuantity))
-        : undefined
-    const tierFilter =
-      minQuantity == null
-        ? undefined
-        : input.discountQuantityMode === 'exact'
-          ? { some: { minQuantity } }
-          : { some: { minQuantity: { gte: minQuantity } } }
-
-    const rules = await this.prisma.discountRule.findMany({
-      where: {
-        isActive: true,
-        eligibleAudiences: { has: PromoEligibleAudience.RETAIL },
-        AND: [
-          { OR: [{ startDate: null }, { startDate: { lte: now } }] },
-          { OR: [{ endDate: null }, { endDate: { gte: now } }] },
-          ...(tierFilter ? [{ quantityTiers: tierFilter }] : []),
-        ],
-      },
-      select: { target: true, targetId: true, targetIds: true },
-    })
-
-    const productIds = new Set<string>()
-    const variantIds: string[] = []
-    const categoryIds: string[] = []
-
-    for (const rule of rules) {
-      const ids = rule.targetIds.length
-        ? rule.targetIds
-        : rule.targetId
-          ? [rule.targetId]
-          : []
-      if (rule.target === DiscountTarget.ALL_PRODUCTS) {
-        return null
-      }
-      if (rule.target === DiscountTarget.PRODUCT) {
-        for (const id of ids) productIds.add(id)
-      } else if (rule.target === DiscountTarget.VARIANT) {
-        variantIds.push(...ids)
-      } else if (rule.target === DiscountTarget.CATEGORY) {
-        categoryIds.push(...ids)
-      }
-    }
-
-    if (variantIds.length) {
-      const variants = await this.prisma.productVariant.findMany({
-        where: { id: { in: [...new Set(variantIds)] } },
-        select: { productId: true },
-      })
-      for (const row of variants) productIds.add(row.productId)
-    }
-
-    if (categoryIds.length) {
-      const uniqueCats = [...new Set(categoryIds)]
-      const products = await this.prisma.product.findMany({
-        where: {
-          OR: [
-            { categoryId: { in: uniqueCats } },
-            { additionalCategories: { some: { categoryId: { in: uniqueCats } } } },
-          ],
-        },
-        select: { id: true },
-      })
-      for (const row of products) productIds.add(row.id)
-    }
-
-    return [...productIds]
+  private withDiscountQuantityBreakpoints(
+    result: BackstageProductListItem[] | PaginatedBackstageProducts,
+    breakpoints: number[] | undefined,
+  ): BackstageProductListItem[] | PaginatedBackstageProducts {
+    if (breakpoints == null || Array.isArray(result)) return result
+    return { ...result, discountQuantityBreakpoints: breakpoints }
   }
 
   async bulkAction(dto: BulkProductsDto) {

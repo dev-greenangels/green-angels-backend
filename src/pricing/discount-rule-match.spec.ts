@@ -13,6 +13,7 @@ import { unitPriceFromRule } from './pricing.helpers'
 import {
   batchMatchDiscountRules,
   buildDiscountRuleCandidates,
+  discountRuleAppliesToVariant,
   matchesDiscountRuleAudience,
   matchesDiscountRuleFilters,
   resolveDiscountRuleTier,
@@ -261,6 +262,108 @@ describe('filter criteria AND/OR', () => {
         },
         v,
       ),
+      false,
+    )
+  })
+})
+
+describe('promotions discovery matching (ALL_PRODUCTS + filters/excludes)', () => {
+  const attrMap = new Map([['v-pot-c2', 'attr-pot']])
+
+  it('ALL_PRODUCTS + filterCriteria: only matching attribute variants', () => {
+    const r = rule({
+      id: 'p9-shape',
+      name: 'p9',
+      target: DiscountTarget.ALL_PRODUCTS,
+      eligibleAudiences: [PromoEligibleAudience.RETAIL],
+      filterCriteria: {
+        attributeGroups: [{ attributeId: 'attr-pot', valueIds: ['v-pot-c2'] }],
+      },
+      quantityTiers: [
+        { minQuantity: 10, type: DiscountValueType.PERCENT, value: 5 },
+        { minQuantity: 40, type: DiscountValueType.PERCENT, value: 10 },
+      ],
+    })
+    const hit = variant({
+      id: 'hit',
+      attributeValueIds: ['v-pot-c2'],
+      attributeIdByValueId: attrMap,
+    })
+    const miss = variant({ id: 'miss', attributeValueIds: [], attributeIdByValueId: new Map() })
+    const audience = { role: undefined as Role | undefined, groupIds: [] as string[] }
+    assert.equal(
+      discountRuleAppliesToVariant({ rule: r, audience, variant: hit, cartSubtotal: 100 }),
+      true,
+    )
+    assert.equal(
+      discountRuleAppliesToVariant({ rule: r, audience, variant: miss, cartSubtotal: 100 }),
+      false,
+    )
+  })
+
+  it('excludes product / variant / category under ALL_PRODUCTS', () => {
+    const audience = { role: Role.USER, groupIds: [] as string[] }
+    const base = variant({
+      id: 'v1',
+      product: {
+        id: 'prod-1',
+        categoryId: 'cat-a',
+        additionalCategories: [],
+        characteristics: [],
+      },
+    })
+    assert.equal(
+      discountRuleAppliesToVariant({
+        rule: rule({
+          id: 'ex-prod',
+          name: 'ex',
+          excludeProductIds: ['prod-1'],
+          eligibleAudiences: [PromoEligibleAudience.RETAIL],
+        }),
+        audience,
+        variant: base,
+        cartSubtotal: 10,
+      }),
+      false,
+    )
+    assert.equal(
+      discountRuleAppliesToVariant({
+        rule: rule({
+          id: 'ex-var',
+          name: 'ex',
+          excludeVariantIds: ['v1'],
+          eligibleAudiences: [PromoEligibleAudience.RETAIL],
+        }),
+        audience,
+        variant: base,
+        cartSubtotal: 10,
+      }),
+      false,
+    )
+    assert.equal(
+      discountRuleAppliesToVariant({
+        rule: rule({
+          id: 'ex-cat',
+          name: 'ex',
+          excludeCategoryIds: ['cat-a'],
+          eligibleAudiences: [PromoEligibleAudience.RETAIL],
+        }),
+        audience,
+        variant: base,
+        cartSubtotal: 10,
+      }),
+      false,
+    )
+  })
+
+  it('inactive is out of band — audience WHOLESALER-only excluded for guest', () => {
+    const wholesaleOnly = rule({
+      id: 'wh',
+      name: 'wh',
+      eligibleAudiences: [PromoEligibleAudience.WHOLESALER],
+    })
+    assert.equal(
+      matchesDiscountRuleAudience(wholesaleOnly, { role: undefined, groupIds: [] }),
       false,
     )
   })

@@ -16,7 +16,11 @@ import { VariantLabelService } from '../products/variant-label.service'
 import { VARIANT_LABEL_ATTRIBUTE_SELECT } from '../products/variant-label.util'
 import { SettingsService } from '../settings/settings.service'
 import { SalesPricesService } from './sales-prices.service'
-import { buildCategoryDescendantMap, type CategoryDescendantMap } from './category-scope.util'
+import {
+  buildCategoryDescendantMap,
+  expandCategoryIds,
+  type CategoryDescendantMap,
+} from './category-scope.util'
 import { computeCartSizeEnvelope } from './delivery-size.util'
 import {
   computeCartVolumeLiters,
@@ -30,11 +34,17 @@ import {
 import { resolveDualOfferLine } from './dual-offer'
 import {
   batchMatchDiscountRules,
+  matchesDiscountRuleAudience,
   parseDiscountRuleFilterCriteria,
   unitPriceFromDiscountRule,
   type MatchableDiscountRule,
   type MatchableVariant,
 } from './discount-rule-match'
+import {
+  parsePromotionAtQuantity,
+  selectPromotionCatalogFromLadders,
+  type PromotionLadderEntry,
+} from './promotions-catalog'
 import {
   limMnozThresholdsFromRows,
   resolveSalesPriceForAudience,
@@ -257,6 +267,219 @@ export class PricingService {
       variantIds,
       audience: enriched,
       retailOnly: true,
+    })
+  }
+
+  /**
+   * Storefront «Акції» discovery: product ids with a real public retail discount
+   * (Product Card vs commercial ladder), plus quantity chip breakpoints.
+   * Reuses discount-rule matchers + dual-offer ladders (retailOnly — no COMPANY/GROUP).
+   */
+  async resolvePublicRetailPromotionCatalog(input?: {
+    /** When set, product must be cheaper than Product Card at this quantity. */
+    atQuantity?: number
+  }): Promise<{ productIds: string[]; quantityBreakpoints: number[] }> {
+    const atQuantity = parsePromotionAtQuantity(input?.atQuantity)
+    const allRules = await this.loadActiveDiscountRules()
+    const guestAudience = { groupIds: [] as string[] }
+    const rules = allRules.filter((rule) => matchesDiscountRuleAudience(rule, guestAudience))
+    if (!rules.length) {
+      return { productIds: [], quantityBreakpoints: [] }
+    }
+
+    const needsCategoryExpansion = rules.some(
+      (rule) => rule.target === DiscountTarget.CATEGORY || rule.excludeCategoryIds.length > 0,
+    )
+    const categoryExpansion = needsCategoryExpansion
+      ? await buildCategoryDescendantMap(this.prisma)
+      : undefined
+
+    const candidates = await this.loadPromotionCandidateVariants(rules, categoryExpansion)
+    if (!candidates.length) {
+      return { productIds: [], quantityBreakpoints: [] }
+    }
+
+    const matchable = candidates.map((row) => this.toMatchableVariant(row))
+    const cartSubtotal = roundMoney(
+      candidates.reduce((sum, row) => {
+        try {
+          return sum + this.resolveBaseUnitPrice(row, RETAIL_PRICE_TYPE)
+        } catch {
+          return sum
+        }
+      }, 0),
+    )
+
+    const matchedByVariant = batchMatchDiscountRules({
+      rules,
+      variants: matchable,
+      audience: guestAudience,
+      cartSubtotal,
+      categoryExpansion,
+    })
+
+    const matchedIds: string[] = []
+    const productIdByVariant = new Map<string, string>()
+    const productCardByVariant = new Map<string, number>()
+    for (const row of candidates) {
+      if (!(matchedByVariant.get(row.id)?.length)) continue
+      let productCard = 0
+      try {
+        productCard = this.resolveBaseUnitPrice(row, RETAIL_PRICE_TYPE)
+      } catch {
+        continue
+      }
+      if (!(productCard > 0)) continue
+      matchedIds.push(row.id)
+      productIdByVariant.set(row.id, row.product.id)
+      productCardByVariant.set(row.id, productCard)
+    }
+
+    if (!matchedIds.length) {
+      return { productIds: [], quantityBreakpoints: [] }
+    }
+
+    const audience = await this.resolveAudience({})
+    const ladders = new Map<
+      string,
+      Array<{ minQuantity: number; unitPrice: number; scope: string }>
+    >()
+    const chunkSize = 200
+    for (let i = 0; i < matchedIds.length; i += chunkSize) {
+      const chunk = matchedIds.slice(i, i + chunkSize)
+      const part = await this.resolveCommercialLaddersForAudience({
+        variantIds: chunk,
+        audience,
+        retailOnly: true,
+      })
+      for (const [id, ladder] of part) ladders.set(id, ladder)
+    }
+
+    const entries: PromotionLadderEntry[] = []
+    for (const variantId of matchedIds) {
+      const productId = productIdByVariant.get(variantId)
+      const productCard = productCardByVariant.get(variantId)
+      const ladder = ladders.get(variantId) ?? []
+      if (!productId || productCard == null) continue
+      entries.push({ productId, productCard, ladder })
+    }
+
+    return selectPromotionCatalogFromLadders({ entries, atQuantity })
+  }
+
+  /**
+   * Candidate variants for promotions discovery (published + in stock).
+   * Narrows ALL_PRODUCTS+attribute filters via SQL; full matcher still applies after.
+   */
+  private async loadPromotionCandidateVariants(
+    rules: MatchableDiscountRule[],
+    categoryExpansion?: CategoryDescendantMap,
+  ) {
+    const currency = await this.commerce.getDefaultCurrencyCode()
+    const productIds = new Set<string>()
+    const variantIds = new Set<string>()
+    const categoryIds = new Set<string>()
+    const attributeValueIds = new Set<string>()
+    let scanAllPublishedInStock = false
+
+    for (const rule of rules) {
+      const targetIds = rule.targetIds.length
+        ? rule.targetIds
+        : rule.targetId
+          ? [rule.targetId]
+          : []
+
+      if (rule.target === DiscountTarget.ALL_PRODUCTS) {
+        const attrGroups = rule.filterCriteria?.attributeGroups ?? []
+        const charGroups = rule.filterCriteria?.characteristicGroups ?? []
+        if (attrGroups.length && !charGroups.length) {
+          for (const group of attrGroups) {
+            for (const valueId of group.valueIds) attributeValueIds.add(valueId)
+          }
+        } else {
+          scanAllPublishedInStock = true
+        }
+        continue
+      }
+
+      if (rule.target === DiscountTarget.PRODUCT) {
+        for (const id of targetIds) productIds.add(id)
+      } else if (rule.target === DiscountTarget.VARIANT) {
+        for (const id of targetIds) variantIds.add(id)
+      } else if (rule.target === DiscountTarget.CATEGORY) {
+        const expanded = categoryExpansion
+          ? expandCategoryIds(targetIds, categoryExpansion)
+          : new Set(targetIds)
+        for (const id of expanded) categoryIds.add(id)
+      }
+    }
+
+    const variantInclude = {
+      product: {
+        select: {
+          id: true,
+          categoryId: true,
+          additionalCategories: { select: { categoryId: true } },
+          characteristics: {
+            select: {
+              characteristicId: true,
+              optionId: true,
+              numberValue: true,
+              textValue: true,
+            },
+          },
+        },
+      },
+      prices: { where: { currency, priceType: RETAIL_PRICE_TYPE } },
+      attributeValues: {
+        select: {
+          valueId: true,
+          value: { select: { id: true, attributeId: true } },
+        },
+      },
+    } as const
+
+    const publishedInStock: Prisma.ProductVariantWhereInput = {
+      stock: { gt: 0 },
+      product: { isPublished: true },
+    }
+
+    if (scanAllPublishedInStock) {
+      return this.prisma.productVariant.findMany({
+        where: publishedInStock,
+        include: variantInclude,
+      })
+    }
+
+    const or: Prisma.ProductVariantWhereInput[] = []
+    if (attributeValueIds.size) {
+      or.push({
+        attributeValues: { some: { valueId: { in: [...attributeValueIds] } } },
+      })
+    }
+    if (productIds.size) {
+      or.push({ productId: { in: [...productIds] } })
+    }
+    if (variantIds.size) {
+      or.push({ id: { in: [...variantIds] } })
+    }
+    if (categoryIds.size) {
+      const cats = [...categoryIds]
+      or.push({
+        product: {
+          OR: [
+            { categoryId: { in: cats } },
+            { additionalCategories: { some: { categoryId: { in: cats } } } },
+          ],
+        },
+      })
+    }
+
+    if (!or.length) return []
+
+    return this.prisma.productVariant.findMany({
+      where: { AND: [publishedInStock, { OR: or }] },
+      include: variantInclude,
     })
   }
 
