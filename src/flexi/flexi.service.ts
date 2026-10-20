@@ -6,7 +6,6 @@ import {
   ServiceUnavailableException,
   forwardRef,
 } from '@nestjs/common'
-import { VariantQuantityDiscountType } from '@prisma/client'
 
 import { RETAIL_PRICE_TYPE } from '../commerce/commerce.constants'
 import { CommerceService } from '../commerce/commerce.service'
@@ -47,6 +46,11 @@ import {
   assertFlexiCommercialTotalParity,
   buildFlexiAncillaryExportLines,
   buildFlexiCatalogProductLine,
+  buildFlexiCatalogProductLineTotalLed,
+  buildFlexiCatalogProductLineTotalLedRc,
+  buildFlexiPromoDiscountLine,
+  shouldExportFlexiPercentTotalLed,
+  shouldExportFlexiPercentTotalLedRc,
   mapPaymentMethodToFlexiCode,
   resolveBankovniUcetCode,
   resolveFlexiAddressCountryCode,
@@ -458,21 +462,6 @@ export class FlexiService {
             currency,
             priceType: RETAIL_PRICE_TYPE,
           },
-        })
-      }
-
-      if (fields.quantityPrices && item.quantityPrices.length > 0) {
-        await tx.productVariantQuantityPrice.deleteMany({
-          where: { productVariantId: variant.id },
-        })
-        await tx.productVariantQuantityPrice.createMany({
-          data: item.quantityPrices.map((qp, index) => ({
-            productVariantId: variant.id,
-            minQuantity: qp.minQuantity,
-            discountType: VariantQuantityDiscountType.PERCENT,
-            value: qp.percent,
-            sortOrder: index,
-          })),
         })
       }
 
@@ -1807,7 +1796,7 @@ export class FlexiService {
     const settings = await this.settings.getSettings()
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { items: true, viesCheck: true },
+      include: { items: true, viesCheck: true, promoCode: { select: { code: true } } },
     })
     if (!order) return { ok: false, message: 'Замовлення не знайдено.' }
 
@@ -1899,25 +1888,86 @@ export class FlexiService {
     const lines: Record<string, unknown>[] = []
     for (const item of order.items) {
       if (!item.sku?.trim()) continue
-      const cena = resolveFlexiProductCenaMj({
+      const slevaPolRaw =
+        item.flexiSlevaPol != null && Number.isFinite(Number(item.flexiSlevaPol))
+          ? Number(item.flexiSlevaPol)
+          : null
+      const baseCommercial =
+        item.commercialBaseUnitPrice != null &&
+        Number.isFinite(Number(item.commercialBaseUnitPrice))
+          ? Number(item.commercialBaseUnitPrice)
+          : null
+      const commercialLineAmount =
+        item.commercialLineAmount != null && Number.isFinite(Number(item.commercialLineAmount))
+          ? Number(item.commercialLineAmount)
+          : null
+      const useTotalLed = shouldExportFlexiPercentTotalLed({
         taxRegime: order.taxRegime,
-        priceAtPurchase: Number(item.priceAtPurchase),
-        commercialUnitPrice:
-          item.commercialUnitPrice != null ? Number(item.commercialUnitPrice) : null,
-        commercialLineAmount:
-          item.commercialLineAmount != null ? Number(item.commercialLineAmount) : null,
+        flexiSlevaPol: slevaPolRaw,
+        commercialBaseUnitPrice: baseCommercial,
+        commercialLineAmount,
       })
-      if (!cena.ok) {
-        return { ok: false, message: cena.message }
-      }
-      const line: Record<string, unknown> = {
-        ...buildFlexiCatalogProductLine({
-          sku: item.sku,
-          quantity: item.quantity,
-          cenaMj: cena.cenaMj,
-        }),
-        rezervovat: reserveLines,
-        rezervovatMj: reserveLines ? item.quantity : 0,
+      const useTotalLedRc = shouldExportFlexiPercentTotalLedRc({
+        taxRegime: order.taxRegime,
+        flexiSlevaPol: slevaPolRaw,
+        commercialLineAmount,
+      })
+      const useSlevaPolUnit =
+        !useTotalLed &&
+        !useTotalLedRc &&
+        slevaPolRaw != null &&
+        slevaPolRaw > 0 &&
+        baseCommercial != null
+
+      let line: Record<string, unknown>
+      if (useTotalLed && slevaPolRaw != null && commercialLineAmount != null) {
+        // B2C T1: Total + Item Discount; ABRA derives cenaMj (LIVE OBP0035/2026).
+        line = {
+          ...buildFlexiCatalogProductLineTotalLed({
+            sku: item.sku,
+            quantity: item.quantity,
+            slevaPol: slevaPolRaw,
+            sumCelkem: commercialLineAmount,
+          }),
+          rezervovat: reserveLines,
+          rezervovatMj: reserveLines ? item.quantity : 0,
+        }
+      } else if (useTotalLedRc && slevaPolRaw != null && commercialLineAmount != null) {
+        // RC T3: net sumZkl + Item Discount; ABRA derives cenaMj (LIVE OBP0038/2026).
+        line = {
+          ...buildFlexiCatalogProductLineTotalLedRc({
+            sku: item.sku,
+            quantity: item.quantity,
+            slevaPol: slevaPolRaw,
+            sumZkl: commercialLineAmount,
+          }),
+          rezervovat: reserveLines,
+          rezervovatMj: reserveLines ? item.quantity : 0,
+        }
+      } else {
+        const cena = resolveFlexiProductCenaMj({
+          taxRegime: order.taxRegime,
+          priceAtPurchase: Number(item.priceAtPurchase),
+          commercialUnitPrice: useSlevaPolUnit
+            ? baseCommercial
+            : item.commercialUnitPrice != null
+              ? Number(item.commercialUnitPrice)
+              : null,
+          commercialLineAmount,
+        })
+        if (!cena.ok) {
+          return { ok: false, message: cena.message }
+        }
+        line = {
+          ...buildFlexiCatalogProductLine({
+            sku: item.sku,
+            quantity: item.quantity,
+            cenaMj: cena.cenaMj,
+            slevaPol: useSlevaPolUnit ? slevaPolRaw : null,
+          }),
+          rezervovat: reserveLines,
+          rezervovatMj: reserveLines ? item.quantity : 0,
+        }
       }
       if (useStock) {
         line.sklad = `code:${stockCode}`
@@ -1953,6 +2003,36 @@ export class FlexiService {
       lines.push(line)
     }
 
+    // FIXED product discount → single negative line (same VAT classification as document).
+    // Shipping FIXED/PERCENT already reflected in deliveryAmount. Idempotent: one line from snapshot.
+    const promoFixed =
+      order.promoFixedDiscountAmount != null
+        ? Number(order.promoFixedDiscountAmount)
+        : 0
+    if (promoFixed > 0) {
+      const snapshot = order.promoCommercialSnapshot as
+        | { promos?: Array<{ code?: string; discountType?: string }> }
+        | null
+        | undefined
+      const fixedPromoCode =
+        snapshot?.promos?.find((p) => p.discountType === 'FIXED')?.code ||
+        order.promoCode?.code ||
+        'PROMO'
+      const promoLine = buildFlexiPromoDiscountLine({
+        code: fixedPromoCode,
+        amount: promoFixed,
+      })
+      if (promoLine) {
+        const line: Record<string, unknown> = {
+          mnozMj: promoLine.mnozMj,
+          cenaMj: promoLine.cenaMj,
+          nazev: promoLine.nazev,
+        }
+        applyLineVat(line)
+        lines.push(line)
+      }
+    }
+
     if (lines.length === 0) {
       return { ok: false, message: 'Немає позицій із SKU для експорту в Flexi.' }
     }
@@ -1976,11 +2056,23 @@ export class FlexiService {
       packagingAmount:
         order.packagingAmount != null ? Number(order.packagingAmount) : null,
       codFeeAmount: order.codFeeAmount != null ? Number(order.codFeeAmount) : null,
+      promoFixedDiscountAmount: promoFixed > 0 ? promoFixed : null,
     })
     const parity = assertFlexiCommercialTotalParity({
       lines: lines.map((line) => ({
-        cenaMj: Number(line.cenaMj),
+        cenaMj:
+          line.cenaMj != null && Number.isFinite(Number(line.cenaMj))
+            ? Number(line.cenaMj)
+            : null,
         mnozMj: Number(line.mnozMj),
+        slevaPol:
+          line.slevaPol != null && Number.isFinite(Number(line.slevaPol))
+            ? Number(line.slevaPol)
+            : null,
+        sumCelkem:
+          line.sumCelkem != null && Number.isFinite(Number(line.sumCelkem))
+            ? Number(line.sumCelkem)
+            : null,
       })),
       expectedTotal: expectedFlexiTotal,
     })

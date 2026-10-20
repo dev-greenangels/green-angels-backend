@@ -10,3 +10,5 @@ prisma/migrations-archive
 coverage
 *.log
 .DS_Store
+# Local DB dumps / one-shot backups — never ship in Coolify image context
+backups/

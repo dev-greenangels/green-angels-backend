@@ -7,7 +7,7 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common'
-import { AuthProvider, CommunicationStatus, Prisma, Role } from '@prisma/client'
+import { AuthProvider, CommunicationStatus, Prisma, Role, SalesPriceScope } from '@prisma/client'
 import * as bcrypt from 'bcrypt'
 
 import { normalizeStoredPhoneE164 } from '../auth/auth.utils'
@@ -89,6 +89,23 @@ export type BackstageUserDetail = BackstageUserListItem & {
   groupIds: string[]
   marketingSource: string | null
   marketingUnsubscribedAt: string | null
+  /** Flexi adresar.kod — COMPANY Sales Prices (ContractorProfile). */
+  flexiFirmaKod: string | null
+  /** Flexi cenikova-skupina.kod override (ContractorProfile). */
+  flexiSkupCenKod: string | null
+  /** Market default GROUP code when contractor override is empty. */
+  salesPricesWholesalerGroupKod: string | null
+  /**
+   * Which Sales Prices scopes this wholesaler can resolve (per-SKU; not a fixed price).
+   * COMPANY / GROUP / ALL_FALLBACK.
+   */
+  salesPriceAccess: {
+    company: boolean
+    group: boolean
+    groupKod: string | null
+    groupFromMarketDefault: boolean
+    allFallback: boolean
+  }
 }
 
 const CUSTOMER_ROLES: Role[] = [Role.USER, Role.WHOLESALER, Role.GUEST]
@@ -344,6 +361,14 @@ export class UsersService {
 
     await this.prisma.user.update({ where: { id }, data })
 
+    if (dto.flexiFirmaKod !== undefined || dto.flexiSkupCenKod !== undefined) {
+      const effectiveRole = (dto.role ?? target.role) as Role
+      await this.upsertWholesalerFlexiMapping(id, effectiveRole, {
+        flexiFirmaKod: dto.flexiFirmaKod,
+        flexiSkupCenKod: dto.flexiSkupCenKod,
+      })
+    }
+
     if (dto.phone !== undefined && dto.phone && normalizedPhone) {
       await this.prisma.account.upsert({
         where: {
@@ -395,6 +420,103 @@ export class UsersService {
     return this.findOne(id)
   }
 
+  private async upsertWholesalerFlexiMapping(
+    userId: string,
+    effectiveRole: Role,
+    dto: { flexiFirmaKod?: string | null; flexiSkupCenKod?: string | null },
+  ): Promise<void> {
+    if (effectiveRole !== Role.WHOLESALER) {
+      throw new BadRequestException(
+        'Коди ABRA Flexi (GROUP/COMPANY) можна задавати лише для ролі гуртового покупця (WHOLESALER).',
+      )
+    }
+
+    const normalizeKod = (value: string | null | undefined): string | null | undefined => {
+      if (value === undefined) return undefined
+      if (value === null) return null
+      const trimmed = value.trim()
+      return trimmed ? trimmed : null
+    }
+
+    const firmaKod = normalizeKod(dto.flexiFirmaKod)
+    const skupKod = normalizeKod(dto.flexiSkupCenKod)
+
+    if (skupKod) {
+      const group = await this.prisma.flexiPriceGroup.findUnique({
+        where: { code: skupKod },
+        select: { id: true },
+      })
+      if (!group) {
+        throw new BadRequestException(
+          `Цінову групу ABRA «${skupKod}» не знайдено в синхронізованому довіднику. Спочатку синхронізуйте Sales Prices.`,
+        )
+      }
+    }
+
+    if (firmaKod) {
+      const knownFirma = await this.prisma.productSalesPrice.findFirst({
+        where: { scope: SalesPriceScope.COMPANY, flexiFirmaKod: firmaKod },
+        select: { id: true },
+      })
+      if (!knownFirma) {
+        // Soft dictionary from synced COMPANY rows — refuse unknown kod to prevent spoofing.
+        const anyCompany = await this.prisma.productSalesPrice.count({
+          where: { scope: SalesPriceScope.COMPANY },
+        })
+        if (anyCompany > 0) {
+          throw new BadRequestException(
+            `Код компанії ABRA «${firmaKod}» відсутній серед синхронізованих COMPANY-цін. Перевірте adresar.kod у Flexi.`,
+          )
+        }
+        // Dictionary empty: allow kod shape only (admin pre-sync setup).
+      }
+    }
+
+    const existing = await this.prisma.contractorProfile.findFirst({
+      where: { userId },
+      orderBy: { id: 'asc' },
+    })
+
+    const nextFirma =
+      firmaKod !== undefined ? firmaKod : (existing?.flexiFirmaKod ?? null)
+    const nextSkup =
+      skupKod !== undefined ? skupKod : (existing?.flexiSkupCenKod ?? null)
+
+    if (existing) {
+      await this.prisma.contractorProfile.update({
+        where: { id: existing.id },
+        data: {
+          flexiFirmaKod: nextFirma,
+          flexiSkupCenKod: nextSkup,
+        },
+      })
+      return
+    }
+
+    if (!nextFirma && !nextSkup) return
+
+    const displayName = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { firstName: true, lastName: true, email: true },
+    })
+    const name =
+      [displayName?.lastName, displayName?.firstName].filter(Boolean).join(' ').trim() ||
+      displayName?.email ||
+      userId
+
+    await this.prisma.contractorProfile.create({
+      data: {
+        userId,
+        externalId1C: `BACKSTAGE-${userId}`,
+        name,
+        discountRate: 0,
+        priceType: 'гуртовий',
+        flexiFirmaKod: nextFirma,
+        flexiSkupCenKod: nextSkup,
+      },
+    })
+  }
+
   async findOne(id: string): Promise<BackstageUserDetail> {
     const user = await this.prisma.user.findUnique({
       where: { id },
@@ -408,6 +530,10 @@ export class UsersService {
           },
         },
         customerGroups: { select: { groupId: true } },
+        contractorProfiles: {
+          select: { flexiFirmaKod: true, flexiSkupCenKod: true },
+          orderBy: { id: 'asc' },
+        },
         _count: { select: { orders: true } },
       },
     })
@@ -420,6 +546,18 @@ export class UsersService {
       userId: user.id,
       email: user.email,
     })
+    const market = await this.settings.getMarketSettings()
+    const marketGroup = market.salesPricesWholesalerGroupKod?.trim() || null
+
+    const contractorFirma =
+      user.contractorProfiles.map((p) => p.flexiFirmaKod?.trim()).find(Boolean) ?? null
+    const contractorGroup =
+      user.contractorProfiles.map((p) => p.flexiSkupCenKod?.trim()).find(Boolean) ?? null
+    const isWholesaler = user.role === Role.WHOLESALER
+    const effectiveGroup = isWholesaler ? contractorGroup || marketGroup : null
+    const groupFromMarketDefault = Boolean(
+      isWholesaler && !contractorGroup && marketGroup,
+    )
 
     const base = this.mapBackstageUserListItem({
       ...user,
@@ -436,6 +574,16 @@ export class UsersService {
       marketingSource: marketing.source,
       marketingUnsubscribedAt: marketing.unsubscribedAt,
       groupIds: user.customerGroups.map((row) => row.groupId),
+      flexiFirmaKod: isWholesaler ? contractorFirma : null,
+      flexiSkupCenKod: isWholesaler ? contractorGroup : null,
+      salesPricesWholesalerGroupKod: marketGroup,
+      salesPriceAccess: {
+        company: Boolean(isWholesaler && contractorFirma),
+        group: Boolean(isWholesaler && effectiveGroup),
+        groupKod: effectiveGroup,
+        groupFromMarketDefault,
+        allFallback: isWholesaler,
+      },
       orders: user.orders.map((order) => ({
         id: order.id,
         orderNumber: this.formatOrderNumber(order.orderNumber),

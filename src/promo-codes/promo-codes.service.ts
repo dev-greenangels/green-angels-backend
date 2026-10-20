@@ -1,8 +1,10 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import {
+  BuyerRegistrationScope,
   DiscountApplicationScope,
   DiscountValueType,
   Prisma,
+  PromoApplicationScope,
   PromoDiscountCombinationMode,
   PromoStackingMode,
 } from '@prisma/client'
@@ -10,6 +12,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service'
 import { VariantLabelService } from '../products/variant-label.service'
 import { VARIANT_LABEL_ATTRIBUTE_SELECT } from '../products/variant-label.util'
+import { assertBuyerRegistrationScopeDto } from '../pricing/buyer-registration'
+import {
+  DEFAULT_PROMO_ELIGIBLE_AUDIENCES,
+  DEFAULT_PROMO_ELIGIBLE_PRICE_SOURCES,
+} from '../pricing/promo-eligibility'
 import { UpsertPromoCodeDto } from './dto/upsert-promo-code.dto'
 
 const DEFAULT_LOCALE = 'uk'
@@ -53,6 +60,11 @@ export class PromoCodesService {
     if (dto.stackingMode === 'DENYLIST' && !dto.compatiblePromoCodeIds?.length) {
       throw new BadRequestException('Оберіть промокоди-виключення для сумісності.')
     }
+    if (hasDiscount && dto.discountType === DiscountValueType.FIXED_PRICE) {
+      throw new BadRequestException(
+        'FIXED_PRICE доступний лише для правил знижок (DiscountRule), не для промокодів.',
+      )
+    }
     if (hasDiscount && dto.discountType === DiscountValueType.PERCENT && dto.value != null && dto.value > 100) {
       throw new BadRequestException('Відсоток знижки не може перевищувати 100%.')
     }
@@ -65,6 +77,11 @@ export class PromoCodesService {
     if (dto.target === 'VARIANT' && !dto.targetIds?.length && !dto.targetId) {
       throw new BadRequestException('Оберіть хоча б один розмір.')
     }
+    assertBuyerRegistrationScopeDto({
+      buyerRegistrationScope: dto.buyerRegistrationScope,
+      allowedUserIds: dto.userIds,
+      eligibleAudiences: dto.eligibleAudiences,
+    })
   }
 
   private toResponse(promo: PromoRecord) {
@@ -85,6 +102,10 @@ export class PromoCodesService {
       excludeProductIds: promo.excludeProductIds,
       excludeVariantIds: promo.excludeVariantIds,
       excludeCategoryIds: promo.excludeCategoryIds,
+      eligibleAudiences: promo.eligibleAudiences,
+      buyerRegistrationScope: promo.buyerRegistrationScope,
+      eligiblePriceSources: promo.eligiblePriceSources,
+      applicationScope: promo.applicationScope,
       groupIds: promo.groups.map((row) => row.groupId),
       groups: promo.groups.map((row) => row.group),
       userIds: promo.allowedUsers.map((row) => row.userId),
@@ -301,6 +322,14 @@ export class PromoCodesService {
       excludeProductIds: dto.excludeProductIds ?? [],
       excludeVariantIds: dto.excludeVariantIds ?? [],
       excludeCategoryIds: dto.excludeCategoryIds ?? [],
+      eligibleAudiences: dto.eligibleAudiences?.length
+        ? [...new Set(dto.eligibleAudiences)]
+        : DEFAULT_PROMO_ELIGIBLE_AUDIENCES,
+      buyerRegistrationScope: dto.buyerRegistrationScope ?? BuyerRegistrationScope.ANY,
+      eligiblePriceSources: dto.eligiblePriceSources?.length
+        ? [...new Set(dto.eligiblePriceSources)]
+        : DEFAULT_PROMO_ELIGIBLE_PRICE_SOURCES,
+      applicationScope: dto.applicationScope ?? PromoApplicationScope.PRODUCTS,
       minCartSubtotal: dto.minCartSubtotal ?? null,
       giftVariantId: dto.giftVariantId?.trim() || null,
       giftQuantity: dto.giftQuantity ?? 1,

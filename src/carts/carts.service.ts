@@ -1062,6 +1062,9 @@ export class CartsService {
       return { byCartId }
     }
 
+    // Guest/admin cart product subtotals always use Product Card (retail).
+    // WHOLESALER personalized totals go through PricingService.quote, not this path.
+    const priceByVariant = new Map<string, number>()
     const prices = await this.prisma.productPrice.findMany({
       where: {
         productVariantId: { in: variantIds },
@@ -1070,9 +1073,7 @@ export class CartsService {
       },
       select: { productVariantId: true, value: true },
     })
-    const priceByVariant = new Map(
-      prices.map((row) => [row.productVariantId, Number(row.value)]),
-    )
+    for (const row of prices) priceByVariant.set(row.productVariantId, Number(row.value))
 
     for (const cart of carts) {
       const displayCurrency = (cart.currencyCode || deployDefault).toUpperCase()

@@ -7,7 +7,6 @@ export type FlexiDocumentSendMode = 'site' | 'abra' | 'both' | 'none'
 export type FlexiImportUpdateFields = {
   stock: boolean
   prices: boolean
-  quantityPrices: boolean
   weight: boolean
   cnCode: boolean
   sizeAttributes: boolean
@@ -26,7 +25,6 @@ export type FlexiImportUpdateFields = {
 export const DEFAULT_FLEXI_IMPORT_UPDATE_FIELDS: FlexiImportUpdateFields = {
   stock: true,
   prices: true,
-  quantityPrices: true,
   weight: true,
   cnCode: true,
   sizeAttributes: true,
@@ -341,7 +339,6 @@ export type FlexiCenikItem = {
   cnCode: string | null
   /** Net weight kg (hmotMj) */
   weight: number | null
-  quantityPrices: Array<{ minQuantity: number; percent: number }>
 }
 
 /** Shop locales accepted from Flexi multilingual JSON (cz→cs). */
@@ -449,6 +446,7 @@ export type FlexiJobPayload =
   | { type: 'process-intake'; flexiNextHint?: number }
   | { type: 'poll-changes' }
   | { type: 'sync-cenik-full' }
+  | { type: 'sync-sales-prices' }
   | { type: 'sync-strom'; createMissing?: boolean }
   | { type: 'export-order'; orderId: string }
   | { type: 'storno-order'; orderId: string }

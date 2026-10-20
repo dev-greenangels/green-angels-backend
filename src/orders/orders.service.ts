@@ -7,13 +7,13 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common'
-import { Prisma, VariantQuantityDiscountType } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 
 import { validatePhoneForPolicy } from '../auth/market-phone.util'
 import { computeCheckoutTotals } from '../pricing/checkout-totals'
 import { normalizePromoCodesInput } from '../pricing/pricing.promo'
 import { PricingService } from '../pricing/pricing.service'
-import { resolveProductCommercialLine } from '../pricing/product-commercial-lines'
+import { buildFlexiLineDiscountSnapshot } from '../pricing/flexi-line-discount-snapshot'
 import { convertEurToHuf, resolveCheckoutTax, assertDeliveryCountryAllowed, pickCartCnCode } from '../pricing/tax-regime'
 import { isIso31661Alpha2 } from '../common/iso-3166-1-alpha2'
 import { roundMoney } from '../pricing/pricing.helpers'
@@ -96,7 +96,6 @@ import {
   shouldReleaseLocalStockOnWebsiteDelete,
 } from './order-dashboard-metrics'
 
-const PREORDER_MAX_QTY = 99
 const DEFAULT_LOCALE = 'uk'
 /** REL-006: backstage order list defaults (never unbounded). */
 export const BACKSTAGE_ORDERS_DEFAULT_PAGE_SIZE = 50
@@ -123,6 +122,9 @@ export type BackstageOrderListItem = {
   customerEmail: string | null
   itemCount: number
   trackingNumber: string | null
+  /** ISO 3166-1 alpha-2 delivery country snapshot. */
+  deliveryCountryCode: string | null
+  paymentMethod: string
   createdAt: string
 }
 
@@ -733,6 +735,8 @@ export class OrdersService {
       customerPhone: string
       customerEmail: string | null
       trackingNumber?: string | null
+      deliveryCountryCode?: string | null
+      paymentMethod: string
       createdAt: Date
       items: Array<{ quantity: number }>
     },
@@ -753,6 +757,8 @@ export class OrdersService {
       customerEmail: order.customerEmail,
       itemCount: order.items.reduce((sum, item) => sum + item.quantity, 0),
       trackingNumber: order.trackingNumber ?? null,
+      deliveryCountryCode: order.deliveryCountryCode ?? null,
+      paymentMethod: order.paymentMethod,
       createdAt: order.createdAt.toISOString(),
     }
   }
@@ -2037,65 +2043,6 @@ export class OrdersService {
     return rows[0] ?? null
   }
 
-  private isQuantityPriceActive(
-    row: { validFrom: Date | null; validTo: Date | null },
-    now = new Date(),
-  ): boolean {
-    if (row.validFrom && now < row.validFrom) return false
-    if (row.validTo) {
-      const to = new Date(row.validTo)
-      to.setHours(23, 59, 59, 999)
-      if (now > to) return false
-    }
-    return true
-  }
-
-  private resolveDiscountUnitPrice(
-    basePrice: number,
-    discountType: VariantQuantityDiscountType,
-    value: number,
-  ): number {
-    if (discountType === VariantQuantityDiscountType.PERCENT) {
-      return Math.round(basePrice * (1 - value / 100) * 100) / 100
-    }
-    return value
-  }
-
-  private resolveUnitPrice(
-    basePrice: number,
-    quantity: number,
-    quantityPrices: Array<{
-      minQuantity: number
-      discountType: VariantQuantityDiscountType
-      value: Prisma.Decimal
-      validFrom: Date | null
-      validTo: Date | null
-    }>,
-  ): number {
-    const tiers = quantityPrices
-      .filter((row) => this.isQuantityPriceActive(row))
-      .sort((a, b) => b.minQuantity - a.minQuantity)
-
-    const tier = tiers.find((row) => quantity >= row.minQuantity)
-    if (!tier) return basePrice
-
-    const unitPrice = this.resolveDiscountUnitPrice(
-      basePrice,
-      tier.discountType,
-      Number(tier.value),
-    )
-    return unitPrice > 0 && unitPrice < basePrice ? unitPrice : basePrice
-  }
-
-  private getVariantMaxQuantity(variant: {
-    stock: number
-    availableFrom: Date | null
-  }): number {
-    if (variant.stock > 0) return variant.stock
-    if (variant.availableFrom) return PREORDER_MAX_QTY
-    return 0
-  }
-
   private validateDeliveryFields(dto: CreateOrderDto): void {
     const method = dto.deliveryMethod.trim()
 
@@ -2503,17 +2450,27 @@ export class OrdersService {
       productVariantId: string
       quantity: number
       priceAtPurchase: number
+      baseUnitPrice: number
+      appliedPercentSum: number | null
       commercialUnitPrice: number
       commercialLineAmount: number
+      commercialBaseUnitPrice: number | null
+      flexiSlevaPol: number | null
       stockToDecrement: number
+      isGift: boolean
     }> = quote.lines.map((line) => ({
       productVariantId: line.productVariantId,
       quantity: line.quantity,
       priceAtPurchase: line.unitPrice,
+      baseUnitPrice: line.baseUnitPrice,
+      appliedPercentSum: line.appliedPercentSum,
       // Filled after tax resolution (RC strip). Placeholder = catalog until then.
       commercialUnitPrice: line.unitPrice,
       commercialLineAmount: roundMoney(line.unitPrice * line.quantity),
+      commercialBaseUnitPrice: null,
+      flexiSlevaPol: null,
       stockToDecrement: line.stockToDecrement,
+      isGift: false,
     }))
 
     for (const gift of quote.giftLines) {
@@ -2521,9 +2478,14 @@ export class OrdersService {
         productVariantId: gift.productVariantId,
         quantity: gift.quantity,
         priceAtPurchase: 0,
+        baseUnitPrice: 0,
+        appliedPercentSum: null,
         commercialUnitPrice: 0,
         commercialLineAmount: 0,
+        commercialBaseUnitPrice: null,
+        flexiSlevaPol: null,
         stockToDecrement: 0,
+        isGift: true,
       })
     }
 
@@ -2578,15 +2540,26 @@ export class OrdersService {
     })
 
     for (const item of lineItems) {
-      const commercial = resolveProductCommercialLine({
-        catalogBasisUnit: item.priceAtPurchase,
+      if (item.isGift) {
+        item.commercialUnitPrice = 0
+        item.commercialLineAmount = 0
+        item.commercialBaseUnitPrice = null
+        item.flexiSlevaPol = null
+        continue
+      }
+      const snap = buildFlexiLineDiscountSnapshot({
+        baseUnitPrice: item.baseUnitPrice,
+        unitPrice: item.priceAtPurchase,
         quantity: item.quantity,
+        appliedPercentSum: item.appliedPercentSum,
         taxRegime: tax.taxRegime,
         taxIncluded: tax.taxIncluded,
         stripVatRatePercent: tax.stripVatRatePercent,
       })
-      item.commercialUnitPrice = commercial.commercialUnit
-      item.commercialLineAmount = commercial.lineAmount
+      item.commercialUnitPrice = snap.commercialUnitPrice
+      item.commercialLineAmount = snap.commercialLineAmount
+      item.commercialBaseUnitPrice = snap.commercialBaseUnitPrice
+      item.flexiSlevaPol = snap.flexiSlevaPol
     }
 
     if (
@@ -2634,6 +2607,8 @@ export class OrdersService {
         quantity: line.quantity,
       })),
       taxOverride: tax,
+      pendingShippingPromos: quote.pendingShippingPromos,
+      promoFixedProductDiscountAmount: quote.promoFixedProductDiscountAmount,
     })
 
     const profile =
@@ -2655,6 +2630,18 @@ export class OrdersService {
         productsSubtotal: convertEurToHuf(checkout.productsSubtotal, rate),
         discountAmount: convertEurToHuf(checkout.discountAmount, rate),
         deliveryAmount: convertEurToHuf(checkout.deliveryAmount, rate),
+        deliveryAmountBeforePromo:
+          checkout.deliveryAmountBeforePromo != null
+            ? convertEurToHuf(checkout.deliveryAmountBeforePromo, rate)
+            : undefined,
+        shippingPromoDiscountAmount:
+          checkout.shippingPromoDiscountAmount != null
+            ? convertEurToHuf(checkout.shippingPromoDiscountAmount, rate)
+            : undefined,
+        promoFixedDiscountAmount:
+          checkout.promoFixedDiscountAmount != null
+            ? convertEurToHuf(checkout.promoFixedDiscountAmount, rate)
+            : undefined,
         packagingAmount: convertEurToHuf(checkout.packagingAmount, rate),
         taxAmount: convertEurToHuf(checkout.taxAmount, rate),
         codFeeAmount: convertEurToHuf(checkout.codFeeAmount, rate),
@@ -2666,16 +2653,27 @@ export class OrdersService {
         grandTotal: 0,
       }
       checkout.grandTotal = roundMoney(
-        checkout.productsSubtotal +
-          (checkout.deliveryIncludedInTotal ? checkout.deliveryAmount : 0) +
-          checkout.packagingAmount +
-          (taxAdds ? checkout.taxAmount : 0) +
-          checkout.codFeeAmount,
+        Math.max(
+          0,
+          checkout.productsSubtotal +
+            (checkout.deliveryIncludedInTotal ? checkout.deliveryAmount : 0) +
+            checkout.packagingAmount +
+            (taxAdds ? checkout.taxAmount : 0) +
+            checkout.codFeeAmount -
+            (checkout.promoFixedDiscountAmount ?? 0),
+        ),
       )
       for (const item of lineItems) {
         item.priceAtPurchase = convertEurToHuf(item.priceAtPurchase, rate)
         item.commercialUnitPrice = convertEurToHuf(item.commercialUnitPrice, rate)
         item.commercialLineAmount = convertEurToHuf(item.commercialLineAmount, rate)
+        if (item.commercialBaseUnitPrice != null) {
+          item.commercialBaseUnitPrice = convertEurToHuf(
+            item.commercialBaseUnitPrice,
+            rate,
+          )
+        }
+        // flexiSlevaPol is percent — do not FX-convert.
       }
     } else if (profile?.currency === 'EUR') {
       currency = 'EUR'
@@ -2893,6 +2891,36 @@ export class OrdersService {
           totalAmount,
           productsSubtotal,
           deliveryAmount: checkout.deliveryAmount,
+          promoFixedDiscountAmount:
+            checkout.promoFixedDiscountAmount && checkout.promoFixedDiscountAmount > 0
+              ? checkout.promoFixedDiscountAmount
+              : null,
+          promoCommercialSnapshot: {
+            version: 1,
+            currency,
+            taxRatePercent: tax.taxRatePercent,
+            taxRegime: tax.taxRegime,
+            taxCountryCode: tax.taxCountryCode,
+            productsSubtotalBeforeFixed: quote.totalAmount,
+            deliveryAmountBeforePromo: checkout.deliveryAmountBeforePromo ?? checkout.deliveryAmount,
+            deliveryAmount: checkout.deliveryAmount,
+            packagingAmount: checkout.packagingAmount,
+            codFeeAmount: checkout.codFeeAmount,
+            abraNegativeLineAmount: checkout.promoFixedDiscountAmount ?? 0,
+            grandTotalBeforeReferral: checkout.grandTotal,
+            shippingPromoDiscountAmount: checkout.shippingPromoDiscountAmount ?? 0,
+            promos: (quote.appliedPromos ?? []).map((p) => ({
+              promoCodeId: p.promoCodeId ?? null,
+              code: p.code,
+              discountType: p.discountType ?? null,
+              applicationScope: p.applicationScope ?? null,
+              totalDiscountAmount: p.appliedDiscountAmount ?? null,
+              productDiscountAmount: p.productDiscountAmount ?? null,
+              shippingDiscountAmount: p.shippingDiscountAmount ?? null,
+              eligibleAudiences: [],
+              eligiblePriceSources: [],
+            })),
+          },
           packagingAmount: checkout.packagingAmount,
           ...orderPackagingCountSnapshot({
             packagingBoxCount: checkout.packagingBoxCount,
@@ -3013,6 +3041,8 @@ export class OrdersService {
                 priceAtPurchase: item.priceAtPurchase,
                 commercialUnitPrice: item.commercialUnitPrice,
                 commercialLineAmount: item.commercialLineAmount,
+                commercialBaseUnitPrice: item.commercialBaseUnitPrice,
+                flexiSlevaPol: item.flexiSlevaPol,
                 productName: snapshot.productName,
                 latinName: snapshot.latinName,
                 productSlug: snapshot.productSlug,

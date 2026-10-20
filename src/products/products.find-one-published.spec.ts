@@ -20,7 +20,8 @@ function createService(prisma: unknown) {
     variantLabels as never,
     commerce as never,
     {} as never,
-    {} as never,
+    {} as never, // PricingService
+    {} as never, // StockNotificationsService
   )
 }
 
@@ -67,7 +68,6 @@ function unpublishedDetailRow() {
         salesUnitId: null,
         salesUnit: null,
         prices: [{ value: new Prisma.Decimal(10), compareAtValue: null }],
-        quantityPrices: [],
         attributeValues: [],
       },
     ],

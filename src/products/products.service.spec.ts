@@ -25,6 +25,8 @@ function createService(prisma: unknown) {
     variantLabels as never,
     commerce as never,
     {} as never,
+    {} as never, // PricingService
+    {} as never, // StockNotificationsService
   )
 }
 
@@ -61,7 +63,6 @@ function listRow(slug: string) {
             compareAtValue: new Prisma.Decimal(299),
           },
         ],
-        quantityPrices: [],
         attributeValues: [],
       },
     ],

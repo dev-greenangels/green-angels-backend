@@ -127,6 +127,10 @@ export function unitPriceFromRule(
     const discounted = baseUnitPrice * (1 - value / 100)
     return roundMoney(discounted)
   }
+  if (type === DiscountValueType.FIXED_PRICE) {
+    return roundMoney(Math.max(0, value))
+  }
+  // FIXED — amount-off in currency units
   const discounted = baseUnitPrice - value
   return roundMoney(Math.max(0, discounted))
 }

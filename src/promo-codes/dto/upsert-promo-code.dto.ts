@@ -1,9 +1,21 @@
-import { DiscountApplicationScope, DiscountTarget, DiscountValueType, PromoDiscountCombinationMode, PromoStackingMode } from '@prisma/client'
+import {
+  BuyerRegistrationScope,
+  DiscountApplicationScope,
+  DiscountTarget,
+  DiscountValueType,
+  PromoApplicationScope,
+  PromoDiscountCombinationMode,
+  PromoEligibleAudience,
+  PromoEligiblePriceSource,
+  PromoStackingMode,
+} from '@prisma/client'
 import { Type } from 'class-transformer'
 import {
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsISO8601,
   IsInt,
   IsNumber,
@@ -54,7 +66,7 @@ export class UpsertPromoCodeDto {
   private readonly _benefitCheck?: unknown
 
   @IsOptional()
-  @IsEnum(DiscountValueType)
+  @IsIn([DiscountValueType.PERCENT, DiscountValueType.FIXED])
   discountType?: DiscountValueType
 
   @IsOptional()
@@ -117,6 +129,30 @@ export class UpsertPromoCodeDto {
   @IsArray()
   @IsUUID('4', { each: true })
   userIds?: string[]
+
+  /** At least one audience required when provided. Omit → legacy default (retail+wholesale). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(PromoEligibleAudience, { each: true })
+  eligibleAudiences?: PromoEligibleAudience[]
+
+  /** Auth gate. Omit → ANY (legacy). Orthogonal to eligibleAudiences. */
+  @IsOptional()
+  @IsEnum(BuyerRegistrationScope)
+  buyerRegistrationScope?: BuyerRegistrationScope
+
+  /** At least one price source required when provided. Omit → legacy default (ALL+GROUP+COMPANY). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(PromoEligiblePriceSource, { each: true })
+  eligiblePriceSources?: PromoEligiblePriceSource[]
+
+  /** PRODUCTS | PRODUCTS_AND_SHIPPING | SHIPPING_ONLY. Default PRODUCTS. */
+  @IsOptional()
+  @IsEnum(PromoApplicationScope)
+  applicationScope?: PromoApplicationScope
 
   @IsOptional()
   @Type(() => Number)

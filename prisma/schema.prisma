@@ -114,9 +114,16 @@ model ContractorProfile {
   name         String
   discountRate Int    @default(0)
   priceType    String @default("роздріб")
+  /// Flexi adresar.kod — only when verified; enables COMPANY Sales Prices
+  flexiFirmaKod   String?
+  /// Flexi cenikova-skupina.kod override for this contractor
+  flexiSkupCenKod String?
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([flexiFirmaKod])
+  @@index([flexiSkupCenKod])
 }
 
 // ==========================================
@@ -435,31 +442,61 @@ model ProductVariant {
   attributeValues ProductVariantAttributeValue[]
   prices          ProductPrice[]
   priceHistory    PriceHistory[]
-  quantityPrices  ProductVariantQuantityPrice[]
+  salesPrices     ProductSalesPrice[]
   cartItems       CartItem[]
   orderItems      OrderItem[]
 }
 
-enum VariantQuantityDiscountType {
-  FIXED_PRICE
-  PERCENT
+/// ABRA Flexi ceníková skupina (synced from /cenikova-skupina).
+model FlexiPriceGroup {
+  id           String    @id @default(uuid())
+  flexiId      String    @unique
+  code         String    @unique
+  name         String
+  lastSyncedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
-/// Оптова ціна / знижка від кількості для варіанту
-model ProductVariantQuantityPrice {
-  id           String                      @id @default(uuid())
-  minQuantity  Int
-  discountType VariantQuantityDiscountType @default(FIXED_PRICE)
-  /// FIXED_PRICE — ціна за од. (₴); PERCENT — знижка у %
-  value        Decimal                     @db.Decimal(10, 2)
-  validFrom    DateTime?
-  validTo      DateTime?
-  sortOrder    Int                         @default(0)
+enum SalesPriceScope {
+  ALL
+  GROUP
+  COMPANY
+}
 
+/// ABRA Flexi Sales Price row (/odberatel), linked by ProductVariant.id.
+model ProductSalesPrice {
+  id               String          @id @default(uuid())
   productVariantId String
-  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  flexiOdberatelId String          @unique
+  scope            SalesPriceScope
+  /// Flexi cenikova-skupina.kod when scope=GROUP
+  priceGroupCode   String?
+  /// Flexi adresar.kod when scope=COMPANY
+  flexiFirmaKod    String?
+  currency         String
+  unitPrice        Decimal         @db.Decimal(12, 4)
+  validFrom        DateTime?
+  validTo          DateTime?
+  limMnoz2         Int             @default(0)
+  unitPrice2       Decimal?        @db.Decimal(12, 4)
+  limMnoz3         Int             @default(0)
+  unitPrice3       Decimal?        @db.Decimal(12, 4)
+  limMnoz4         Int             @default(0)
+  unitPrice4       Decimal?        @db.Decimal(12, 4)
+  limMnoz5         Int             @default(0)
+  unitPrice5       Decimal?        @db.Decimal(12, 4)
+  flexiLastUpdate  DateTime?
+  syncedAt         DateTime        @default(now())
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
-  @@index([productVariantId])
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+
+  @@index([productVariantId, scope, currency])
+  @@index([priceGroupCode])
+  @@index([flexiFirmaKod])
+  @@index([scope, validFrom, validTo])
 }
 
 model ProductVariantAttributeValue {
@@ -585,6 +622,8 @@ enum DiscountTarget {
 enum DiscountValueType {
   PERCENT
   FIXED
+  /// Absolute final unit price (DiscountRule only; not used by PromoCode).
+  FIXED_PRICE
 }
 
 enum DiscountApplicationScope {
@@ -602,6 +641,34 @@ enum PromoStackingMode {
 enum PromoDiscountCombinationMode {
   STACK
   BEST_PRICE
+}
+
+/// Buyer audience for promo eligibility (independent of selected price source).
+enum PromoEligibleAudience {
+  RETAIL
+  WHOLESALER
+}
+
+/// Auth/registration gate (orthogonal to PromoEligibleAudience RETAIL/WHOLESALER).
+/// GUEST = no customer session userId; REGISTERED = Boolean(userId). Default ANY = legacy.
+enum BuyerRegistrationScope {
+  ANY
+  GUEST_ONLY
+  REGISTERED_ONLY
+}
+
+/// Base price source a promo may apply on top of (independent of buyer role).
+enum PromoEligiblePriceSource {
+  ALL
+  GROUP
+  COMPANY
+}
+
+/// Which commercial components a promo may discount (independent of PERCENT/FIXED).
+enum PromoApplicationScope {
+  PRODUCTS
+  PRODUCTS_AND_SHIPPING
+  SHIPPING_ONLY
 }
 
 /// How auto discount rules combine with retail / qty / contractor prices
@@ -639,8 +706,6 @@ model UserCustomerGroup {
 model DiscountRule {
   id                         String                      @id @default(uuid())
   name                       String
-  type                       DiscountValueType
-  value                      Decimal                     @db.Decimal(10, 2)
   target                     DiscountTarget
   targetId                   String?
   targetIds                  String[]                    @default([])
@@ -648,6 +713,12 @@ model DiscountRule {
   excludeVariantIds          String[]                    @default([])
   excludeCategoryIds         String[]                    @default([])
   onlyForRoles               Role[]
+  /// Empty = no audience gate from this field (legacy). New rules default to [RETAIL].
+  eligibleAudiences          PromoEligibleAudience[]     @default([])
+  /// Auth gate: ANY (default/legacy) | guests only | signed-in only. Independent of eligibleAudiences.
+  buyerRegistrationScope     BuyerRegistrationScope      @default(ANY)
+  /// Extra AND filters (attribute/characteristic groups). Null/empty = no filter gate.
+  filterCriteria             Json?
   combinesWithOtherDiscounts DiscountRuleCombinationMode @default(BEST_PRICE)
   minCartSubtotal            Decimal?                    @db.Decimal(10, 2)
   startDate                  DateTime?
@@ -656,8 +727,26 @@ model DiscountRule {
   createdAt                  DateTime                    @default(now())
   updatedAt                  DateTime                    @updatedAt
 
-  groups       DiscountRuleGroup[]
-  allowedUsers DiscountRuleUser[]
+  groups        DiscountRuleGroup[]
+  allowedUsers  DiscountRuleUser[]
+  /// Sole source of discount magnitude. At least one tier required (enforced in service).
+  quantityTiers DiscountRuleQuantityTier[]
+
+  @@index([isActive])
+}
+
+/// Quantity ladder on a DiscountRule (per ProductVariant qty at quote time). Sole discount source.
+model DiscountRuleQuantityTier {
+  id             String            @id @default(uuid())
+  minQuantity    Int
+  type           DiscountValueType
+  value          Decimal           @db.Decimal(10, 2)
+  sortOrder      Int               @default(0)
+  discountRuleId String
+  discountRule   DiscountRule      @relation(fields: [discountRuleId], references: [id], onDelete: Cascade)
+
+  @@unique([discountRuleId, minQuantity])
+  @@index([discountRuleId])
 }
 
 model DiscountRuleGroup {
@@ -696,6 +785,14 @@ model PromoCode {
   excludeProductIds          String[]                     @default([])
   excludeVariantIds          String[]                     @default([])
   excludeCategoryIds         String[]                     @default([])
+  /// Buyer audiences that may use this promo. Default = legacy open (retail + wholesale).
+  eligibleAudiences          PromoEligibleAudience[]      @default([RETAIL, WHOLESALER])
+  /// Auth gate: ANY (default/legacy) | guests only | signed-in only. Independent of eligibleAudiences.
+  buyerRegistrationScope     BuyerRegistrationScope       @default(ANY)
+  /// Price sources this promo may stack on. Default = legacy open (all sources).
+  eligiblePriceSources       PromoEligiblePriceSource[]   @default([ALL, GROUP, COMPANY])
+  /// PRODUCTS | PRODUCTS_AND_SHIPPING | SHIPPING_ONLY. Default PRODUCTS for new + legacy rows.
+  applicationScope           PromoApplicationScope        @default(PRODUCTS)
   minCartSubtotal            Decimal?                     @db.Decimal(10, 2)
   giftVariantId              String?
   giftQuantity               Int                          @default(1)
@@ -853,6 +950,10 @@ model Order {
   totalAmount                   Decimal              @db.Decimal(10, 2)
   productsSubtotal              Decimal?             @db.Decimal(10, 2)
   deliveryAmount                Decimal?             @db.Decimal(10, 2)
+  /// FIXED product-side discount kept for ABRA negative line (shipping FIXED already in deliveryAmount).
+  promoFixedDiscountAmount      Decimal?             @db.Decimal(10, 2)
+  /// Immutable commercial promo breakdown for Stripe/ABRA reconciliation (JSON).
+  promoCommercialSnapshot       Json?
   packagingAmount               Decimal?             @db.Decimal(10, 2)
   /// Snapshot: boxes used for packaging fee (packagingMode=boxes)
   packagingBoxCount             Int?
@@ -1258,10 +1359,14 @@ model OrderItem {
   stockDecremented     Int             @default(0)
   /// Catalog/quote-basis unit after tiers/discounts/promos (SK inc_vat = gross). Not RC-stripped.
   priceAtPurchase      Decimal         @db.Decimal(10, 2)
-  /// Payable commercial unit for Flexi cenaMj (RC = net; B2C = same as priceAtPurchase). Null = legacy.
+  /// Payable commercial unit for Flexi cenaMj when slevaPol absent (RC = net; B2C = same as priceAtPurchase). Null = legacy.
   commercialUnitPrice  Decimal?        @db.Decimal(16, 6)
   /// Payable commercial line total; Σ(new rows) === Order.productsSubtotal (pre-referral). Null = legacy.
   commercialLineAmount Decimal?        @db.Decimal(10, 2)
+  /// Commercial unit before site PERCENT discounts (same VAT treatment as commercialUnitPrice). Null = legacy / non-percent export.
+  commercialBaseUnitPrice Decimal?     @db.Decimal(16, 6)
+  /// Additive site PERCENT for Flexi slevaPol (0–100). Null = legacy or non-percent-safe line (export payable cenaMj only).
+  flexiSlevaPol           Decimal?     @db.Decimal(6, 2)
   productName          String
   /// Immutable botanical Latin snapshot from Product.latinName at order create (null on legacy rows).
   latinName            String?

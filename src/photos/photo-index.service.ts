@@ -4,6 +4,7 @@ import { createHash } from 'crypto'
 
 import { CategoriesService } from '../categories/categories.service'
 import { pickLocalizedLabel, pickLocalizedName } from '../i18n/pick-localized-name'
+import { PricingService } from '../pricing/pricing.service'
 import { PrismaService } from '../prisma/prisma.service'
 import type { EanCacheItem } from './dto/list-photos-by-barcode-body.dto'
 import {
@@ -76,6 +77,7 @@ export class PhotoIndexService {
     private readonly prisma: PrismaService,
     private readonly categories: CategoriesService,
     private readonly storage: PhotoStorageService,
+    private readonly pricing: PricingService,
   ) {}
 
   /** URL будується на льоту з relativePath — зміна домену/тунелю не ламає старі записи. */
@@ -362,13 +364,6 @@ export class PhotoIndexService {
         images: Array<{ url: string; isMain: boolean; sortOrder: number }>
       }
       prices: Array<{ value: Prisma.Decimal }>
-      quantityPrices: Array<{
-        minQuantity: number
-        discountType: string
-        value: Prisma.Decimal
-        validFrom: Date | null
-        validTo: Date | null
-      }>
       attributeValues: Array<{
         value: { translations: Array<{ locale: string; label: string }> }
       }>
@@ -394,13 +389,6 @@ export class PhotoIndexService {
         images: Array<{ url: string; isMain: boolean; sortOrder: number }>
       }
       prices: Array<{ value: Prisma.Decimal }>
-      quantityPrices: Array<{
-        minQuantity: number
-        discountType: string
-        value: Prisma.Decimal
-        validFrom: Date | null
-        validTo: Date | null
-      }>
       attributeValues: Array<{
         value: { translations: Array<{ locale: string; label: string }> }
       }>
@@ -434,13 +422,6 @@ export class PhotoIndexService {
         images: Array<{ url: string; isMain: boolean; sortOrder: number }>
       }
       prices: Array<{ value: Prisma.Decimal }>
-      quantityPrices: Array<{
-        minQuantity: number
-        discountType: string
-        value: Prisma.Decimal
-        validFrom: Date | null
-        validTo: Date | null
-      }>
       attributeValues: Array<{
         value: { translations: Array<{ locale: string; label: string }> }
       }>
@@ -471,13 +452,7 @@ export class PhotoIndexService {
                 .map((av) => this.pickAttributeLabel(av.value.translations, locale))
                 .filter(Boolean)
                 .join(' · ') || null,
-            quantityPrices: v.quantityPrices.map((row) => ({
-              minQuantity: row.minQuantity,
-              discountType: row.discountType,
-              value: Number(row.value),
-              validFrom: row.validFrom?.toISOString() ?? null,
-              validTo: row.validTo?.toISOString() ?? null,
-            })),
+            priceTiers: [] as Array<{ minQuantity: number; unitPrice: number }>,
           },
         ]),
     )
@@ -554,13 +529,6 @@ export class PhotoIndexService {
         stock: number | null
         availableFrom: string | null
         variantLabel: string | null
-        quantityPrices: Array<{
-          minQuantity: number
-          discountType: string
-          value: number
-          validFrom: string | null
-          validTo: string | null
-        }>
       }
     >
   }> {
@@ -638,16 +606,6 @@ export class PhotoIndexService {
                 },
               },
               prices: { select: { value: true }, take: 1 },
-              quantityPrices: {
-                select: {
-                  minQuantity: true,
-                  discountType: true,
-                  value: true,
-                  validFrom: true,
-                  validTo: true,
-                },
-                orderBy: [{ minQuantity: 'asc' }, { sortOrder: 'asc' }],
-              },
               attributeValues: {
                 select: {
                   value: {
@@ -663,12 +621,15 @@ export class PhotoIndexService {
 
     const byEan = this.enrichVariantsByEan(variants, locale)
     const bySku = this.enrichVariantsBySku(variants, locale)
+    const ladders = await this.pricing.resolvePublicRetailLadders(variants.map((v) => v.id))
 
     return {
       ...page,
       items: page.items.map((item) => {
         const match =
           item.identifierType === 'sku' ? bySku.get(item.identifier) : byEan.get(item.identifier)
+        const ladder = match?.variantId ? ladders.get(match.variantId) : undefined
+        const atOne = ladder?.find((t) => t.minQuantity === 1) ?? ladder?.[0]
         return {
           ...item,
           productId: match?.productId ?? item.appProperties.productId ?? null,
@@ -679,11 +640,14 @@ export class PhotoIndexService {
             (locale === 'uk' ? item.appProperties.plantName ?? null : null),
           productImageUrl: match?.productImageUrl ?? null,
           variantId: match?.variantId ?? null,
-          price: match?.price ?? null,
+          price: atOne?.unitPrice ?? match?.price ?? null,
           stock: match?.stock ?? null,
           availableFrom: match?.availableFrom ?? null,
           variantLabel: match?.variantLabel ?? item.appProperties.plantSize ?? null,
-          quantityPrices: match?.quantityPrices ?? [],
+          priceTiers: (ladder ?? []).map((t) => ({
+            minQuantity: t.minQuantity,
+            unitPrice: t.unitPrice,
+          })),
         }
       }),
     }

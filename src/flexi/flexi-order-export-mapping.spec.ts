@@ -8,7 +8,11 @@ import {
   assertFlexiCommercialTotalParity,
   buildFlexiAncillaryExportLines,
   buildFlexiCatalogProductLine,
+  buildFlexiCatalogProductLineTotalLed,
+  buildFlexiCatalogProductLineTotalLedRc,
+  flexiLinePayableTotal,
   flexiIsoDate,
+  sumFlexiPayloadCommercialTotal,
   mapPaymentMethodToFlexiCode,
   normalizeDeliveryMethodCodes,
   resolveBankovniUcetCode,
@@ -22,11 +26,16 @@ import {
   resolveFlexiTypCenyDphK,
   resolveFlexiVatCountryCode,
   resolveOrderFlexiRepresentedTotal,
+  shouldExportFlexiPercentTotalLed,
+  shouldExportFlexiPercentTotalLedRc,
   toFlexiKonSymRef,
   toFlexiRelationCode,
   resolveSalesConstantSymbol,
   DEFAULT_SALES_CONSTANT_SYMBOL,
 } from './flexi-order-export-mapping'
+import { buildFlexiLineDiscountSnapshot } from '../pricing/flexi-line-discount-snapshot'
+import { unitPriceFromBasePercent } from '../pricing/percent-stack'
+import { roundMoney } from '../pricing/pricing.helpers'
 
 const createdAt = new Date('2026-08-14T16:55:34.216Z')
 const preferredShipDate = new Date('2026-08-21T12:00:00.000Z')
@@ -464,6 +473,29 @@ describe('buildFlexiCatalogProductLine', () => {
       cenaMj: 14.35,
     })
     assert.equal('nazev' in line, false)
+    assert.equal('slevaPol' in line, false)
+  })
+
+  it('sends slevaPol only when percent > 0', () => {
+    const withDiscount = buildFlexiCatalogProductLine({
+      sku: 'SKU',
+      quantity: 2,
+      cenaMj: 100,
+      slevaPol: 15,
+    })
+    assert.deepEqual(withDiscount, {
+      cenik: 'code:SKU',
+      mnozMj: 2,
+      cenaMj: 100,
+      slevaPol: 15,
+    })
+    const wholesale = buildFlexiCatalogProductLine({
+      sku: 'SKU',
+      quantity: 2,
+      cenaMj: 70,
+      slevaPol: 0,
+    })
+    assert.equal('slevaPol' in wholesale, false)
   })
 
   /**
@@ -539,6 +571,341 @@ describe('resolveFlexiProductCenaMj / typCeny / commercial parity', () => {
     })
     assert.equal(parity.ok, true)
     assert.equal(parity.payloadTotal, 30)
+  })
+
+  it('parity with unit-priced slevaPol (RC/legacy path): base 100 ×2 @15% = 170', () => {
+    const line = buildFlexiCatalogProductLine({
+      sku: 'SKU',
+      quantity: 2,
+      cenaMj: 100,
+      slevaPol: 15,
+    })
+    assert.equal(flexiLinePayableTotal(line), 170)
+    assert.equal(sumFlexiPayloadCommercialTotal([line]), 170)
+    const parity = assertFlexiCommercialTotalParity({
+      lines: [line],
+      expectedTotal: 170,
+    })
+    assert.equal(parity.ok, true)
+  })
+
+  it('B2C total-led: 3.99×40 @10% → sumCelkem 143.60, no cenaMj', () => {
+    const payable = unitPriceFromBasePercent(3.99, 10)
+    assert.equal(payable, 3.59)
+    const snap = buildFlexiLineDiscountSnapshot({
+      baseUnitPrice: 3.99,
+      unitPrice: payable,
+      quantity: 40,
+      appliedPercentSum: 10,
+      taxRegime: 'seller',
+      taxIncluded: true,
+    })
+    assert.equal(snap.commercialLineAmount, 143.6)
+    assert.equal(snap.flexiSlevaPol, 10)
+    assert.equal(
+      shouldExportFlexiPercentTotalLed({
+        taxRegime: 'seller',
+        flexiSlevaPol: snap.flexiSlevaPol,
+        commercialBaseUnitPrice: snap.commercialBaseUnitPrice,
+        commercialLineAmount: snap.commercialLineAmount,
+      }),
+      true,
+    )
+    const line = buildFlexiCatalogProductLineTotalLed({
+      sku: 'PLANT666',
+      quantity: 40,
+      slevaPol: snap.flexiSlevaPol!,
+      sumCelkem: snap.commercialLineAmount,
+    })
+    assert.equal('cenaMj' in line, false)
+    assert.equal(line.slevaPol, 10)
+    assert.equal(line.sumCelkem, 143.6)
+    assert.equal(line['sumCelkem-previousValue'], '0')
+    assert.equal(flexiLinePayableTotal(line), 143.6)
+    const parity = assertFlexiCommercialTotalParity({
+      lines: [line],
+      expectedTotal: 143.6,
+    })
+    assert.equal(parity.ok, true)
+  })
+
+  it('B2C total-led: 3.99×10 @10% → 35.90; ×1 → 3.59', () => {
+    for (const [qty, expected] of [
+      [10, 35.9],
+      [1, 3.59],
+    ] as const) {
+      const snap = buildFlexiLineDiscountSnapshot({
+        baseUnitPrice: 3.99,
+        unitPrice: unitPriceFromBasePercent(3.99, 10),
+        quantity: qty,
+        appliedPercentSum: 10,
+        taxRegime: 'seller',
+        taxIncluded: true,
+      })
+      assert.equal(snap.commercialLineAmount, expected)
+      const line = buildFlexiCatalogProductLineTotalLed({
+        sku: 'SKU',
+        quantity: qty,
+        slevaPol: 10,
+        sumCelkem: snap.commercialLineAmount,
+      })
+      assert.equal(flexiLinePayableTotal(line), expected)
+      assert.equal(
+        assertFlexiCommercialTotalParity({ lines: [line], expectedTotal: expected }).ok,
+        true,
+      )
+    }
+  })
+
+  it('BEST_PRICE / STACK percent snapshots export total-led on seller regime', () => {
+    // BEST_PRICE winning 10%
+    const best = buildFlexiLineDiscountSnapshot({
+      baseUnitPrice: 3.99,
+      unitPrice: unitPriceFromBasePercent(3.99, 10),
+      quantity: 40,
+      appliedPercentSum: 10,
+      taxRegime: 'seller',
+      taxIncluded: true,
+    })
+    assert.equal(best.flexiSlevaPol, 10)
+    // STACK 10+5 = 15
+    const stack = buildFlexiLineDiscountSnapshot({
+      baseUnitPrice: 100,
+      unitPrice: unitPriceFromBasePercent(100, 15),
+      quantity: 2,
+      appliedPercentSum: 15,
+      taxRegime: 'seller',
+      taxIncluded: true,
+    })
+    assert.equal(stack.flexiSlevaPol, 15)
+    assert.equal(stack.commercialLineAmount, 170)
+    const line = buildFlexiCatalogProductLineTotalLed({
+      sku: 'SKU',
+      quantity: 2,
+      slevaPol: 15,
+      sumCelkem: 170,
+    })
+    assert.equal(flexiLinePayableTotal(line), 170)
+  })
+
+  it('wholesale base + PERCENT uses total-led when seller + snapshot present', () => {
+    const wholesaleBase = roundMoney(19.99 * 0.7)
+    const payable = unitPriceFromBasePercent(wholesaleBase, 10)
+    const snap = buildFlexiLineDiscountSnapshot({
+      baseUnitPrice: wholesaleBase,
+      unitPrice: payable,
+      quantity: 5,
+      appliedPercentSum: 10,
+      taxRegime: 'seller',
+      taxIncluded: true,
+    })
+    assert.ok(snap.flexiSlevaPol === 10)
+    assert.equal(
+      shouldExportFlexiPercentTotalLed({
+        taxRegime: 'seller',
+        flexiSlevaPol: snap.flexiSlevaPol,
+        commercialBaseUnitPrice: snap.commercialBaseUnitPrice,
+        commercialLineAmount: snap.commercialLineAmount,
+      }),
+      true,
+    )
+  })
+
+  it('FIXED / null percent: no total-led; unit cenaMj only', () => {
+    const snap = buildFlexiLineDiscountSnapshot({
+      baseUnitPrice: 100,
+      unitPrice: 75,
+      quantity: 2,
+      appliedPercentSum: null,
+      taxRegime: 'seller',
+      taxIncluded: true,
+    })
+    assert.equal(snap.flexiSlevaPol, null)
+    assert.equal(
+      shouldExportFlexiPercentTotalLed({
+        taxRegime: 'seller',
+        flexiSlevaPol: snap.flexiSlevaPol,
+        commercialBaseUnitPrice: snap.commercialBaseUnitPrice,
+        commercialLineAmount: snap.commercialLineAmount,
+      }),
+      false,
+    )
+    const line = buildFlexiCatalogProductLine({
+      sku: 'SKU',
+      quantity: 2,
+      cenaMj: snap.commercialUnitPrice,
+    })
+    assert.equal('slevaPol' in line, false)
+    assert.equal('sumCelkem' in line, false)
+    assert.equal(flexiLinePayableTotal(line), 150)
+  })
+
+  it('legacy without percent snapshot: no total-led', () => {
+    assert.equal(
+      shouldExportFlexiPercentTotalLed({
+        taxRegime: 'seller',
+        flexiSlevaPol: null,
+        commercialBaseUnitPrice: null,
+        commercialLineAmount: 143.6,
+      }),
+      false,
+    )
+  })
+
+  it('reverse charge: B2C helper false; RC total-led uses sumZkl (LIVE OBP0038)', () => {
+    assert.equal(
+      shouldExportFlexiPercentTotalLed({
+        taxRegime: 'reverse_charge',
+        flexiSlevaPol: 10,
+        commercialBaseUnitPrice: 3.99,
+        commercialLineAmount: 100,
+      }),
+      false,
+    )
+    assert.equal(
+      shouldExportFlexiPercentTotalLedRc({
+        taxRegime: 'reverse_charge',
+        flexiSlevaPol: 10,
+        commercialLineAmount: 116.75,
+      }),
+      true,
+    )
+    const payableGross = unitPriceFromBasePercent(3.99, 10)
+    const snap = buildFlexiLineDiscountSnapshot({
+      baseUnitPrice: 3.99,
+      unitPrice: payableGross,
+      quantity: 40,
+      appliedPercentSum: 10,
+      taxRegime: 'reverse_charge',
+      taxIncluded: true,
+      stripVatRatePercent: 23,
+    })
+    assert.equal(snap.flexiSlevaPol, 10)
+    assert.equal(snap.commercialLineAmount, 116.75)
+    const line = buildFlexiCatalogProductLineTotalLedRc({
+      sku: 'PLANT666',
+      quantity: 40,
+      slevaPol: snap.flexiSlevaPol!,
+      sumZkl: snap.commercialLineAmount,
+    })
+    assert.equal('cenaMj' in line, false)
+    assert.equal('sumCelkem' in line, false)
+    assert.equal(line.slevaPol, 10)
+    assert.equal(line.sumZkl, 116.75)
+    assert.equal(line['sumZkl-previousValue'], '0')
+    assert.equal(flexiLinePayableTotal(line), 116.75)
+    assert.equal(
+      assertFlexiCommercialTotalParity({
+        lines: [line],
+        expectedTotal: 116.75,
+      }).ok,
+      true,
+    )
+  })
+
+  it('RC total-led: qty 1/10/40 + BEST_PRICE/STACK snapshot keep slevaPol', () => {
+    for (const [qty, expectedNet] of [
+      [1, 2.92],
+      [10, 29.19],
+      [40, 116.75],
+    ] as const) {
+      const snap = buildFlexiLineDiscountSnapshot({
+        baseUnitPrice: 3.99,
+        unitPrice: unitPriceFromBasePercent(3.99, 10),
+        quantity: qty,
+        appliedPercentSum: 10,
+        taxRegime: 'reverse_charge',
+        taxIncluded: true,
+        stripVatRatePercent: 23,
+      })
+      assert.equal(snap.flexiSlevaPol, 10)
+      assert.equal(snap.commercialLineAmount, expectedNet)
+      assert.equal(
+        flexiLinePayableTotal(
+          buildFlexiCatalogProductLineTotalLedRc({
+            sku: 'SKU',
+            quantity: qty,
+            slevaPol: 10,
+            sumZkl: snap.commercialLineAmount,
+          }),
+        ),
+        expectedNet,
+      )
+    }
+    const stack = buildFlexiLineDiscountSnapshot({
+      baseUnitPrice: 100,
+      unitPrice: unitPriceFromBasePercent(100, 15),
+      quantity: 2,
+      appliedPercentSum: 15,
+      taxRegime: 'reverse_charge',
+      taxIncluded: true,
+      stripVatRatePercent: 23,
+    })
+    assert.equal(stack.flexiSlevaPol, 15)
+    const wholesale = buildFlexiLineDiscountSnapshot({
+      baseUnitPrice: roundMoney(19.99 * 0.7),
+      unitPrice: unitPriceFromBasePercent(roundMoney(19.99 * 0.7), 10),
+      quantity: 5,
+      appliedPercentSum: 10,
+      taxRegime: 'reverse_charge',
+      taxIncluded: true,
+      stripVatRatePercent: 23,
+    })
+    assert.equal(wholesale.flexiSlevaPol, 10)
+    assert.equal(
+      shouldExportFlexiPercentTotalLedRc({
+        taxRegime: 'seller',
+        flexiSlevaPol: 10,
+        commercialLineAmount: 100,
+      }),
+      false,
+    )
+  })
+
+  it('order VAT total parity: products total-led + shipping + COD', () => {
+    const product = buildFlexiCatalogProductLineTotalLed({
+      sku: 'PLANT666',
+      quantity: 40,
+      slevaPol: 10,
+      sumCelkem: 143.6,
+    })
+    const fees = buildFlexiAncillaryExportLines({
+      deliveryAmount: 26.73,
+      packagingAmount: 0,
+      packagingBoxCount: 0,
+      codFeeAmount: 1.23,
+      shippingCenikKod: 'SHIPPING',
+      boxesCenikKod: 'BOXES',
+    }).map((l) => ({ cenaMj: l.cenaMj, mnozMj: l.mnozMj }))
+    const expected = resolveOrderFlexiRepresentedTotal({
+      productsSubtotal: 143.6,
+      deliveryAmount: 26.73,
+      packagingAmount: 0,
+      codFeeAmount: 1.23,
+    })
+    assert.equal(expected, 171.56)
+    const parity = assertFlexiCommercialTotalParity({
+      lines: [product, ...fees],
+      expectedTotal: expected,
+    })
+    assert.equal(parity.ok, true)
+    assert.equal(parity.payloadTotal, 171.56)
+  })
+
+  it('re-export idempotent: same snapshot → same total-led payload', () => {
+    const a = buildFlexiCatalogProductLineTotalLed({
+      sku: 'PLANT666',
+      quantity: 40,
+      slevaPol: 10,
+      sumCelkem: 143.6,
+    })
+    const b = buildFlexiCatalogProductLineTotalLed({
+      sku: 'PLANT666',
+      quantity: 40,
+      slevaPol: 10,
+      sumCelkem: 143.6,
+    })
+    assert.deepEqual(a, b)
   })
 
   it('legacy B2C falls back to priceAtPurchase', () => {

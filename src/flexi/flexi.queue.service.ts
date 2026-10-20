@@ -192,6 +192,14 @@ export class FlexiQueueService implements OnModuleInit {
     )
   }
 
+  enqueueSyncSalesPrices() {
+    return this.queue.add(
+      FLEXI_JOB_NAMES.SYNC_SALES_PRICES,
+      { type: 'sync-sales-prices' },
+      { jobId: `flexi-sales-prices-${Date.now()}`, removeOnComplete: 10, removeOnFail: 20 },
+    )
+  }
+
   enqueueSyncStrom(createMissing = true) {
     return this.queue.add(
       FLEXI_JOB_NAMES.SYNC_STROM,

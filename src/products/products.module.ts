@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module'
 import { CategoriesModule } from '../categories/categories.module'
 import { CharacteristicsModule } from '../characteristics/characteristics.module'
 import { CommerceModule } from '../commerce/commerce.module'
+import { PricingModule } from '../pricing/pricing.module'
 import { PrismaModule } from '../prisma/prisma.module'
 import { SearchModule } from '../search/search.module'
 import { SettingsModule } from '../settings/settings.module'
@@ -26,6 +27,7 @@ import { ProductsService } from './products.service'
     VariantLabelModule,
     CommerceModule,
     SettingsModule,
+    PricingModule,
     forwardRef(() => StockNotificationsModule),
   ],
   controllers: [ProductsController, CatalogFiltersController],

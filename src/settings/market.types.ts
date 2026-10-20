@@ -29,6 +29,14 @@ export type PriceBasis = 'ex_vat' | 'inc_vat'
 /** Primary shelf/cart unit price mode for B2C storefront. */
 export type StorefrontPrimaryPrice = 'inc_vat' | 'ex_vat'
 
+/**
+ * WHOLESALER-only base price source for this deploy (retail/guest always Product Card).
+ * PRODUCT_CARD = ProductPrice + site qty tiers + contractor %.
+ * SALES_PRICES = ABRA Flexi /odberatel hierarchy (COMPANY → MIN(GROUP, ALL));
+ * missing sales row falls back to Product Card.
+ */
+export type PriceSource = 'PRODUCT_CARD' | 'SALES_PRICES'
+
 export type DeliveryReducedRate = {
   code: string
   percent: number
@@ -136,6 +144,18 @@ export type MarketSettings = {
   storefrontPrimaryPrice: StorefrontPrimaryPrice
   /** Smaller secondary “without VAT” under the primary shelf price. */
   storefrontShowExVatSecondary: boolean
+  /**
+   * WHOLESALER base price source. Default PRODUCT_CARD.
+   * Retail/guest ignore this and always use Product Card.
+   * Switching does not sync ABRA or mutate historical orders.
+   */
+  priceSource: PriceSource
+  /**
+   * Flexi cenikova-skupina.kod for Role.WHOLESALER when ContractorProfile.flexiSkupCenKod is empty.
+   * Empty/null = no role-based group (only ALL / explicit contractor group / company).
+   * Default WHOLESALE matches current ABRA data; not hardcoded in the pricing engine.
+   */
+  salesPricesWholesalerGroupKod: string | null
 }
 
 export const DEFAULT_AUTH_CONSENT_TEXT =
@@ -262,6 +282,8 @@ export const DEFAULT_MARKET_SETTINGS: MarketSettings = {
   priceBasis: 'inc_vat',
   storefrontPrimaryPrice: 'inc_vat',
   storefrontShowExVatSecondary: false,
+  priceSource: 'PRODUCT_CARD',
+  salesPricesWholesalerGroupKod: 'WHOLESALE',
 }
 
 const MARKET_REGIONS: MarketRegion[] = ['ua', 'sk']
@@ -272,7 +294,12 @@ const COUNTRY_SITE_CODES: CountrySiteCode[] = ['sk', 'hu', 'at']
 const COUNTRY_CURRENCIES: CountrySiteCurrency[] = ['EUR', 'HUF']
 const PRICE_BASES: PriceBasis[] = ['ex_vat', 'inc_vat']
 const STOREFRONT_PRIMARY_PRICES: StorefrontPrimaryPrice[] = ['inc_vat', 'ex_vat']
+const PRICE_SOURCES: PriceSource[] = ['PRODUCT_CARD', 'SALES_PRICES']
 const SITE_LOCALES: AppLocale[] = ['uk', 'en', 'sk', 'hu', 'de', 'cs']
+
+export function isPriceSource(value: unknown): value is PriceSource {
+  return typeof value === 'string' && PRICE_SOURCES.includes(value as PriceSource)
+}
 
 export function defaultPriceBasisForRegion(_region: MarketRegion): PriceBasis {
   // SK Flexi: Selling price including VAT → catalog stores gross.
@@ -688,5 +715,16 @@ export function normalizeMarketSettings(
       typeof raw?.storefrontShowExVatSecondary === 'boolean'
         ? raw.storefrontShowExVatSecondary
         : defaultStorefrontShowExVatSecondary(region),
+    priceSource: isPriceSource(raw?.priceSource)
+      ? raw.priceSource
+      : DEFAULT_MARKET_SETTINGS.priceSource,
+    salesPricesWholesalerGroupKod: (() => {
+      if (raw?.salesPricesWholesalerGroupKod === null) return null
+      if (typeof raw?.salesPricesWholesalerGroupKod === 'string') {
+        const trimmed = raw.salesPricesWholesalerGroupKod.trim()
+        return trimmed ? trimmed : null
+      }
+      return DEFAULT_MARKET_SETTINGS.salesPricesWholesalerGroupKod
+    })(),
   }
 }

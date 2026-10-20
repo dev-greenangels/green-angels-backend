@@ -6,14 +6,10 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common'
-import { Prisma, VariantAttributeType, VariantQuantityDiscountType } from '@prisma/client'
-
-import {
-  VariantQuantityDiscountTypeDto,
-  VariantQuantityPriceDto,
-} from './dto/variant-quantity-price.dto'
+import { DiscountTarget, Prisma, PromoEligibleAudience, VariantAttributeType } from '@prisma/client'
 
 import { PrismaService } from '../prisma/prisma.service'
+import { PricingService } from '../pricing/pricing.service'
 import { StockNotificationsService } from '../stock-notifications/stock-notifications.service'
 import { pickLocalizedName, pickLocalizedText, pickTranslationHint } from '../i18n/pick-localized-name'
 import { CommerceService } from '../commerce/commerce.service'
@@ -46,6 +42,12 @@ import {
   type ProductAvailabilityTouchResult,
 } from './product-availability.types'
 
+/** Server-resolved commercial ladder step (absolute unit price). */
+export type CatalogPriceTier = {
+  minQuantity: number
+  unitPrice: number
+}
+
 export type CatalogStorefrontVariant = {
   id: string
   sku: string | null
@@ -56,7 +58,8 @@ export type CatalogStorefrontVariant = {
   availableFrom: string | null
   salesUnitId: string | null
   salesUnitSymbol: string | null
-  quantityPrices: BackstageVariantQuantityPrice[]
+  /** Public retail commercial ladder (DiscountRule). Empty until SSR overlay. */
+  priceTiers: CatalogPriceTier[]
   displayAttributes: ProductDisplayCharacteristic[]
 }
 
@@ -100,15 +103,6 @@ export type PaginatedBackstageProducts = {
   totalPages: number
 }
 
-export type BackstageVariantQuantityPrice = {
-  id: string
-  minQuantity: number
-  discountType: VariantQuantityDiscountTypeDto
-  value: number
-  validFrom: string | null
-  validTo: string | null
-}
-
 export type BackstageProductVariant = {
   id: string
   sku: string | null
@@ -126,11 +120,12 @@ export type BackstageProductVariant = {
   widthCm: number | null
   heightCm: number | null
   volumetricWeightKg: number | null
-  quantityPrices: BackstageVariantQuantityPrice[]
+  /** Public retail commercial ladder when SSR overlay applied; empty for backstage edit. */
+  priceTiers?: CatalogPriceTier[]
   displayAttributes: ProductDisplayCharacteristic[]
 }
 
-export type BackstageProductDetail = BackstageProductListItem & {
+export type BackstageProductDetail = Omit<BackstageProductListItem, 'variants'> & {
   description: string | null
   searchSynonyms: string | null
   metaTitle: string | null
@@ -157,9 +152,86 @@ export class ProductsService {
     private readonly variantLabels: VariantLabelService,
     private readonly commerce: CommerceService,
     private readonly settings: SettingsService,
+    private readonly pricing: PricingService,
     @Inject(forwardRef(() => StockNotificationsService))
     private readonly stockNotifications: StockNotificationsService,
   ) {}
+
+  /**
+   * Overlay public retail commercial prices + quantity ladder (DiscountRule).
+   * Never leaks WHOLESALER / GROUP / COMPANY.
+   */
+  async applyPublicRetailListPrices(
+    result: BackstageProductListItem[] | PaginatedBackstageProducts,
+  ): Promise<BackstageProductListItem[] | PaginatedBackstageProducts> {
+    if (Array.isArray(result)) {
+      return this.withPublicRetailPrices(result)
+    }
+    return {
+      ...result,
+      items: await this.withPublicRetailPrices(result.items),
+    }
+  }
+
+  private async withPublicRetailPrices(
+    items: BackstageProductListItem[],
+  ): Promise<BackstageProductListItem[]> {
+    const variantIds = items.flatMap((item) => item.variants.map((v) => v.id))
+    if (!variantIds.length) return items
+    const ladders = await this.pricing.resolvePublicRetailLadders(variantIds)
+    if (!ladders.size) return items
+    return items.map((item) => {
+      const variants = item.variants.map((variant) => {
+        const ladder = ladders.get(variant.id)
+        if (!ladder?.length) return variant
+        const atOne = ladder.find((t) => t.minQuantity === 1) ?? ladder[0]
+        return {
+          ...variant,
+          price: atOne.unitPrice,
+          priceTiers: ladder.map((t) => ({
+            minQuantity: t.minQuantity,
+            unitPrice: t.unitPrice,
+          })),
+        }
+      })
+      let minPrice: number | null = null
+      for (const variant of variants) {
+        if (variant.price > 0 && (minPrice == null || variant.price < minPrice)) {
+          minPrice = variant.price
+        }
+      }
+      return { ...item, variants, price: minPrice ?? item.price }
+    })
+  }
+
+  private async withPublicRetailDetail(
+    detail: BackstageProductDetail,
+  ): Promise<BackstageProductDetail> {
+    const variantIds = detail.variants.map((v) => v.id)
+    if (!variantIds.length) return detail
+    const ladders = await this.pricing.resolvePublicRetailLadders(variantIds)
+    if (!ladders.size) return detail
+    const variants = detail.variants.map((variant) => {
+      const ladder = ladders.get(variant.id)
+      if (!ladder?.length) return variant
+      const atOne = ladder.find((t) => t.minQuantity === 1) ?? ladder[0]
+      return {
+        ...variant,
+        price: atOne.unitPrice,
+        priceTiers: ladder.map((t) => ({
+          minQuantity: t.minQuantity,
+          unitPrice: t.unitPrice,
+        })),
+      }
+    })
+    let minPrice: number | null = null
+    for (const variant of variants) {
+      if (variant.price > 0 && (minPrice == null || variant.price < minPrice)) {
+        minPrice = variant.price
+      }
+    }
+    return { ...detail, variants, price: minPrice ?? detail.price }
+  }
 
   private retailPriceFilter(currency: string) {
     return { priceType: RETAIL_PRICE_TYPE, currency }
@@ -280,58 +352,12 @@ export class ProductsService {
     return value.toISOString()
   }
 
-  private toDiscountTypeDto(
-    type: VariantQuantityDiscountType,
-  ): VariantQuantityDiscountTypeDto {
-    return type === VariantQuantityDiscountType.PERCENT ? 'percent' : 'fixed_price'
-  }
-
-  private fromDiscountTypeDto(
-    type: VariantQuantityDiscountTypeDto | undefined,
-  ): VariantQuantityDiscountType {
-    return type === 'percent'
-      ? VariantQuantityDiscountType.PERCENT
-      : VariantQuantityDiscountType.FIXED_PRICE
-  }
-
-  private resolveDiscountUnitPrice(
-    basePrice: number,
-    discountType: VariantQuantityDiscountTypeDto,
-    value: number,
-  ): number {
-    if (discountType === 'percent') {
-      return Math.round(basePrice * (1 - value / 100) * 100) / 100
-    }
-    return value
-  }
-
-  private isQuantityPriceActive(
-    row: { validFrom: Date | null; validTo: Date | null },
-    now = new Date(),
-  ) {
-    if (row.validFrom && now < row.validFrom) return false
-    if (row.validTo) {
-      const to = new Date(row.validTo)
-      to.setHours(23, 59, 59, 999)
-      if (now > to) return false
-    }
-    return true
-  }
-
   private computeMaxDiscountPercent(
     variants: Array<{
       stock: number
       prices: Array<{ value: Prisma.Decimal; compareAtValue: Prisma.Decimal | null }>
-      quantityPrices?: Array<{
-        minQuantity: number
-        discountType: VariantQuantityDiscountType
-        value: Prisma.Decimal
-        validFrom: Date | null
-        validTo: Date | null
-      }>
     }>,
   ): number | null {
-    const now = new Date()
     let maxPercent = 0
 
     for (const variant of variants) {
@@ -345,18 +371,6 @@ export class ProductsService {
         const compareAt = Number(priceRow.compareAtValue)
         if (compareAt > basePrice) {
           maxPercent = Math.max(maxPercent, Math.round((1 - basePrice / compareAt) * 100))
-        }
-      }
-
-      for (const row of variant.quantityPrices ?? []) {
-        if (!this.isQuantityPriceActive(row, now)) continue
-        const salePrice = this.resolveDiscountUnitPrice(
-          basePrice,
-          this.toDiscountTypeDto(row.discountType),
-          Number(row.value),
-        )
-        if (salePrice < basePrice - 0.001) {
-          maxPercent = Math.max(maxPercent, Math.round((1 - salePrice / basePrice) * 100))
         }
       }
     }
@@ -374,15 +388,6 @@ export class ProductsService {
       salesUnitId?: string | null
       salesUnit?: { symbol: string } | null
       prices: Array<{ value: Prisma.Decimal }>
-      quantityPrices?: Array<{
-        id: string
-        minQuantity: number
-        discountType: VariantQuantityDiscountType
-        value: Prisma.Decimal
-        validFrom: Date | null
-        validTo: Date | null
-        sortOrder: number
-      }>
       attributeValues: Array<{
         value: {
           slug?: string
@@ -415,16 +420,7 @@ export class ProductsService {
       availableFrom: this.toIsoDate(variant.availableFrom),
       salesUnitId: variant.salesUnitId ?? null,
       salesUnitSymbol: variant.salesUnit?.symbol ?? null,
-      quantityPrices: [...(variant.quantityPrices ?? [])]
-        .sort((a, b) => a.minQuantity - b.minQuantity || a.sortOrder - b.sortOrder)
-        .map((row) => ({
-          id: row.id,
-          minQuantity: row.minQuantity,
-          discountType: this.toDiscountTypeDto(row.discountType),
-          value: Number(row.value),
-          validFrom: this.toIsoDate(row.validFrom),
-          validTo: this.toIsoDate(row.validTo),
-        })),
+      priceTiers: [],
       displayAttributes: toVariantDisplayAttributes(variant.attributeValues, locale),
     }
   }
@@ -462,15 +458,6 @@ export class ProductsService {
           }
         }
       }>
-      quantityPrices: Array<{
-        id: string
-        minQuantity: number
-        discountType: VariantQuantityDiscountType
-        value: Prisma.Decimal
-        validFrom: Date | null
-        validTo: Date | null
-        sortOrder: number
-      }>
     },
     typeOrder: VariantAttributeType[],
     locale = 'uk',
@@ -493,16 +480,6 @@ export class ProductsService {
       widthCm: variant.widthCm ?? null,
       heightCm: variant.heightCm ?? null,
       volumetricWeightKg: variant.volumetricWeightKg ?? null,
-      quantityPrices: [...variant.quantityPrices]
-        .sort((a, b) => a.minQuantity - b.minQuantity || a.sortOrder - b.sortOrder)
-        .map((row) => ({
-          id: row.id,
-          minQuantity: row.minQuantity,
-          discountType: this.toDiscountTypeDto(row.discountType),
-          value: Number(row.value),
-          validFrom: this.toIsoDate(row.validFrom),
-          validTo: this.toIsoDate(row.validTo),
-        })),
       displayAttributes: toVariantDisplayAttributes(variant.attributeValues, locale),
     }
   }
@@ -546,15 +523,6 @@ export class ProductsService {
         salesUnitId?: string | null
         salesUnit?: { symbol: string } | null
         prices: Array<{ value: Prisma.Decimal; compareAtValue: Prisma.Decimal | null }>
-        quantityPrices?: Array<{
-          id: string
-          minQuantity: number
-          discountType: VariantQuantityDiscountType
-          value: Prisma.Decimal
-          validFrom: Date | null
-          validTo: Date | null
-          sortOrder: number
-        }>
         attributeValues: Array<{
           value: {
             translations: Array<{ label: string }>
@@ -655,7 +623,6 @@ export class ProductsService {
             where: this.retailPriceFilter(currency),
             take: 1,
           },
-          quantityPrices: { orderBy: [{ minQuantity: 'asc' as const }, { sortOrder: 'asc' as const }] },
           attributeValues: {
             include: {
               value: {
@@ -714,6 +681,7 @@ export class ProductsService {
       translations: { where: { locale }, select: { name: true } },
       variants: {
         select: {
+          id: true,
           stock: true,
           prices: {
             where: this.retailPriceFilter(currency),
@@ -867,20 +835,24 @@ export class ProductsService {
       )
     }
 
-    const aggregate = await this.prisma.productPrice.aggregate({
-      where: {
-        ...this.retailPriceFilter(currency),
-        productVariant: {
-          stock: { gt: 0 },
-          product: productWhere ?? { isPublished: true },
+    let minRaw = 0
+    let maxRaw = 0
+    {
+      // Public catalog price facets always use Product Card (retail shelf).
+      const aggregate = await this.prisma.productPrice.aggregate({
+        where: {
+          ...this.retailPriceFilter(currency),
+          productVariant: {
+            stock: { gt: 0 },
+            product: productWhere ?? { isPublished: true },
+          },
         },
-      },
-      _min: { value: true },
-      _max: { value: true },
-    })
-
-    const minRaw = aggregate._min.value != null ? Number(aggregate._min.value) : 0
-    const maxRaw = aggregate._max.value != null ? Number(aggregate._max.value) : 0
+        _min: { value: true },
+        _max: { value: true },
+      })
+      minRaw = aggregate._min.value != null ? Number(aggregate._min.value) : 0
+      maxRaw = aggregate._max.value != null ? Number(aggregate._max.value) : 0
+    }
 
     if (!Number.isFinite(minRaw) || !Number.isFinite(maxRaw) || maxRaw <= 0) {
       return { min: 0, max: 0 }
@@ -1427,40 +1399,6 @@ export class ProductsService {
     }
 
     for (const variant of variantDtos) {
-      const tiers = variant.quantityPrices ?? []
-      const minQuantities = new Set<number>()
-      for (const tier of tiers) {
-        if (minQuantities.has(tier.minQuantity)) {
-          throw new BadRequestException(
-            `Дубль порогу кількості ${tier.minQuantity} у знижках варіанту.`,
-          )
-        }
-        minQuantities.add(tier.minQuantity)
-        const discountType = tier.discountType ?? 'fixed_price'
-        if (discountType === 'percent') {
-          if (tier.value <= 0 || tier.value >= 100) {
-            throw new BadRequestException('Відсоток знижки має бути від 1 до 99.')
-          }
-        } else if (tier.value > variant.price) {
-          throw new BadRequestException(
-            'Ціна знижки не може бути вищою за базову ціну варіанту.',
-          )
-        }
-        const resolved = this.resolveDiscountUnitPrice(
-          variant.price,
-          discountType,
-          tier.value,
-        )
-        if (resolved <= 0 || resolved >= variant.price) {
-          throw new BadRequestException('Знижка має зменшувати ціну варіанту.')
-        }
-        const from = tier.validFrom ? this.parseDateInput(tier.validFrom) : null
-        const to = tier.validTo ? this.parseDateInput(tier.validTo) : null
-        if (from && to && from > to) {
-          throw new BadRequestException('Дата початку знижки не може бути пізніше дати закінчення.')
-        }
-      }
-
       if (variant.sku?.trim()) {
         const existing = await this.prisma.productVariant.findFirst({
           where: {
@@ -1508,31 +1446,6 @@ export class ProductsService {
     return { additionalCategoryIds, variantDtos }
   }
 
-  private async syncVariantQuantityPrices(
-    tx: Prisma.TransactionClient,
-    variantId: string,
-    quantityPrices: VariantQuantityPriceDto[] | undefined,
-  ) {
-    await tx.productVariantQuantityPrice.deleteMany({ where: { productVariantId: variantId } })
-
-    const rows = quantityPrices ?? []
-    if (!rows.length) return
-
-    for (const [index, row] of rows.entries()) {
-      await tx.productVariantQuantityPrice.create({
-        data: {
-          productVariantId: variantId,
-          minQuantity: row.minQuantity,
-          discountType: this.fromDiscountTypeDto(row.discountType),
-          value: row.value,
-          validFrom: row.validFrom ? this.parseDateInput(row.validFrom) : null,
-          validTo: row.validTo ? this.parseDateInput(row.validTo) : null,
-          sortOrder: index,
-        },
-      })
-    }
-  }
-
   private async syncVariants(
     tx: Prisma.TransactionClient,
     productId: string,
@@ -1568,7 +1481,6 @@ export class ProductsService {
         ? this.parseDateInput(variantDto.availableFrom)
         : null
 
-      let variantId = variantDto.id
       const salesUnitId = variantDto.salesUnitId ?? defaultSalesUnitId
       const dims = this.resolveVariantDims(variantDto)
 
@@ -1648,7 +1560,6 @@ export class ProductsService {
             },
           },
         })
-        variantId = created.id
         await tx.priceHistory.create({
           data: {
             productVariantId: created.id,
@@ -1657,10 +1568,6 @@ export class ProductsService {
             value: variantDto.price,
           },
         })
-      }
-
-      if (variantId) {
-        await this.syncVariantQuantityPrices(tx, variantId, variantDto.quantityPrices)
       }
     }
 
@@ -1802,24 +1709,66 @@ export class ProductsService {
     const listOptions = { merchant: Boolean(params.merchant) }
 
     if (normalizedSearch) {
-      if (this.hasCatalogFacetFilters(params)) {
+      let searchParams = { ...params, search: normalizedSearch, locale }
+      if (params.hasDiscount === 'true') {
+        const discountIds = await this.resolveDiscountCatalogProductIds({
+          discountMinQuantity: params.discountMinQuantity,
+          discountQuantityMode: params.discountQuantityMode,
+        })
+        if (discountIds !== null) {
+          const existing = params.ids
+            ?.split(',')
+            .map((v) => v.trim())
+            .filter(Boolean)
+          const allowed = existing?.length
+            ? discountIds.filter((id) => existing.includes(id))
+            : discountIds
+          if (!allowed.length) {
+            const usePagination = params.page != null || params.pageSize != null
+            if (usePagination) {
+              return {
+                items: [],
+                total: 0,
+                page: Math.max(1, params.page ?? 1),
+                pageSize: Math.min(200, Math.max(1, params.pageSize ?? 100)),
+                totalPages: 0,
+              }
+            }
+            return []
+          }
+          searchParams = { ...searchParams, ids: allowed.join(',') }
+        }
+      }
+      if (this.hasCatalogFacetFilters(searchParams)) {
         return this.findAllWithSearchAndFacetFilters({
-          ...params,
+          ...searchParams,
           search: normalizedSearch,
           locale,
         })
       }
-      return this.findAllWithSearch({ ...params, search: normalizedSearch, locale })
+      return this.findAllWithSearch({ ...searchParams, search: normalizedSearch, locale })
     }
 
     const categorySubtreeIds = params.categorySlug?.trim()
       ? await this.categories.findCategoryIdsInSubtreeBySlug(params.categorySlug)
       : undefined
-
+    const discountProductIds =
+      params.hasDiscount === 'true'
+        ? await this.resolveDiscountCatalogProductIds({
+            discountMinQuantity: params.discountMinQuantity,
+            discountQuantityMode: params.discountQuantityMode,
+          })
+        : undefined
+    // Public catalog price filters always use Product Card (not ALL Sales Prices).
     const where = this.buildListWhere(
       {
         ...params,
         categorySubtreeIds,
+        // null → ALL_PRODUCTS rule: skip id filter; [] → no matches
+        discountProductIds:
+          discountProductIds === null ? undefined : discountProductIds,
+        hasDiscount:
+          discountProductIds === null ? undefined : params.hasDiscount,
       },
       locale,
       currency,
@@ -2039,6 +1988,8 @@ export class ProductsService {
       hasDiscount?: string
       discountMinQuantity?: number
       discountQuantityMode?: string
+      /** When hasDiscount=true: product ids with active RETAIL DiscountRule; empty = none. */
+      discountProductIds?: string[]
       namePrefix?: string
     },
     locale: string,
@@ -2140,28 +2091,92 @@ export class ProductsService {
     }
 
     if (params.hasDiscount === 'true') {
-      const minQuantity =
-        params.discountMinQuantity && Number.isFinite(params.discountMinQuantity)
-          ? Math.max(1, Math.floor(params.discountMinQuantity))
-          : undefined
-      const quantityFilter =
-        minQuantity == null
-          ? {}
-          : params.discountQuantityMode === 'exact'
-            ? { minQuantity }
-            : { minQuantity: { gte: minQuantity } }
-      and.push({
-        variants: {
-          some: {
-            quantityPrices: {
-              some: quantityFilter,
-            },
-          },
-        },
-      })
+      if (params.discountProductIds !== undefined) {
+        and.push({ id: { in: params.discountProductIds } })
+      }
     }
 
     return and.length ? { AND: and } : undefined
+  }
+
+  /**
+   * Product ids with an active RETAIL DiscountRule (any target scope).
+   * Returns null when ALL_PRODUCTS rule matches (no id restriction needed).
+   */
+  private async resolveDiscountCatalogProductIds(input: {
+    discountMinQuantity?: number
+    discountQuantityMode?: string
+  }): Promise<string[] | null> {
+    const now = new Date()
+    const minQuantity =
+      input.discountMinQuantity != null && Number.isFinite(input.discountMinQuantity)
+        ? Math.max(1, Math.floor(input.discountMinQuantity))
+        : undefined
+    const tierFilter =
+      minQuantity == null
+        ? undefined
+        : input.discountQuantityMode === 'exact'
+          ? { some: { minQuantity } }
+          : { some: { minQuantity: { gte: minQuantity } } }
+
+    const rules = await this.prisma.discountRule.findMany({
+      where: {
+        isActive: true,
+        eligibleAudiences: { has: PromoEligibleAudience.RETAIL },
+        AND: [
+          { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+          { OR: [{ endDate: null }, { endDate: { gte: now } }] },
+          ...(tierFilter ? [{ quantityTiers: tierFilter }] : []),
+        ],
+      },
+      select: { target: true, targetId: true, targetIds: true },
+    })
+
+    const productIds = new Set<string>()
+    const variantIds: string[] = []
+    const categoryIds: string[] = []
+
+    for (const rule of rules) {
+      const ids = rule.targetIds.length
+        ? rule.targetIds
+        : rule.targetId
+          ? [rule.targetId]
+          : []
+      if (rule.target === DiscountTarget.ALL_PRODUCTS) {
+        return null
+      }
+      if (rule.target === DiscountTarget.PRODUCT) {
+        for (const id of ids) productIds.add(id)
+      } else if (rule.target === DiscountTarget.VARIANT) {
+        variantIds.push(...ids)
+      } else if (rule.target === DiscountTarget.CATEGORY) {
+        categoryIds.push(...ids)
+      }
+    }
+
+    if (variantIds.length) {
+      const variants = await this.prisma.productVariant.findMany({
+        where: { id: { in: [...new Set(variantIds)] } },
+        select: { productId: true },
+      })
+      for (const row of variants) productIds.add(row.productId)
+    }
+
+    if (categoryIds.length) {
+      const uniqueCats = [...new Set(categoryIds)]
+      const products = await this.prisma.product.findMany({
+        where: {
+          OR: [
+            { categoryId: { in: uniqueCats } },
+            { additionalCategories: { some: { categoryId: { in: uniqueCats } } } },
+          ],
+        },
+        select: { id: true },
+      })
+      for (const row of products) productIds.add(row.id)
+    }
+
+    return [...productIds]
   }
 
   async bulkAction(dto: BulkProductsDto) {
@@ -2411,7 +2426,8 @@ export class ProductsService {
       throw new NotFoundException('Товар не знайдено')
     }
 
-    return this.toDetail(product, loc, strictLocale)
+    const detail = await this.toDetail(product, loc, strictLocale)
+    return options?.publishedOnly ? this.withPublicRetailDetail(detail) : detail
   }
 
   async findBySlug(slug: string, locale?: string): Promise<BackstageProductDetail> {
@@ -2427,7 +2443,7 @@ export class ProductsService {
 
     if (!product) throw new NotFoundException('Товар не знайдено')
 
-    return this.toDetail(product, loc, false)
+    return this.withPublicRetailDetail(await this.toDetail(product, loc, false))
   }
 
   private async toDetail(
@@ -2495,15 +2511,6 @@ export class ProductsService {
             translations?: Array<{ name: string }>
           }
         }
-      }>
-      quantityPrices: Array<{
-        id: string
-        minQuantity: number
-        discountType: VariantQuantityDiscountType
-        value: Prisma.Decimal
-        validFrom: Date | null
-        validTo: Date | null
-        sortOrder: number
       }>
     }>
     additionalCategories: Array<{ categoryId: string }>

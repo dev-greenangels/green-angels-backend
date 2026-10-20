@@ -246,4 +246,15 @@ export class UpdateMarketSettingsDto {
   @IsOptional()
   @IsBoolean()
   storefrontShowExVatSecondary?: boolean
+
+  @IsOptional()
+  @IsIn(['PRODUCT_CARD', 'SALES_PRICES'])
+  priceSource?: 'PRODUCT_CARD' | 'SALES_PRICES'
+
+  /** null or "" clears role→group mapping for WHOLESALER. */
+  @IsOptional()
+  @ValidateIf((_, v) => v != null)
+  @IsString()
+  @MaxLength(64)
+  salesPricesWholesalerGroupKod?: string | null
 }

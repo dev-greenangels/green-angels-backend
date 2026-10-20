@@ -345,17 +345,6 @@ export class FlexiClient {
     const cnCode = this.parseCnCode(row)
     const weightRaw = this.num(row.hmotMj ?? row.hmotnost ?? row.hmotNetto ?? 0, NaN)
     const weight = Number.isFinite(weightRaw) && weightRaw > 0 ? weightRaw : null
-    const quantityPrices: FlexiCenikItem['quantityPrices'] = []
-    const odberatele = this.asArray<Record<string, unknown>>(
-      row.odberatele ?? row['cenik-odberatel'] ?? row.cenikOdberatel,
-    )
-    for (const o of odberatele) {
-      const minQuantity = Math.max(1, Math.floor(this.num(o.pocetMj ?? o.minPocet ?? o.mnozMj ?? 0)))
-      const percent = this.num(o.slevaProc ?? o.rabat ?? o.procento ?? 0)
-      if (minQuantity > 1 && percent > 0) {
-        quantityPrices.push({ minQuantity, percent })
-      }
-    }
     return {
       id: String(row.id ?? kod),
       kod,
@@ -364,7 +353,6 @@ export class FlexiClient {
       price,
       cnCode,
       weight,
-      quantityPrices,
     }
   }
 

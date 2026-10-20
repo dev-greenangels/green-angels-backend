@@ -8,6 +8,7 @@ import {
 } from '@prisma/client'
 
 import type { CategoryDescendantMap } from './category-scope.util'
+import { clampPercentSum, unitPriceFromBasePercent } from './percent-stack'
 import { matchesScope, roundMoney, type ScopeExclusions } from './pricing.helpers'
 
 export type LoadedPromo = PromoCode & {
@@ -97,7 +98,12 @@ export function promoCombinesWithOtherDiscounts(
 }
 
 export function sumQualifyingBaseSubtotal(
-  lines: Array<{ productVariantId: string; baseUnitPrice: number; quantity: number }>,
+  lines: Array<{
+    productVariantId: string
+    baseUnitPrice: number
+    quantity: number
+    basePriceSource?: string | null
+  }>,
   variants: Array<{
     id: string
     product: {
@@ -108,27 +114,87 @@ export function sumQualifyingBaseSubtotal(
   }>,
   promo: LoadedPromo,
   categoryExpansion?: CategoryDescendantMap,
+  lineEligible?: (line: {
+    productVariantId: string
+    basePriceSource?: string | null
+  }) => boolean,
 ): number {
   const variantById = new Map(variants.map((variant) => [variant.id, variant]))
   return roundMoney(
     lines.reduce((sum, line) => {
       const variant = variantById.get(line.productVariantId)
       if (!variant || !promoAppliesToVariant(promo, variant, categoryExpansion)) return sum
+      if (lineEligible && !lineEligible(line)) return sum
       return sum + line.baseUnitPrice * line.quantity
     }, 0),
   )
 }
 
+export type LinePromoUnitPriceResult = {
+  nextUnit: number
+  applied: boolean
+  /** Updated additive percent from base when exportable; null when tainted. */
+  appliedPercentSum: number | null
+}
+
+/**
+ * PERCENT promo on a quote line.
+ * - BEST_PRICE: compare final unit prices (current vs base×(1−p%)); take the lower.
+ * - STACK: add p% to prior additive percent and apply once on base (never compound).
+ */
 export function computeLinePromoUnitPrice(
   promo: LoadedPromo,
-  line: { baseUnitPrice: number; unitPrice: number },
+  line: {
+    baseUnitPrice: number
+    unitPrice: number
+    appliedPercentSum?: number | null
+  },
   percent: number,
-): { nextUnit: number; applied: boolean } {
-  const fromBase = applyLinePercentPromo(line.baseUnitPrice, percent)
-  const nextUnit = promoCombinesWithOtherDiscounts(promo)
-    ? applyLinePercentPromo(line.unitPrice, percent)
-    : Math.min(line.unitPrice, fromBase)
-  return { nextUnit, applied: nextUnit < line.unitPrice }
+): LinePromoUnitPriceResult {
+  const base = line.baseUnitPrice
+  const current = line.unitPrice
+  const priorPercent =
+    line.appliedPercentSum != null && Number.isFinite(line.appliedPercentSum)
+      ? clampPercentSum(line.appliedPercentSum)
+      : null
+
+  if (promoCombinesWithOtherDiscounts(promo)) {
+    // STACK — arithmetic sum on one base when prior state is percent-clean (or undiscounted).
+    const priorClean =
+      priorPercent != null || Math.abs(roundMoney(current) - roundMoney(base)) <= 0.005
+    if (priorClean) {
+      const nextPercent = clampPercentSum((priorPercent ?? 0) + percent)
+      const nextUnit = unitPriceFromBasePercent(base, nextPercent)
+      return {
+        nextUnit,
+        applied: nextUnit < current - 0.000_001 || nextPercent > (priorPercent ?? 0),
+        appliedPercentSum: nextPercent > 0 ? nextPercent : 0,
+      }
+    }
+    // Prior FIXED/FIXED_PRICE/contractor — do not invent additive %; keep payable-safe min.
+    const fromBase = unitPriceFromBasePercent(base, percent)
+    const nextUnit = Math.min(current, fromBase)
+    return {
+      nextUnit,
+      applied: nextUnit < current - 0.000_001,
+      appliedPercentSum: null,
+    }
+  }
+
+  // BEST_PRICE — compete on real final unit prices.
+  const fromBase = unitPriceFromBasePercent(base, percent)
+  if (fromBase < current - 0.000_001) {
+    return {
+      nextUnit: fromBase,
+      applied: true,
+      appliedPercentSum: clampPercentSum(percent),
+    }
+  }
+  return {
+    nextUnit: current,
+    applied: false,
+    appliedPercentSum: priorPercent,
+  }
 }
 
 export type CartPromoDiscountResult = {
@@ -148,8 +214,9 @@ export function computeCartPromoDiscount(
   if (promo.discountType === DiscountValueType.FIXED) {
     requested = promoValue
   } else if (promo.discountType === DiscountValueType.PERCENT) {
-    const basis = combines ? qualifyingSubtotal : qualifyingBaseSubtotal
-    requested = applyCartPercentDiscount(basis, promoValue)
+    // PERCENT always from base subtotal (STACK adds on the same base; never compound).
+    void combines
+    requested = applyCartPercentDiscount(qualifyingBaseSubtotal, promoValue)
   }
 
   const actualDiscount = roundMoney(Math.min(requested, qualifyingSubtotal))
@@ -202,7 +269,11 @@ export function isPromoSkippedNoAdditionalDiscount(
 }
 
 export function sumQualifyingLineTotals(
-  lines: Array<{ productVariantId: string; lineTotal: number }>,
+  lines: Array<{
+    productVariantId: string
+    lineTotal: number
+    basePriceSource?: string | null
+  }>,
   variants: Array<{
     id: string
     product: {
@@ -213,12 +284,17 @@ export function sumQualifyingLineTotals(
   }>,
   promo: LoadedPromo,
   categoryExpansion?: CategoryDescendantMap,
+  lineEligible?: (line: {
+    productVariantId: string
+    basePriceSource?: string | null
+  }) => boolean,
 ): number {
   const variantById = new Map(variants.map((variant) => [variant.id, variant]))
   return roundMoney(
     lines.reduce((sum, line) => {
       const variant = variantById.get(line.productVariantId)
       if (!variant || !promoAppliesToVariant(promo, variant, categoryExpansion)) return sum
+      if (lineEligible && !lineEligible(line)) return sum
       return sum + line.lineTotal
     }, 0),
   )

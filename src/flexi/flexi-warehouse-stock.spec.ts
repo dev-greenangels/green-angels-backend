@@ -13,7 +13,6 @@ function item(kod: string, stock: number): FlexiCenikItem {
     price: 1,
     cnCode: null,
     weight: null,
-    quantityPrices: [],
   }
 }
 

@@ -29,7 +29,7 @@ export class ProductsController {
 
   @Get()
   @UseGuards(OptionalBackstageJwtAuthGuard)
-  findAll(
+  async findAll(
     @Req() req: Request & { user?: SessionJwtPayload },
     @Query('locale') locale?: string,
     @Query('search') search?: string,
@@ -56,7 +56,7 @@ export class ProductsController {
     @Query('merchant') merchant?: string,
   ) {
     const isBackstage = isBackstageStaffRequest(req.user)
-    return this.products.findAll({
+    const result = await this.products.findAll({
       locale,
       search,
       categoryId,
@@ -87,6 +87,11 @@ export class ProductsController {
       discountQuantityMode,
       merchant: merchant === '1' || merchant === 'true',
     })
+    // Public/merchant catalog: retail commercial price (DiscountRule @ qty=1). Backstage keeps Product Card.
+    if (!isBackstage) {
+      return this.products.applyPublicRetailListPrices(result)
+    }
+    return result
   }
 
   @Patch('bulk')
@@ -124,7 +129,7 @@ export class ProductsController {
   }
 
   @Get('by-slug/:slug')
-  findBySlug(@Param('slug') slug: string, @Query('locale') locale?: string) {
+  async findBySlug(@Param('slug') slug: string, @Query('locale') locale?: string) {
     return this.products.findBySlug(slug, locale)
   }
 

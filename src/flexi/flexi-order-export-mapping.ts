@@ -3,7 +3,10 @@ import {
   resolvePackagingCommercialLines,
   type PackagingCommercialLine,
 } from '../pricing/packaging-commercial-lines'
+import { flexiLinePayableTotal } from '../pricing/flexi-line-payable'
 import { roundMoney } from '../pricing/pricing.helpers'
+
+export { flexiLinePayableTotal } from '../pricing/flexi-line-payable'
 
 export const PAYMENT_METHOD_TO_FLEXI_CODE: Record<string, string> = {
   'card-online': 'KARTA',
@@ -483,25 +486,134 @@ export type FlexiAncillaryExportLine = {
 }
 
 /**
- * Catalog product line for objednávka-přijatá.
+ * Catalog product line for objednávka-přijatá (unit-priced).
  * References Ceník by SKU code only — do NOT send `nazev`.
  * ABRA fills the line name from the Ceník item (Latin botanical name is SoT in ABRA).
- * Variant identity is the SKU/Ceník kod itself (each size has its own kod).
  *
- * `cenaMj` MUST be the payable commercial unit (OrderItem.commercialUnitPrice),
- * never a live ProductPrice / ceník recalculation.
+ * Used when there is no percent Item Discount, or Reverse Charge (no T1 total-led).
+ * When `slevaPol` > 0: `cenaMj` is commercial base before PERCENT (RC / legacy path).
  */
 export function buildFlexiCatalogProductLine(item: {
   sku: string
   quantity: number
-  /** Payable commercial unit → Flexi cenaMj. */
+  /** Payable or base commercial unit → Flexi cenaMj. */
   cenaMj: number
-}): { cenik: string; mnozMj: number; cenaMj: number } {
-  return {
+  /** Item Discount % (slevaPol). Omit / 0 → not sent. */
+  slevaPol?: number | null
+}): { cenik: string; mnozMj: number; cenaMj: number; slevaPol?: number } {
+  const line: { cenik: string; mnozMj: number; cenaMj: number; slevaPol?: number } = {
     cenik: `code:${item.sku.trim()}`,
     mnozMj: item.quantity,
     cenaMj: item.cenaMj,
   }
+  const percent =
+    item.slevaPol != null && Number.isFinite(Number(item.slevaPol))
+      ? Number(item.slevaPol)
+      : null
+  if (percent != null && percent > 0) {
+    line.slevaPol = roundMoney(percent)
+  }
+  return line
+}
+
+/**
+ * B2C (`typCeny.sDph`) percent line — LIVE-proven T1 (OBP0035/2026, OBP0036/2026):
+ * `mnozMj` + `slevaPol` + `sumCelkem` + `sumCelkem-previousValue`, **no** `cenaMj`.
+ * ABRA derives unit price; site `commercialLineAmount` is SoT for Total.
+ */
+export function buildFlexiCatalogProductLineTotalLed(item: {
+  sku: string
+  quantity: number
+  slevaPol: number
+  sumCelkem: number
+}): {
+  cenik: string
+  mnozMj: number
+  slevaPol: number
+  sumCelkem: number
+  'sumCelkem-previousValue': string
+} {
+  return {
+    cenik: `code:${item.sku.trim()}`,
+    mnozMj: item.quantity,
+    slevaPol: roundMoney(item.slevaPol),
+    sumCelkem: roundMoney(item.sumCelkem),
+    'sumCelkem-previousValue': '0',
+  }
+}
+
+/**
+ * Reverse charge (`typCeny.bezDph`) percent line — LIVE-proven T3 (OBP0038/2026):
+ * `mnozMj` + `slevaPol` + `sumZkl` + `sumZkl-previousValue`, **no** `cenaMj`.
+ * ABRA derives unit price; site `commercialLineAmount` (net) is SoT for sumZkl.
+ */
+export function buildFlexiCatalogProductLineTotalLedRc(item: {
+  sku: string
+  quantity: number
+  slevaPol: number
+  sumZkl: number
+}): {
+  cenik: string
+  mnozMj: number
+  slevaPol: number
+  sumZkl: number
+  'sumZkl-previousValue': string
+} {
+  return {
+    cenik: `code:${item.sku.trim()}`,
+    mnozMj: item.quantity,
+    slevaPol: roundMoney(item.slevaPol),
+    sumZkl: roundMoney(item.sumZkl),
+    'sumZkl-previousValue': '0',
+  }
+}
+
+/**
+ * True when export should use B2C T1 total-led percent payload (`sumCelkem`).
+ * Reverse charge uses {@link shouldExportFlexiPercentTotalLedRc} instead.
+ */
+export function shouldExportFlexiPercentTotalLed(input: {
+  taxRegime?: string | null
+  flexiSlevaPol?: number | null
+  commercialBaseUnitPrice?: number | null
+  commercialLineAmount?: number | null
+}): boolean {
+  if ((input.taxRegime ?? '').trim() === 'reverse_charge') return false
+  const percent =
+    input.flexiSlevaPol != null && Number.isFinite(Number(input.flexiSlevaPol))
+      ? Number(input.flexiSlevaPol)
+      : null
+  const base =
+    input.commercialBaseUnitPrice != null &&
+    Number.isFinite(Number(input.commercialBaseUnitPrice))
+      ? Number(input.commercialBaseUnitPrice)
+      : null
+  const sum =
+    input.commercialLineAmount != null && Number.isFinite(Number(input.commercialLineAmount))
+      ? Number(input.commercialLineAmount)
+      : null
+  return percent != null && percent > 0 && base != null && sum != null && sum >= 0
+}
+
+/**
+ * True when export should use RC total-led percent payload (`sumZkl`).
+ * Requires percent snapshot + commercial line amount (net SoT).
+ */
+export function shouldExportFlexiPercentTotalLedRc(input: {
+  taxRegime?: string | null
+  flexiSlevaPol?: number | null
+  commercialLineAmount?: number | null
+}): boolean {
+  if ((input.taxRegime ?? '').trim() !== 'reverse_charge') return false
+  const percent =
+    input.flexiSlevaPol != null && Number.isFinite(Number(input.flexiSlevaPol))
+      ? Number(input.flexiSlevaPol)
+      : null
+  const sum =
+    input.commercialLineAmount != null && Number.isFinite(Number(input.commercialLineAmount))
+      ? Number(input.commercialLineAmount)
+      : null
+  return percent != null && percent > 0 && sum != null && sum >= 0
 }
 
 export type FlexiProductCenaMjSource = 'commercial' | 'priceAtPurchase_legacy'
@@ -557,16 +669,20 @@ export function resolveFlexiTypCenyDphK(taxRegime?: string | null): string {
 }
 
 /**
- * Pre-export parity: Σ (cenaMj × mnozMj) over Flexi lines must equal the Order
- * commercial components Flexi represents (products + delivery + packaging + COD),
+ * Pre-export parity: Σ payable Flexi lines must equal the Order commercial
+ * components Flexi represents (products + delivery + packaging + COD),
  * not loyalty reductions that have no Flexi line.
+ * Total-led lines contribute `sumCelkem` exactly.
  */
 export function sumFlexiPayloadCommercialTotal(
-  lines: Array<{ cenaMj: number; mnozMj: number }>,
+  lines: Array<{
+    cenaMj?: number | null
+    mnozMj: number
+    slevaPol?: number | null
+    sumCelkem?: number | null
+  }>,
 ): number {
-  return roundMoney(
-    lines.reduce((sum, line) => sum + Number(line.cenaMj) * Number(line.mnozMj), 0),
-  )
+  return roundMoney(lines.reduce((sum, line) => sum + flexiLinePayableTotal(line), 0))
 }
 
 export function resolveOrderFlexiRepresentedTotal(input: {
@@ -574,6 +690,8 @@ export function resolveOrderFlexiRepresentedTotal(input: {
   deliveryAmount: number | null | undefined
   packagingAmount: number | null | undefined
   codFeeAmount: number | null | undefined
+  /** FIXED product discount exported as a negative Flexi line. */
+  promoFixedDiscountAmount?: number | null | undefined
 }): number {
   const products =
     input.productsSubtotal != null && Number.isFinite(Number(input.productsSubtotal))
@@ -591,7 +709,27 @@ export function resolveOrderFlexiRepresentedTotal(input: {
     input.codFeeAmount != null && Number.isFinite(Number(input.codFeeAmount))
       ? Math.max(0, Number(input.codFeeAmount))
       : 0
-  return roundMoney(products + delivery + packaging + cod)
+  const promoFixed =
+    input.promoFixedDiscountAmount != null &&
+    Number.isFinite(Number(input.promoFixedDiscountAmount))
+      ? Math.max(0, Number(input.promoFixedDiscountAmount))
+      : 0
+  return roundMoney(Math.max(0, products + delivery + packaging + cod - promoFixed))
+}
+
+/** Negative commercial line for FIXED promo (same typCenyDphK/szbDph as document). */
+export function buildFlexiPromoDiscountLine(input: {
+  code: string
+  amount: number
+}): { mnozMj: number; cenaMj: number; nazev: string } | null {
+  const amount = roundMoney(Math.abs(Number(input.amount)))
+  if (!(amount > 0)) return null
+  const code = (input.code || 'PROMO').trim().toUpperCase() || 'PROMO'
+  return {
+    mnozMj: 1,
+    cenaMj: roundMoney(-amount),
+    nazev: `Promo ${code}`,
+  }
 }
 
 export type FlexiCommercialParityResult =
@@ -607,9 +745,28 @@ export type FlexiCommercialParityResult =
 export const FLEXI_COMMERCIAL_TOTAL_TOLERANCE = 0.005
 
 export function assertFlexiCommercialTotalParity(input: {
-  lines: Array<{ cenaMj: number; mnozMj: number }>
+  lines: Array<{
+    cenaMj?: number | null
+    mnozMj: number
+    slevaPol?: number | null
+    sumCelkem?: number | null
+  }>
   expectedTotal: number
 }): FlexiCommercialParityResult {
+  // Total-led rows: sumCelkem must equal site commercial line (exact money).
+  for (const line of input.lines) {
+    if (line.sumCelkem == null || !Number.isFinite(Number(line.sumCelkem))) continue
+    // Presence of sumCelkem implies total-led export; reject NaN qty noise only.
+    if (!(Number(line.mnozMj) > 0)) {
+      return {
+        ok: false,
+        payloadTotal: sumFlexiPayloadCommercialTotal(input.lines),
+        expectedTotal: roundMoney(input.expectedTotal),
+        message:
+          'Flexi total-led line has invalid mnozMj. Експорт зупинено.',
+      }
+    }
+  }
   const payloadTotal = sumFlexiPayloadCommercialTotal(input.lines)
   const expectedTotal = roundMoney(input.expectedTotal)
   const delta = Math.abs(payloadTotal - expectedTotal)

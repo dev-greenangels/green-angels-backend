@@ -9,7 +9,7 @@ describe('FlexiCenikEvidenceHandler', () => {
     const client = {
       fetchCenikById: async (id: string) => {
         calls.push(`get:${id}`)
-        return { id, kod: 'SKU-1', nazev: 'Plant', stock: 17, price: 10, cnCode: null, weight: null, quantityPrices: [] }
+        return { id, kod: 'SKU-1', nazev: 'Plant', stock: 17, price: 10, cnCode: null, weight: null }
       },
     }
     const flexi = {

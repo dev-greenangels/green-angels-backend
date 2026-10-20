@@ -11,6 +11,7 @@ import { FlexiFullRefreshService } from './flexi-full-refresh.service'
 import { FlexiLiveSyncService } from './flexi-live-sync.service'
 import { FlexiOrderReconcileService } from './flexi-order-reconcile.service'
 import { FlexiService } from './flexi.service'
+import { FlexiSalesPricesSyncService } from './flexi-sales-prices.sync'
 import { FlexiQueueService } from './flexi.queue.service'
 import type { FlexiJobPayload } from './flexi.types'
 
@@ -28,6 +29,7 @@ export class FlexiProcessor extends WorkerHost {
     private readonly live: FlexiLiveSyncService,
     private readonly fullRefresh: FlexiFullRefreshService,
     private readonly orderReconcile: FlexiOrderReconcileService,
+    private readonly salesPricesSync: FlexiSalesPricesSyncService,
   ) {
     super()
   }
@@ -66,6 +68,8 @@ export class FlexiProcessor extends WorkerHost {
         return this.live.pollChangesLive()
       case 'sync-cenik-full':
         return this.flexi.syncCenikFull()
+      case 'sync-sales-prices':
+        return this.salesPricesSync.syncFull()
       case 'sync-strom':
         return this.flexi.syncStromCatalog({
           createMissing: data.createMissing !== false,

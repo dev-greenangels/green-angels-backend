@@ -32,5 +32,6 @@ lerna-debug.log*
 scripts/_local_*.mjs
 scripts/_local_*.ts
 scripts/local/
+backups/
 
 .DS_Store

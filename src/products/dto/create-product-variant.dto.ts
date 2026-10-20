@@ -9,10 +9,7 @@ import {
   IsUUID,
   MaxLength,
   Min,
-  ValidateNested,
 } from 'class-validator'
-
-import { VariantQuantityPriceDto } from './variant-quantity-price.dto'
 
 export class CreateProductVariantDto {
   @IsOptional()
@@ -79,10 +76,4 @@ export class CreateProductVariantDto {
   @IsNumber()
   @Min(0)
   heightCm?: number
-
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => VariantQuantityPriceDto)
-  quantityPrices?: VariantQuantityPriceDto[]
 }

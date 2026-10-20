@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module'
 import { CategoriesModule } from '../categories/categories.module'
 import { MediaModule } from '../media/media.module'
 import { PhotoApiKeyGuard } from '../common/photo-api-key.guard'
+import { PricingModule } from '../pricing/pricing.module'
 import { ViberPhotosModule } from '../viber-photos/viber-photos.module'
 import { BackstagePhotosController } from './backstage-photos.controller'
 import { CatalogPhotosController } from './catalog-photos.controller'
@@ -16,7 +17,14 @@ import { PhotosService } from './photos.service'
 import { SettingsModule } from '../settings/settings.module'
 
 @Module({
-  imports: [AuthModule, ViberPhotosModule, CategoriesModule, MediaModule, SettingsModule],
+  imports: [
+    AuthModule,
+    ViberPhotosModule,
+    CategoriesModule,
+    MediaModule,
+    SettingsModule,
+    PricingModule,
+  ],
   controllers: [
     PhotosController,
     PhotosDebugController,

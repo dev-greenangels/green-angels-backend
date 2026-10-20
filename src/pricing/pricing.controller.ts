@@ -1,11 +1,13 @@
-import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common'
-import type { Request } from 'express'
+import { Body, Controller, Post, Req, Res, UseGuards } from '@nestjs/common'
+import { Role } from '@prisma/client'
+import type { Request, Response } from 'express'
 
 import type { SessionJwtPayload } from '../auth/auth.constants'
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard'
 import { SettingsService } from '../settings/settings.service'
 import { computeCheckoutTotals } from './checkout-totals'
 import { QuotePricingDto } from './dto/quote-pricing.dto'
+import { ShelfPricesDto } from './dto/shelf-prices.dto'
 import { PricingService } from './pricing.service'
 import { convertEurToHuf, pickCartCnCode, resolveCheckoutTax } from './tax-regime'
 import { roundMoney } from './pricing.helpers'
@@ -20,6 +22,35 @@ export class PricingController {
     private readonly pricing: PricingService,
     private readonly settings: SettingsService,
   ) {}
+
+  /**
+   * Private shelf batch for authenticated WHOLESALER catalog overlay.
+   * Commercial ladder (DiscountRule × Sales Prices dual-offer). Never accept audience from body.
+   * Cache-Control: private, no-store — must not enter shared CDN/RSC cache.
+   */
+  @Post('shelf-prices')
+  @UseGuards(OptionalJwtAuthGuard)
+  async shelfPrices(
+    @Body() dto: ShelfPricesDto,
+    @Req() req: Request & { user?: SessionJwtPayload },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate')
+    res.setHeader('Vary', 'Cookie')
+    const audience = await this.pricing.resolveAudience({
+      userId: req.user?.userId,
+    })
+    const items = await this.pricing.shelfUnitPrices({
+      variantIds: dto.variantIds,
+      audience,
+    })
+    return {
+      items,
+      // Any authenticated session may receive a private commercial ladder (retail or wholesale).
+      personalized: Boolean(audience.userId),
+      wholesale: audience.role === Role.WHOLESALER,
+    }
+  }
 
   @Post('quote')
   @UseGuards(OptionalJwtAuthGuard)
@@ -94,6 +125,8 @@ export class PricingController {
         quantity: line.quantity,
       })),
       taxOverride: tax,
+      pendingShippingPromos: quote.pendingShippingPromos,
+      promoFixedProductDiscountAmount: quote.promoFixedProductDiscountAmount,
     })
 
     // HUF conversion is for HU *site* currency, not delivery destination.

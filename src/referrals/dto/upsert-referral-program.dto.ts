@@ -4,6 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -25,7 +26,7 @@ export class UpsertReferralProgramDto {
   @IsBoolean()
   isActive?: boolean
 
-  @IsEnum(DiscountValueType)
+  @IsIn([DiscountValueType.PERCENT, DiscountValueType.FIXED])
   refereeDiscountType!: DiscountValueType
 
   @Type(() => Number)

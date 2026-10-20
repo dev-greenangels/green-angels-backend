@@ -13,6 +13,10 @@ import { filterDeliveryMethodsByWeight } from './delivery-weight.util'
 import { resolveMinOrderPolicy } from './min-order-policy'
 import { roundMoney } from './pricing.helpers'
 import {
+  applyPendingShippingPromos,
+  type ShippingPromoEffectInput,
+} from './promo-commercial'
+import {
   netToGross,
   grossToNet,
   vatFromTaxIncludedGross,
@@ -60,6 +64,11 @@ export type CheckoutTotalsBreakdown = {
   discountAmount: number
   /** Customer-payable delivery (GROSS when VAT applies; NET on reverse charge). */
   deliveryAmount: number
+  /** Delivery before shipping promo (for snapshot / ABRA shipping vs negative split). */
+  deliveryAmountBeforePromo?: number
+  shippingPromoDiscountAmount?: number
+  /** FIXED product discount → ABRA negative line (not baked into product lines). */
+  promoFixedDiscountAmount?: number
   deliveryMode: DeliveryMode
   /** false when carrier quote cannot be formed (missing weight / no tariff) */
   deliveryIncludedInTotal: boolean
@@ -539,6 +548,15 @@ export function computeCheckoutTotals(input: {
     taxCountryCode?: string | null
     stripVatRatePercent?: number
   }
+  /** Shipping-side / deferred FIXED promos from PricingService.quote */
+  pendingShippingPromos?: ShippingPromoEffectInput[]
+  /** FIXED PRODUCTS-only amount from quote (ABRA negative line). */
+  promoFixedProductDiscountAmount?: number
+  /**
+   * Eligible product commercial sum for FIXED PRODUCTS_AND_SHIPPING allocation.
+   * Defaults to productsSubtotal when omitted.
+   */
+  eligibleProductsSubtotalForPromo?: number
 }): CheckoutTotalsBreakdown {
   const {
     productsSubtotal,
@@ -555,8 +573,11 @@ export function computeCheckoutTotals(input: {
     deliveryCountryCode,
     hostCountryCode,
     productLines,
+    pendingShippingPromos,
+    promoFixedProductDiscountAmount,
+    eligibleProductsSubtotalForPromo,
   } = input
-  const discountAmount = Math.max(0, roundMoney(subtotalBeforeDiscount - productsSubtotal))
+  let discountAmount = Math.max(0, roundMoney(subtotalBeforeDiscount - productsSubtotal))
 
   const taxRatePercent = taxOverride?.taxRatePercent ?? settings.taxRatePercent
   const taxIncluded = taxOverride?.taxIncluded ?? settings.taxIncluded
@@ -633,16 +654,38 @@ export function computeCheckoutTotals(input: {
     ? customerFeeSnapshotFromNet(packagingConfigured, feeVat)
     : roundMoney(packagingConfigured)
 
-  const deliveryCustomer = delivery.treatAsNet
+  const deliveryCustomerBeforePromo = delivery.treatAsNet
     ? customerFeeSnapshotFromNet(delivery.amountNet, feeVat)
     : delivery.customerAmount
 
-  // Deterministic pre-COD base for tier selection (products + delivery + packaging).
+  const shippingPromoResult = applyPendingShippingPromos({
+    deliveryAmountBeforePromo: delivery.includedInTotal ? deliveryCustomerBeforePromo : 0,
+    eligibleProductsSubtotal:
+      eligibleProductsSubtotalForPromo != null
+        ? eligibleProductsSubtotalForPromo
+        : productsSubtotal,
+    promos: pendingShippingPromos ?? [],
+    quoteFixedProductDiscountAmount: promoFixedProductDiscountAmount ?? 0,
+  })
+
+  const deliveryCustomer = shippingPromoResult.deliveryAmount
+  const promoFixedDiscountAmount = shippingPromoResult.fixedProductDiscountAmount
+  discountAmount = roundMoney(
+    discountAmount +
+      shippingPromoResult.shippingDiscountAmount +
+      promoFixedDiscountAmount,
+  )
+
+  // Deterministic pre-COD base for tier selection (products + delivery + packaging − FIXED).
   // `cod_collected` feeBase uses this same amount — never includes the COD fee itself.
   const grandTotalBeforeCod = roundMoney(
-    productsSubtotal +
-      (delivery.includedInTotal ? deliveryCustomer : 0) +
-      packagingCustomer,
+    Math.max(
+      0,
+      productsSubtotal +
+        (delivery.includedInTotal ? deliveryCustomer : 0) +
+        packagingCustomer -
+        promoFixedDiscountAmount,
+    ),
   )
 
   const codResolved = resolveCodFeeAmount(settings, {
@@ -697,6 +740,8 @@ export function computeCheckoutTotals(input: {
     }
   }
 
+  // Under RC + inc_vat, FIXED commercial discount is also stripped to net (same as product lines).
+  let promoFixedForTotal = promoFixedDiscountAmount
   if (isReverseCharge && taxIncluded) {
     const stripRate = taxOverride?.stripVatRatePercent ?? 0
     if (stripRate > 0) {
@@ -731,10 +776,20 @@ export function computeCheckoutTotals(input: {
       if (!codAmountsAreNet) {
         codForTotal = codFeeAmount > 0 ? grossToNet(codFeeAmount, stripRate) : 0
       }
+      if (promoFixedDiscountAmount > 0) {
+        promoFixedForTotal = grossToNet(promoFixedDiscountAmount, stripRate)
+      }
     }
     taxAmount = 0
     grandTotal = roundMoney(
-      productsForTotal + deliveryForTotal + packagingForTotal + codForTotal,
+      Math.max(
+        0,
+        productsForTotal +
+          deliveryForTotal +
+          packagingForTotal +
+          codForTotal -
+          promoFixedForTotal,
+      ),
     )
   } else {
     const taxAddsToTotal = settings.showTax && !taxIncluded && taxRatePercent > 0
@@ -754,11 +809,26 @@ export function computeCheckoutTotals(input: {
           (packagingGross - packagingAmount) +
           (codGross - (codAmountsAreNet ? codFeeAmount : codGross)),
       )
-      grandTotal = roundMoney(productsGross + deliveryGross + packagingGross + codGross)
+      // FIXED product discount is tax-inclusive commercial reduction (same gross contract).
+      const fixedGross = promoFixedDiscountAmount
+      taxAmount = roundMoney(
+        Math.max(0, taxAmount - vatFromTaxIncludedGross(fixedGross, rate)),
+      )
+      grandTotal = roundMoney(
+        Math.max(0, productsGross + deliveryGross + packagingGross + codGross - fixedGross),
+      )
     } else if (taxAddsToTotal) {
       taxAmount = roundMoney((productsSubtotal * taxRatePercent) / 100)
       grandTotal = roundMoney(
-        productsSubtotal + deliveryInTotal + packagingAmount + taxAmount + codFeeAmount,
+        Math.max(
+          0,
+          productsSubtotal +
+            deliveryInTotal +
+            packagingAmount +
+            taxAmount +
+            codFeeAmount -
+            promoFixedDiscountAmount,
+        ),
       )
     } else {
       if (settings.showTax && taxIncluded && taxRatePercent > 0) {
@@ -773,9 +843,25 @@ export function computeCheckoutTotals(input: {
           taxRatePercent,
           taxAppliesToFees: Boolean(feeVat.taxAppliesToFees),
         })
+        // Negative FIXED commercial reduces taxable base (extract VAT from discount too).
+        if (promoFixedDiscountAmount > 0) {
+          taxAmount = roundMoney(
+            Math.max(
+              0,
+              taxAmount - vatFromTaxIncludedGross(promoFixedDiscountAmount, taxRatePercent),
+            ),
+          )
+        }
       }
       grandTotal = roundMoney(
-        productsSubtotal + deliveryInTotal + packagingAmount + codFeeAmount,
+        Math.max(
+          0,
+          productsSubtotal +
+            deliveryInTotal +
+            packagingAmount +
+            codFeeAmount -
+            promoFixedDiscountAmount,
+        ),
       )
     }
   }
@@ -827,6 +913,13 @@ export function computeCheckoutTotals(input: {
     ),
     discountAmount,
     deliveryAmount: isReverseCharge && taxIncluded ? deliveryForTotal : deliveryAmount,
+    deliveryAmountBeforePromo: delivery.includedInTotal
+      ? deliveryCustomerBeforePromo
+      : 0,
+    shippingPromoDiscountAmount: shippingPromoResult.shippingDiscountAmount,
+    promoFixedDiscountAmount: isReverseCharge && taxIncluded
+      ? promoFixedForTotal
+      : promoFixedDiscountAmount,
     deliveryMode: delivery.mode,
     deliveryIncludedInTotal: delivery.includedInTotal,
     packagingAmount: isReverseCharge && taxIncluded ? packagingForTotal : packagingAmount,

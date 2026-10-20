@@ -24,6 +24,7 @@ import { FlexiOrderReconcileService } from './flexi-order-reconcile.service'
 import { FlexiProcessor } from './flexi.processor'
 import { FlexiQueueService } from './flexi.queue.service'
 import { FlexiService } from './flexi.service'
+import { FlexiSalesPricesSyncService } from './flexi-sales-prices.sync'
 import { FlexiSettingsService } from './flexi.settings.service'
 import { FlexiSyncLockService } from './flexi-sync-lock.service'
 import { FLEXI_EVIDENCE_HANDLERS } from './evidence/flexi-evidence.handler'
@@ -51,6 +52,7 @@ import { FlexiStromEvidenceHandler } from './evidence/handlers/flexi-strom.evide
     FlexiBacklogCleanupService,
     FlexiClient,
     FlexiService,
+    FlexiSalesPricesSyncService,
     FlexiQueueService,
     FlexiProcessor,
     FlexiSyncLockService,

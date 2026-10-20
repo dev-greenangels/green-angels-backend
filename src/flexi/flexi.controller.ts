@@ -35,6 +35,7 @@ import { FlexiLiveSyncService } from './flexi-live-sync.service'
 import { FlexiOperationLogService } from './flexi-operation-log.service'
 import { FlexiOrderReconcileService } from './flexi-order-reconcile.service'
 import { FlexiQueueService } from './flexi.queue.service'
+import { FlexiSalesPricesSyncService } from './flexi-sales-prices.sync'
 import { FlexiService } from './flexi.service'
 import { FlexiSettingsService } from './flexi.settings.service'
 import { FlexiSyncLockService } from './flexi-sync-lock.service'
@@ -125,6 +126,7 @@ export class FlexiAdminController {
     private readonly health: FlexiInboundHealthService,
     private readonly apiUsage: FlexiApiUsageService,
     private readonly legacyRetirement: FlexiLegacyRetirementService,
+    private readonly salesPricesSync: FlexiSalesPricesSyncService,
   ) {}
 
   @Get('settings')
@@ -419,6 +421,23 @@ export class FlexiAdminController {
   async fullSync() {
     const job = await this.queue.enqueueFullSync()
     return { ok: true, jobId: job.id, message: 'Повний sync cenik поставлено в чергу.' }
+  }
+
+  @Post('sync-sales-prices')
+  @RequirePermissions('flexi.manage')
+  async syncSalesPrices() {
+    const job = await this.queue.enqueueSyncSalesPrices()
+    return {
+      ok: true,
+      jobId: job.id,
+      message: 'Синхронізацію Sales Prices поставлено в чергу.',
+    }
+  }
+
+  @Post('sync-sales-prices/run')
+  @RequirePermissions('flexi.manage')
+  syncSalesPricesRun() {
+    return this.salesPricesSync.syncFull()
   }
 
   @Post('full-sync/run')

@@ -1,5 +1,8 @@
 export const FLEXI_SETTINGS_KEY = 'integration.flexi'
 
+/** Nested JSON key inside integration.flexi settings blob. */
+export const SALES_PRICES_SYNC_META_KEY = 'salesPricesSync'
+
 export const FLEXI_QUEUE = 'flexi'
 
 export const FLEXI_JOB_NAMES = {
@@ -7,6 +10,7 @@ export const FLEXI_JOB_NAMES = {
   PROCESS_INTAKE: 'process-intake',
   POLL_CHANGES: 'poll-changes',
   SYNC_CENIK_FULL: 'sync-cenik-full',
+  SYNC_SALES_PRICES: 'sync-sales-prices',
   SYNC_STROM: 'sync-strom',
   EXPORT_ORDER: 'export-order',
   STORNO_ORDER: 'storno-order',

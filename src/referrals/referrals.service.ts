@@ -108,6 +108,11 @@ export class ReferralsService {
   }
 
   async upsertProgram(dto: UpsertReferralProgramDto) {
+    if (dto.refereeDiscountType === DiscountValueType.FIXED_PRICE) {
+      throw new BadRequestException(
+        'FIXED_PRICE доступний лише для правил знижок (DiscountRule), не для реферальної програми.',
+      )
+    }
     if (dto.refereeDiscountType === DiscountValueType.PERCENT && dto.refereeDiscountValue > 100) {
       throw new BadRequestException('Відсоток знижки для реферала не може перевищувати 100%.')
     }

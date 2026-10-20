@@ -5,8 +5,11 @@ import { CommerceModule } from '../commerce/commerce.module'
 import { PrismaModule } from '../prisma/prisma.module'
 import { SettingsModule } from '../settings/settings.module'
 import { VariantLabelModule } from '../products/variant-label.module'
+import { BackstageVariantPricingController } from './backstage-variant-pricing.controller'
 import { PricingController } from './pricing.controller'
 import { PricingService } from './pricing.service'
+import { SalesPricesService } from './sales-prices.service'
+import { SalesPricesAdminController } from './sales-prices.admin.controller'
 
 @Module({
   imports: [
@@ -16,8 +19,12 @@ import { PricingService } from './pricing.service'
     VariantLabelModule,
     CommerceModule,
   ],
-  controllers: [PricingController],
-  providers: [PricingService],
-  exports: [PricingService],
+  controllers: [
+    PricingController,
+    SalesPricesAdminController,
+    BackstageVariantPricingController,
+  ],
+  providers: [PricingService, SalesPricesService],
+  exports: [PricingService, SalesPricesService],
 })
 export class PricingModule {}

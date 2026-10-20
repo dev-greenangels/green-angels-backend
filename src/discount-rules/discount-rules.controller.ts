@@ -6,6 +6,7 @@ import { RequirePermissions } from '../auth/decorators/require-permissions.decor
 import { RolesGuard } from '../auth/guards/roles.guard'
 import { BackstageJwtAuthGuard } from '../auth/backstage-jwt-auth.guard'
 import { DiscountRulesService } from './discount-rules.service'
+import { PreviewDiscountRuleDto } from './dto/preview-discount-rule.dto'
 import { UpsertDiscountRuleDto } from './dto/upsert-discount-rule.dto'
 
 @Controller('discount-rules')
@@ -18,6 +19,16 @@ export class DiscountRulesController {
   @Get('backstage/all')
   findAll() {
     return this.rules.findAll()
+  }
+
+  @Get('backstage/for-variant/:variantId')
+  findForVariant(@Param('variantId') variantId: string) {
+    return this.rules.findAffectingVariant(variantId)
+  }
+
+  @Post('backstage/preview')
+  preview(@Body() dto: PreviewDiscountRuleDto) {
+    return this.rules.preview(dto)
   }
 
   @Post()
