@@ -253,4 +253,12 @@ export class SettingsController {
   updateMarket(@Body() dto: UpdateMarketSettingsDto) {
     return this.settings.updateMarket(dto as Partial<MarketSettings>)
   }
+
+  @Post('market/check-nbs-eur-huf')
+  @UseGuards(BackstageJwtAuthGuard, RolesGuard)
+  @RequirePermissions('settings.manage')
+  @Roles(Role.ADMIN, Role.MANAGER)
+  checkNbsEurHuf() {
+    return this.settings.checkNbsEurHufReference()
+  }
 }

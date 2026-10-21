@@ -227,6 +227,39 @@ export class UpdateMarketSettingsDto {
 
   @IsOptional()
   @IsBoolean()
+  huHufPaymentsEnabled?: boolean
+
+  @IsOptional()
+  @ValidateIf((_, v) => v != null)
+  @IsNumber()
+  @Min(0.0001)
+  eurToHufReferenceRate?: number | null
+
+  @IsOptional()
+  @ValidateIf((_, v) => v != null)
+  @IsString()
+  @MaxLength(32)
+  eurToHufReferenceRateDate?: string | null
+
+  @IsOptional()
+  @ValidateIf((_, v) => v != null)
+  @IsString()
+  @MaxLength(40)
+  eurToHufReferenceCheckedAt?: string | null
+
+  @IsOptional()
+  @ValidateIf((_, v) => v != null)
+  @IsIn(['nbs_ecb'])
+  eurToHufReferenceSource?: 'nbs_ecb' | null
+
+  @IsOptional()
+  @ValidateIf((_, v) => v != null)
+  @IsString()
+  @MaxLength(500)
+  eurToHufReferenceLastError?: string | null
+
+  @IsOptional()
+  @IsBoolean()
   applyDestinationVatB2c?: boolean
 
   @IsOptional()

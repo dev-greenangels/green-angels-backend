@@ -14,7 +14,13 @@ import { computeCheckoutTotals } from '../pricing/checkout-totals'
 import { normalizePromoCodesInput } from '../pricing/pricing.promo'
 import { PricingService } from '../pricing/pricing.service'
 import { buildFlexiLineDiscountSnapshot } from '../pricing/flexi-line-discount-snapshot'
-import { convertEurToHuf, resolveCheckoutTax, assertDeliveryCountryAllowed, pickCartCnCode } from '../pricing/tax-regime'
+import { resolveCheckoutTax, assertDeliveryCountryAllowed, pickCartCnCode } from '../pricing/tax-regime'
+import { applyHufPresentmentToCheckout } from '../pricing/apply-huf-presentment'
+import {
+  hufLineTotalFromEurUnit,
+  resolveCountrySiteCurrency,
+  toHufMajor,
+} from '../pricing/resolve-country-site-currency'
 import { isIso31661Alpha2 } from '../common/iso-3166-1-alpha2'
 import { roundMoney } from '../pricing/pricing.helpers'
 import { packetaCheckoutOrderSnapshot } from '../packeta/packeta-fulfilment'
@@ -1198,6 +1204,10 @@ export class OrdersService {
       if (order.paymentProvider === 'stripe' && order.stripePaymentId) {
         const open = await this.stripeProvider.retrieveOpenSessionClientSecret(
           order.stripePaymentId,
+          {
+            amountMajor: Number(order.totalAmount),
+            currency: order.currency,
+          },
         )
         if (open) {
           clientSecret = open.clientSecret
@@ -2629,72 +2639,44 @@ export class OrdersService {
       promoFixedProductDiscountAmount: quote.promoFixedProductDiscountAmount,
     })
 
-    const profile =
-      dto.countryCode && marketSettings.region === 'sk'
-        ? marketSettings.countrySites.find((s) => s.code === dto.countryCode && s.enabled)
-        : null
-
-    let currency = await this.commerce.getDefaultCurrencyCode()
+    // Presentment / payable currency from countrySites.hu (gated), never deploy default alone.
+    // commercial* stay EUR for ABRA; only payable priceAtPurchase + checkout totals FX to HUF.
+    const resolvedCurrency = resolveCountrySiteCurrency(
+      marketSettings,
+      dto.countryCode,
+    )
+    let currency = resolvedCurrency.currency
     let fxRateUsed: number | null = null
+    /** EUR checkout snapshot for promoCommercialSnapshot (Flexi) before HUF presentment. */
+    let eurCheckoutForSnapshot: typeof checkout | null = null
 
-    // HUF amounts only when the deploy/site default currency is HUF — not when
-    // delivery country is Hungary on an EUR shop.
-    if (currency === 'HUF') {
-      const rate = marketSettings.eurToHufRate
+    if (resolvedCurrency.applyHufFx) {
+      const rate = resolvedCurrency.eurToHufRate
       fxRateUsed = rate
-      const taxAdds = checkout.showTax && !checkout.taxIncluded
-      checkout = {
-        ...checkout,
-        productsSubtotal: convertEurToHuf(checkout.productsSubtotal, rate),
-        discountAmount: convertEurToHuf(checkout.discountAmount, rate),
-        deliveryAmount: convertEurToHuf(checkout.deliveryAmount, rate),
-        deliveryAmountBeforePromo:
-          checkout.deliveryAmountBeforePromo != null
-            ? convertEurToHuf(checkout.deliveryAmountBeforePromo, rate)
-            : undefined,
-        shippingPromoDiscountAmount:
-          checkout.shippingPromoDiscountAmount != null
-            ? convertEurToHuf(checkout.shippingPromoDiscountAmount, rate)
-            : undefined,
-        promoFixedDiscountAmount:
-          checkout.promoFixedDiscountAmount != null
-            ? convertEurToHuf(checkout.promoFixedDiscountAmount, rate)
-            : undefined,
-        packagingAmount: convertEurToHuf(checkout.packagingAmount, rate),
-        taxAmount: convertEurToHuf(checkout.taxAmount, rate),
-        codFeeAmount: convertEurToHuf(checkout.codFeeAmount, rate),
-        minOrderAmount:
-          checkout.minOrderAmount != null
-            ? convertEurToHuf(checkout.minOrderAmount, rate)
-            : null,
-        belowMinPackagingFee: convertEurToHuf(checkout.belowMinPackagingFee, rate),
-        grandTotal: 0,
-      }
-      checkout.grandTotal = roundMoney(
-        Math.max(
-          0,
-          checkout.productsSubtotal +
-            (checkout.deliveryIncludedInTotal ? checkout.deliveryAmount : 0) +
-            checkout.packagingAmount +
-            (taxAdds ? checkout.taxAmount : 0) +
-            checkout.codFeeAmount -
-            (checkout.promoFixedDiscountAmount ?? 0),
-        ),
+      currency = 'HUF'
+      eurCheckoutForSnapshot = { ...checkout }
+      checkout = applyHufPresentmentToCheckout(
+        checkout,
+        lineItems
+          .filter((item) => !item.isGift)
+          .map((item) => ({
+            unitPriceEur: item.priceAtPurchase,
+            quantity: item.quantity,
+          })),
+        rate,
       )
       for (const item of lineItems) {
-        item.priceAtPurchase = convertEurToHuf(item.priceAtPurchase, rate)
-        item.commercialUnitPrice = convertEurToHuf(item.commercialUnitPrice, rate)
-        item.commercialLineAmount = convertEurToHuf(item.commercialLineAmount, rate)
-        if (item.commercialBaseUnitPrice != null) {
-          item.commercialBaseUnitPrice = convertEurToHuf(
-            item.commercialBaseUnitPrice,
-            rate,
-          )
-        }
-        // flexiSlevaPol is percent — do not FX-convert.
+        if (item.isGift) continue
+        const { unitHuf } = hufLineTotalFromEurUnit(
+          item.priceAtPurchase,
+          item.quantity,
+          rate,
+        )
+        item.priceAtPurchase = unitHuf
+        // commercial* remain EUR — never overwrite with HUF.
       }
-    } else if (profile?.currency === 'EUR') {
-      currency = 'EUR'
+    } else if (marketSettings.region === 'sk') {
+      currency = resolvedCurrency.currency || 'EUR'
     }
 
     if (!checkout.canPlaceOrder) {
@@ -2827,11 +2809,14 @@ export class OrdersService {
       preferredShipDate = new Date(`${dto.preferredShipDate.trim()}T12:00:00.000Z`)
     }
 
+    // Referral/points previews use commercial EUR line totals; convert discounts to HUF after.
+    const eurProductsForReferral =
+      eurCheckoutForSnapshot?.productsSubtotal ?? checkout.productsSubtotal
     const referralPreview = dto.referralCode
       ? await this.referrals.previewRefereeDiscount({
           referralCode: dto.referralCode,
           refereeUserId: userId,
-          productsSubtotal: checkout.productsSubtotal,
+          productsSubtotal: eurProductsForReferral,
           lines: lineItems.map((item) => ({
             productVariantId: item.productVariantId,
             quantity: item.quantity,
@@ -2839,7 +2824,10 @@ export class OrdersService {
           })),
         })
       : null
-    const referralDiscountAmount = referralPreview?.eligible ? referralPreview.discountAmount : 0
+    let referralDiscountAmount = referralPreview?.eligible ? referralPreview.discountAmount : 0
+    if (fxRateUsed != null && referralDiscountAmount > 0) {
+      referralDiscountAmount = toHufMajor(referralDiscountAmount, fxRateUsed)
+    }
 
     let pointsPreview: Awaited<ReturnType<ReferralsService['previewPointsRedemption']>> | null = null
     if (dto.pointsToRedeem && userId) {
@@ -2849,15 +2837,25 @@ export class OrdersService {
       }
     }
 
+    let pointsMoneyValue = pointsPreview?.valid ? pointsPreview.moneyValue : 0
+    if (fxRateUsed != null && pointsMoneyValue > 0) {
+      pointsMoneyValue = toHufMajor(pointsMoneyValue, fxRateUsed)
+    }
+
     const amountAfterReferral = Math.max(0, checkout.grandTotal - referralDiscountAmount)
     const pointsDiscountAmount = pointsPreview?.valid
-      ? Math.min(pointsPreview.moneyValue, amountAfterReferral)
+      ? Math.min(pointsMoneyValue, amountAfterReferral)
       : 0
 
-    const totalAmount = Math.round((amountAfterReferral - pointsDiscountAmount) * 100) / 100
+    const totalAmount =
+      fxRateUsed != null
+        ? Math.round(amountAfterReferral - pointsDiscountAmount)
+        : Math.round((amountAfterReferral - pointsDiscountAmount) * 100) / 100
     const productsSubtotal = Math.max(
       0,
-      Math.round((checkout.productsSubtotal - referralDiscountAmount) * 100) / 100,
+      fxRateUsed != null
+        ? Math.round(checkout.productsSubtotal - referralDiscountAmount)
+        : Math.round((checkout.productsSubtotal - referralDiscountAmount) * 100) / 100,
     )
 
     const paymentMethod = dto.paymentMethod.trim()
@@ -2915,18 +2913,25 @@ export class OrdersService {
               : null,
           promoCommercialSnapshot: {
             version: 1,
-            currency,
+            // Always EUR commercial amounts for ABRA — never HUF presentment.
+            currency: 'EUR',
+            payableCurrency: currency,
+            fxRateUsed,
             taxRatePercent: tax.taxRatePercent,
             taxRegime: tax.taxRegime,
             taxCountryCode: tax.taxCountryCode,
             productsSubtotalBeforeFixed: quote.totalAmount,
-            deliveryAmountBeforePromo: checkout.deliveryAmountBeforePromo ?? checkout.deliveryAmount,
-            deliveryAmount: checkout.deliveryAmount,
-            packagingAmount: checkout.packagingAmount,
-            codFeeAmount: checkout.codFeeAmount,
-            abraNegativeLineAmount: checkout.promoFixedDiscountAmount ?? 0,
-            grandTotalBeforeReferral: checkout.grandTotal,
-            shippingPromoDiscountAmount: checkout.shippingPromoDiscountAmount ?? 0,
+            deliveryAmountBeforePromo:
+              (eurCheckoutForSnapshot ?? checkout).deliveryAmountBeforePromo ??
+              (eurCheckoutForSnapshot ?? checkout).deliveryAmount,
+            deliveryAmount: (eurCheckoutForSnapshot ?? checkout).deliveryAmount,
+            packagingAmount: (eurCheckoutForSnapshot ?? checkout).packagingAmount,
+            codFeeAmount: (eurCheckoutForSnapshot ?? checkout).codFeeAmount,
+            abraNegativeLineAmount:
+              (eurCheckoutForSnapshot ?? checkout).promoFixedDiscountAmount ?? 0,
+            grandTotalBeforeReferral: (eurCheckoutForSnapshot ?? checkout).grandTotal,
+            shippingPromoDiscountAmount:
+              (eurCheckoutForSnapshot ?? checkout).shippingPromoDiscountAmount ?? 0,
             promos: (quote.appliedPromos ?? []).map((p) => ({
               promoCodeId: p.promoCodeId ?? null,
               code: p.code,

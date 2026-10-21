@@ -1980,9 +1980,39 @@ export class FlexiService {
       lines.push(line)
     }
 
-    const deliveryAmount = order.deliveryAmount != null ? Number(order.deliveryAmount) : 0
-    const packagingAmount = order.packagingAmount != null ? Number(order.packagingAmount) : 0
-    const codFeeAmount = order.codFeeAmount != null ? Number(order.codFeeAmount) : 0
+    // HUF payable orders: fees on Order row are HUF — Flexi must use EUR commercial snapshot.
+    const commercialSnap = order.promoCommercialSnapshot as
+      | {
+          currency?: string
+          deliveryAmount?: number
+          packagingAmount?: number
+          codFeeAmount?: number
+          abraNegativeLineAmount?: number
+          promos?: Array<{ code?: string; discountType?: string }>
+        }
+      | null
+      | undefined
+    const orderCurrencyEarly = (order.currency || 'EUR').toUpperCase()
+    const useEurFeeSnapshot =
+      orderCurrencyEarly === 'HUF' &&
+      commercialSnap != null &&
+      (commercialSnap.currency === 'EUR' || commercialSnap.currency == null)
+
+    const deliveryAmount = useEurFeeSnapshot
+      ? Number(commercialSnap.deliveryAmount ?? 0)
+      : order.deliveryAmount != null
+        ? Number(order.deliveryAmount)
+        : 0
+    const packagingAmount = useEurFeeSnapshot
+      ? Number(commercialSnap.packagingAmount ?? 0)
+      : order.packagingAmount != null
+        ? Number(order.packagingAmount)
+        : 0
+    const codFeeAmount = useEurFeeSnapshot
+      ? Number(commercialSnap.codFeeAmount ?? 0)
+      : order.codFeeAmount != null
+        ? Number(order.codFeeAmount)
+        : 0
     const boxCount = order.packagingBoxCount ?? 0
 
     // Flexi-only: COD surcharge folds into shipping cenaMj. No separate COD cenik line.
@@ -2009,15 +2039,13 @@ export class FlexiService {
 
     // FIXED product discount → single negative line (same VAT classification as document).
     // Shipping FIXED/PERCENT already reflected in deliveryAmount. Idempotent: one line from snapshot.
-    const promoFixed =
-      order.promoFixedDiscountAmount != null
+    const promoFixed = useEurFeeSnapshot
+      ? Number(commercialSnap.abraNegativeLineAmount ?? 0)
+      : order.promoFixedDiscountAmount != null
         ? Number(order.promoFixedDiscountAmount)
         : 0
     if (promoFixed > 0) {
-      const snapshot = order.promoCommercialSnapshot as
-        | { promos?: Array<{ code?: string; discountType?: string }> }
-        | null
-        | undefined
+      const snapshot = commercialSnap
       const fixedPromoCode =
         snapshot?.promos?.find((p) => p.discountType === 'FIXED')?.code ||
         order.promoCode?.code ||
@@ -2128,7 +2156,7 @@ export class FlexiService {
       )
     }
 
-    // SK deploy documents stay in EUR; HUF display is website-only.
+    // SK deploy received orders stay EUR commercial; HUF is storefront/Stripe only.
     const orderCurrency = (order.currency || 'EUR').toUpperCase()
     const menaCode = orderCurrency === 'UAH' ? 'UAH' : 'EUR'
     const notes: string[] = []
@@ -2153,8 +2181,40 @@ export class FlexiService {
     if (order.paymentMethod) {
       notes.push(`Platba: ${order.paymentMethod}`)
     }
-    if (orderCurrency === 'HUF' && order.fxRateUsed) {
-      notes.push(`Web mena: HUF, kurz EUR→HUF ${order.fxRateUsed}`)
+    if (orderCurrency === 'HUF') {
+      const rate =
+        order.fxRateUsed != null && Number.isFinite(Number(order.fxRateUsed))
+          ? Number(order.fxRateUsed)
+          : null
+      const charged = Number(order.totalAmount)
+      const snapEur = order.promoCommercialSnapshot as
+        | {
+            grandTotalBeforeReferral?: number
+            deliveryAmount?: number
+            packagingAmount?: number
+          }
+        | null
+        | undefined
+      const eurCommercial =
+        snapEur?.grandTotalBeforeReferral != null &&
+        Number.isFinite(Number(snapEur.grandTotalBeforeReferral))
+          ? Number(snapEur.grandTotalBeforeReferral)
+          : productItems.reduce((sum, item) => {
+              const line =
+                item.commercialLineAmount != null &&
+                Number.isFinite(Number(item.commercialLineAmount))
+                  ? Number(item.commercialLineAmount)
+                  : 0
+              return sum + line
+            }, 0)
+      notes.push('HU storefront payment currency: HUF')
+      if (rate != null) {
+        notes.push(`Exchange rate: 1 EUR = ${rate} HUF`)
+      }
+      if (Number.isFinite(charged)) {
+        notes.push(`Customer charged: ${Math.round(charged)} HUF`)
+      }
+      notes.push(`Original EUR total: ${eurCommercial.toFixed(2)} EUR`)
     }
     if (isReverseCharge) {
       notes.push('VAT reverse charge (0% DPH) — prenesenie daňovej povinnosti.')

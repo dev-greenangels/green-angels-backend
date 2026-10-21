@@ -14,7 +14,6 @@ import { VariantLabelService } from '../products/variant-label.service'
 import { VARIANT_LABEL_ATTRIBUTE_SELECT } from '../products/variant-label.util'
 import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
-import { DEFAULT_COUNTRY_SITES } from '../settings/market.types'
 import {
   CustomerErrorCode,
   customerBadRequest,
@@ -289,12 +288,11 @@ export class CartsService {
     if (!countrySiteCode) return deployDefault
     try {
       const market = await this.settings.getMarketSettings()
-      if (market.region !== 'sk') return deployDefault
-      const site =
-        market.countrySites.find((s) => s.code === countrySiteCode && s.enabled) ??
-        DEFAULT_COUNTRY_SITES.find((s) => s.code === countrySiteCode) ??
-        null
-      if (site?.currency) return site.currency.toUpperCase()
+      const { resolveCountrySiteCurrency } = await import(
+        '../pricing/resolve-country-site-currency'
+      )
+      const resolved = resolveCountrySiteCurrency(market, countrySiteCode)
+      if (resolved.countrySiteCode) return resolved.currency
     } catch {
       // soft-degrade to deploy default
     }
@@ -1096,7 +1094,7 @@ export class CartsService {
           primary,
           ratePercent: taxRatePercent,
         })
-        if (displayCurrency === 'HUF' && deployDefault !== 'HUF') {
+        if (displayCurrency === 'HUF') {
           shelfUnit = convertEurToHuf(shelfUnit, eurToHufRate)
         }
         total += shelfUnit * item.quantity
@@ -1521,7 +1519,7 @@ export class CartsService {
             ratePercent: taxRatePercent,
           })
         }
-        if (unitPrice != null && currency === 'HUF' && deployDefault !== 'HUF') {
+        if (unitPrice != null && currency === 'HUF') {
           unitPrice = convertEurToHuf(unitPrice, eurToHufRate)
         }
         const lineTotal =

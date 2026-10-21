@@ -80,7 +80,9 @@ export function resolveIncomingClearingMenaCode(
   currency: string | null | undefined,
 ): string {
   const c = (currency || 'EUR').trim().toUpperCase()
-  return c === 'UAH' ? 'UAH' : 'EUR'
+  // Stripe HUF charges clear in HUF; received orders stay EUR commercial (separate).
+  if (c === 'UAH' || c === 'HUF') return c
+  return 'EUR'
 }
 
 /** @deprecated alias */

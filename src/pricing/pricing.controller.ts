@@ -9,12 +9,9 @@ import { computeCheckoutTotals } from './checkout-totals'
 import { QuotePricingDto } from './dto/quote-pricing.dto'
 import { ShelfPricesDto } from './dto/shelf-prices.dto'
 import { PricingService } from './pricing.service'
-import { convertEurToHuf, pickCartCnCode, resolveCheckoutTax } from './tax-regime'
-import { roundMoney } from './pricing.helpers'
-
-function mapHuf(amount: number, rate: number): number {
-  return convertEurToHuf(amount, rate)
-}
+import { pickCartCnCode, resolveCheckoutTax } from './tax-regime'
+import { applyHufPresentmentToCheckout } from './apply-huf-presentment'
+import { hufLineTotalFromEurUnit, resolveCountrySiteCurrency } from './resolve-country-site-currency'
 
 @Controller('pricing')
 export class PricingController {
@@ -129,44 +126,44 @@ export class PricingController {
       promoFixedProductDiscountAmount: quote.promoFixedProductDiscountAmount,
     })
 
-    // HUF conversion is for HU *site* currency, not delivery destination.
-    // Selecting Hungary as ship-to on an EUR shop must keep EUR totals (FX is client-side on HU domain).
-    let currency = market.defaultCurrency
+    // Presentment currency = countrySites (HU), never deploy defaultCurrency alone.
+    const resolved = resolveCountrySiteCurrency(market, dto.countryCode)
+    let currency = resolved.currency
     let fxRateUsed: number | null = null
     let totalAmount = quote.totalAmount
     let subtotalBeforeDiscount = quote.subtotalBeforeDiscount
+    let lines = quote.lines
 
-    if (market.defaultCurrency === 'HUF') {
-      const rate = market.eurToHufRate
+    if (resolved.applyHufFx) {
+      const rate = resolved.eurToHufRate
       fxRateUsed = rate
       currency = 'HUF'
-      totalAmount = mapHuf(quote.totalAmount, rate)
-      subtotalBeforeDiscount = mapHuf(quote.subtotalBeforeDiscount, rate)
-      const taxAdds = checkout.showTax && !checkout.taxIncluded
-      checkout = {
-        ...checkout,
-        productsSubtotal: mapHuf(checkout.productsSubtotal, rate),
-        discountAmount: mapHuf(checkout.discountAmount, rate),
-        deliveryAmount: mapHuf(checkout.deliveryAmount, rate),
-        packagingAmount: mapHuf(checkout.packagingAmount, rate),
-        taxAmount: mapHuf(checkout.taxAmount, rate),
-        codFeeAmount: mapHuf(checkout.codFeeAmount, rate),
-        minOrderAmount:
-          checkout.minOrderAmount != null ? mapHuf(checkout.minOrderAmount, rate) : null,
-        belowMinPackagingFee: mapHuf(checkout.belowMinPackagingFee, rate),
-        grandTotal: 0,
-      }
-      checkout.grandTotal = roundMoney(
-        checkout.productsSubtotal +
-          (checkout.deliveryIncludedInTotal ? checkout.deliveryAmount : 0) +
-          checkout.packagingAmount +
-          (taxAdds ? checkout.taxAmount : 0) +
-          checkout.codFeeAmount,
+      lines = quote.lines.map((line) => {
+        const { unitHuf, lineHuf } = hufLineTotalFromEurUnit(
+          line.unitPrice,
+          line.quantity,
+          rate,
+        )
+        return { ...line, unitPrice: unitHuf, lineTotal: lineHuf }
+      })
+      totalAmount = lines.reduce((sum, line) => sum + line.lineTotal, 0)
+      subtotalBeforeDiscount = quote.lines.reduce((sum, line) => {
+        const base = line.baseUnitPrice ?? line.unitPrice
+        return sum + hufLineTotalFromEurUnit(base, line.quantity, rate).lineHuf
+      }, 0)
+      checkout = applyHufPresentmentToCheckout(
+        checkout,
+        quote.lines.map((line) => ({
+          unitPriceEur: line.unitPrice,
+          quantity: line.quantity,
+        })),
+        rate,
       )
     }
 
     return {
       ...quote,
+      lines,
       totalAmount,
       subtotalBeforeDiscount,
       currency,

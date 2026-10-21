@@ -42,7 +42,11 @@ type OrderConfirmationTokenClaims = {
   orderNumber?: unknown
 }
 
-/** Stripe zero-decimal currencies (amount is already in major units). */
+/**
+ * Stripe zero-decimal currencies (charge amount = major units, no ×100).
+ * HUF is NOT zero-decimal: Stripe expects minor units (fillér), so 2340 HUF → 234000.
+ * @see https://docs.stripe.com/currencies#zero-decimal
+ */
 const STRIPE_ZERO_DECIMAL = new Set([
   'bif',
   'clp',
@@ -60,7 +64,6 @@ const STRIPE_ZERO_DECIMAL = new Set([
   'xaf',
   'xof',
   'xpf',
-  'huf',
 ])
 
 function stripeUnitAmount(currency: string, amountMajor: number): number {
@@ -273,14 +276,30 @@ export class StripePaymentProvider implements PaymentProvider {
     }
   }
 
-  /** Resume helpers: retrieve open session client_secret if still payable. */
+  /**
+   * Resume helpers: retrieve open session client_secret if still payable.
+   * When `expected` is provided, reject reuse if currency or amount no longer match
+   * the order (e.g. after HU EUR/HUF switch) — caller should mint a new session.
+   */
   async retrieveOpenSessionClientSecret(
     sessionId: string,
+    expected?: { amountMajor: number; currency: string },
   ): Promise<{ clientSecret: string; publishableKey: string } | null> {
     if (!this.isConfigured()) return null
     try {
       const session = await this.getClient().checkout.sessions.retrieve(sessionId)
       if (session.status !== 'open' || !session.client_secret) return null
+      if (expected) {
+        const wantCurrency = expected.currency.trim().toLowerCase()
+        const gotCurrency = (session.currency || '').toLowerCase()
+        if (wantCurrency && gotCurrency && wantCurrency !== gotCurrency) {
+          return null
+        }
+        if (session.amount_total != null && Number.isFinite(expected.amountMajor)) {
+          const wantMinor = stripeUnitAmount(wantCurrency || gotCurrency, expected.amountMajor)
+          if (session.amount_total !== wantMinor) return null
+        }
+      }
       return {
         clientSecret: session.client_secret,
         publishableKey: this.getPublishableKey(),

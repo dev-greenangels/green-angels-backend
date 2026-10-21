@@ -713,4 +713,34 @@ export class SettingsService implements OnModuleInit {
 
     return this.getMarketSettings()
   }
+
+  /**
+   * Admin informational check: fetch NBS/ECB HUF-per-EUR, persist reference fields.
+   * Never mutates `eurToHufRate` (manual commercial rate).
+   */
+  async checkNbsEurHufReference(): Promise<MarketSettings> {
+    const { fetchNbsEurHufRate } = await import('./nbs-eur-huf-rate')
+    const current = await this.getMarketSettings()
+    try {
+      const result = await fetchNbsEurHufRate()
+      return this.updateMarket({
+        eurToHufReferenceRate: result.rate,
+        eurToHufReferenceRateDate: result.rateDate,
+        eurToHufReferenceCheckedAt: new Date().toISOString(),
+        eurToHufReferenceSource: result.source,
+        eurToHufReferenceLastError: null,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      this.logger.warn(`NBS EUR/HUF reference check failed: ${message}`)
+      // Keep last successful reference; only record error.
+      return this.updateMarket({
+        eurToHufReferenceLastError: message.slice(0, 500),
+        eurToHufReferenceCheckedAt: current.eurToHufReferenceCheckedAt,
+        eurToHufReferenceRate: current.eurToHufReferenceRate,
+        eurToHufReferenceRateDate: current.eurToHufReferenceRateDate,
+        eurToHufReferenceSource: current.eurToHufReferenceSource,
+      })
+    }
+  }
 }

@@ -6,6 +6,7 @@ import {
   buildIncomingClearingBankaDocument,
   buildStripeClearingBankaDocument,
   INCOMING_CLEARING_ZBYTEK,
+  resolveIncomingClearingMenaCode,
 } from './flexi-stripe-clearing-banka'
 
 describe('buildIncomingClearingBankaDocument — STRIPE', () => {
@@ -28,6 +29,25 @@ describe('buildIncomingClearingBankaDocument — STRIPE', () => {
     assert.equal(doc.konSym, 'code:0008')
     assert.equal(doc.varSym, '36')
     assert.equal((doc.sparovani as { zbytek: string }).zbytek, INCOMING_CLEARING_ZBYTEK)
+  })
+
+  it('uses HUF mena for HUF Stripe clearing', () => {
+    assert.equal(resolveIncomingClearingMenaCode('HUF'), 'HUF')
+    assert.equal(resolveIncomingClearingMenaCode('huf'), 'HUF')
+    assert.equal(resolveIncomingClearingMenaCode('EUR'), 'EUR')
+    const doc = buildStripeClearingBankaDocument({
+      orderId: 'ord-huf',
+      orderNumber: 41,
+      totalAmount: 2340,
+      currency: 'HUF',
+      paidAt: '2026-10-01T08:00:00.000Z',
+      stripeClearingBankDocTypeCode: 'STANDARD',
+      bankAccountCodeCard: 'STRIPE',
+      salesConstantSymbol: '0008',
+      erpAdvanceKod: 'ZA26-0011',
+    })
+    assert.equal(doc.mena, 'code:HUF')
+    assert.equal(doc.sumOsv, 2340)
   })
 })
 
